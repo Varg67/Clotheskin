@@ -117,3 +117,7 @@ test('long or numerous pieces are capped, so a runaway answer cannot flood the c
 test('a curly apostrophe inside a value is kept', () => {
   assert.equal(say('{"topwear":["Isa’s old band T-shirt"]}'), 'Wearing Isa’s old band T-shirt.');
 });
+
+test('placeholders like "no shoes" are dropped, but a piece that starts with "no-" is kept', () => {
+  assert.equal(say({ footwear: ['no shoes'], footunderwear: ['no-show socks'], topwear: ['a no-iron shirt'] }), 'Wearing a no-iron shirt and no-show socks.');
+});

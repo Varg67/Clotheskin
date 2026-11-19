@@ -1,7 +1,7 @@
 import { h, keepFocus, openSheet } from './dom.js';
 import { icon, spinner } from './icons.js';
 import { buildOutfitPrompt } from '../core/prompt.js';
-import { parseReading, describeReading, poseIcon } from '../core/outfit.js';
+import { parseReading, describeReading, describeLocation, describeDoing, describeOutfit, poseIcon } from '../core/outfit.js';
 import { formatClock, formatRelative } from '../core/format.js';
 import { DEMO_SCENES } from '../demo/demo.js';
 
@@ -21,8 +21,8 @@ function applyTheme(id) {
 const LOCAL_ID = 'local';
 
 /**
- * The tracker: ask the Kin what it is wearing, show the answer as one sentence. Nothing about outfits is
- * stored; results live in memory for the session, per Kin id.
+ * The tracker: ask the Kin where it is, what it is doing and what it is wearing, and show the answer as three
+ * sentences. Nothing about outfits is stored; results live in memory for the session, per Kin id.
  */
 export async function startApp({ root, settings, host, clock = () => new Date() }) {
   document.documentElement.lang = 'en';
@@ -82,18 +82,20 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
 
   /** The run ends with {"location":"…","doing":"…","outfit":"…"}. Plain text (an older run) is shown as the outfit. */
   function readSummary(summary) {
-    const NO_LOCATION = 'No location described in the recent chat.';
-    const NO_DOING = 'No pose or action described in the recent chat.';
+    const none = { location: describeLocation(null), doing: describeDoing({}) };
     try {
       const o = JSON.parse(summary);
       if (o && typeof o.outfit === 'string') {
-        return { ok: true, location: typeof o.location === 'string' ? o.location : NO_LOCATION, doing: typeof o.doing === 'string' ? o.doing : NO_DOING, outfit: o.outfit };
+        return { ok: true, location: typeof o.location === 'string' ? o.location : none.location, doing: typeof o.doing === 'string' ? o.doing : none.doing, outfit: o.outfit };
       }
     } catch { /* not JSON */ }
-    return { ok: true, location: NO_LOCATION, doing: NO_DOING, outfit: summary || 'No outfit described in the recent chat.' };
+    return { ok: true, ...none, outfit: summary || describeOutfit({}) };
   }
 
-  const announceResult = (id) => S.errors.get(id) || (S.results.get(id) ? `${S.results.get(id).location} ${S.results.get(id).doing} ${S.results.get(id).outfit}` : '');
+  const announceResult = (id) => {
+    const r = S.results.get(id);
+    return S.errors.get(id) || (r ? `${r.location} ${r.doing} ${r.outfit}` : '');
+  };
 
   /** Workshop: the run asks the Kin about its recent chat. The reading belongs to the Kin it started for. */
   async function readInWorkshop(kin) {
@@ -228,8 +230,8 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
             h('div', { class: 'demo-pick' }, h('label', { class: 'label', for: 'scene-pick' }, 'Scene'),
               (sceneSel = h('select', { id: 'scene-pick', class: 'text-input', 'data-key': 'scene-pick' }, ...DEMO_SCENES.map((s) => h('option', { value: s.id }, s.title))))),
             h('div', { class: 'btn-row' },
-              h('button', { type: 'button', class: 'btn', 'data-key': 'demo-load', onClick: async () => { const s = DEMO_SCENES.find((x) => x.id === sceneSel.value); S.chatDraft = s.chat; S.responseDraft = s.response; S.info = { kind: 'info', text: `Loaded “${s.title}”. Prepare the prompt, then press Show status.` }; render(); } }, 'Load scene'),
-              h('button', { type: 'button', class: 'btn', 'data-key': 'demo-run', onClick: async () => { const s = DEMO_SCENES.find((x) => x.id === sceneSel.value); S.chatDraft = s.chat; S.responseDraft = s.response; S.pending = { id: kin.id, prompt: buildOutfitPrompt({ name: kin.name, chat: s.chat }) }; applyLocal(s.response); } }, 'Run demo scene'))),
+              h('button', { type: 'button', class: 'btn', 'data-key': 'demo-load', onClick: () => { const s = DEMO_SCENES.find((x) => x.id === sceneSel.value); S.chatDraft = s.chat; S.responseDraft = s.response; S.info = { kind: 'info', text: `Loaded “${s.title}”. Prepare the prompt, then press Show status.` }; render(); } }, 'Load scene'),
+              h('button', { type: 'button', class: 'btn', 'data-key': 'demo-run', onClick: () => { const s = DEMO_SCENES.find((x) => x.id === sceneSel.value); S.chatDraft = s.chat; S.responseDraft = s.response; S.pending = { id: kin.id, prompt: buildOutfitPrompt({ name: kin.name, chat: s.chat }) }; applyLocal(s.response); } }, 'Run demo scene'))),
           renderThemePicker())));
   }
 

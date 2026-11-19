@@ -1,13 +1,15 @@
 // The whole "tracker" logic: read the Kin's JSON, put its branches in order, add commas, show a sentence.
 // Nothing here is saved: every reading stands on its own.
-import { CLOTHING_SLOTS, ACCESSORY_SLOTS, BAG_SLOT, WEAR_SLOTS } from './constants.js';
+import { ACCESSORY_SLOTS, BAG_SLOT, WEAR_SLOTS } from './constants.js';
 import { cleanString, capitalizeFirst } from './text.js';
 import { parseJsonObject } from './json.js';
 
+/** Key matching ignores case, spaces, underscores and hyphens: "Top Wear", "top_wear" and "topwear" are one key. */
+const keyName = (k) => String(k).toLowerCase().replace(/[\s_-]+/g, '');
+
 // ---- slot words: the identifiers are obscure ("topunderwear"), so common slips are understood
-const slotKey = (s) => String(s).toLowerCase().replace(/[\s_-]+/g, '');
 const SLOT_ALIASES = (() => {
-  const m = Object.fromEntries(WEAR_SLOTS.map((s) => [slotKey(s), s]));
+  const m = Object.fromEntries(WEAR_SLOTS.map((s) => [keyName(s), s]));
   Object.assign(m, {
     top: 'topwear', tops: 'topwear', bottom: 'bottomwear', bottoms: 'bottomwear',
     shoes: 'footwear', shoe: 'footwear', boots: 'footwear', hat: 'headwear', cap: 'headwear',
@@ -18,7 +20,7 @@ const SLOT_ALIASES = (() => {
   });
   return m;
 })();
-export const normalizeSlot = (v) => (typeof v === 'string' ? SLOT_ALIASES[slotKey(v)] : undefined);
+export const normalizeSlot = (v) => (typeof v === 'string' ? SLOT_ALIASES[keyName(v)] : undefined);
 
 // A Kin that ignores the slot names and answers {"clothing":[...],"accessories":[...]} is still understood.
 const LOOSE_CLOTHING = new Set(['clothing', 'clothes', 'outfit', 'wearing', 'garments']);
@@ -29,7 +31,7 @@ export const CLOTHING_ORDER = ['headwear', 'topwear', 'bottomwear', 'footwear', 
 export const UNDERWEAR_ORDER = ['topunderwear', 'bottomunderwear'];
 export const ACCESSORY_ORDER = [...ACCESSORY_SLOTS, BAG_SLOT, 'accessories'];
 
-const PLACEHOLDER = /^(unknown|unspecified|undefined|null|none|nothing|no\b.*|not (mentioned|specified|stated|known|visible|described)|n\/?a|-+|\?+)$/i;
+const PLACEHOLDER = /^(unknown|unspecified|undefined|null|none|nothing|no\s.*|not (mentioned|specified|stated|known|visible|described)|n\/?a|-+|\?+)$/i;
 const MAX_PER_SLOT = 8;
 const MAX_LEN = 80;
 
@@ -48,9 +50,7 @@ function cleanPieces(v) {
 }
 
 // The Kin may name the key differently; all of these mean "where you are".
-const isLocationKey = (k) => ['location', 'place', 'where', 'currentlocation', 'currentplace'].includes(String(k).toLowerCase().replace(/[\s_-]+/g, ''));
-
-const keyName = (k) => String(k).toLowerCase().replace(/[\s_-]+/g, '');
+const isLocationKey = (k) => ['location', 'place', 'where', 'currentlocation', 'currentplace'].includes(keyName(k));
 // "position" counts as pose: it was the original name of that field.
 const isPoseKey = (k) => ['pose', 'posture', 'position', 'stance', 'bodyposition'].includes(keyName(k));
 const isActionKey = (k) => ['action', 'activity', 'doing', 'doingnow', 'currentaction', 'currentactivity', 'currentlydoing'].includes(keyName(k));
@@ -64,8 +64,8 @@ function outfitFromObject(doc) {
   for (const [key, value] of Object.entries(doc)) {
     if (isReadingKey(key)) continue;
     let slot = normalizeSlot(key);
-    if (!slot && LOOSE_CLOTHING.has(key.toLowerCase())) slot = 'clothing';
-    if (!slot && LOOSE_ACCESSORIES.has(key.toLowerCase())) slot = 'accessories';
+    if (!slot && LOOSE_CLOTHING.has(keyName(key))) slot = 'clothing';
+    if (!slot && LOOSE_ACCESSORIES.has(keyName(key))) slot = 'accessories';
     if (!slot) { warnings.push(`"${key}" is not a slot and was ignored`); continue; }
     if (value === null || value === undefined) continue;
     const pieces = cleanPieces(value);
@@ -95,6 +95,24 @@ export function parseOutfit(text) {
   return { ok: true, outfit, warnings };
 }
 
+// ---- shared cleanup for location, pose and action
+const CLOTHES_CLAUSE = /\s*[,;–—-]?\s*\b(wearing|dressed)\b.*$/i; // "…, wearing a robe"
+
+/** Shared first step: text, a list of texts (joined) or nothing. Returns string | null | undefined (wrong type). */
+function rawText(v, max) {
+  if (v === null || v === undefined) return null;
+  let s;
+  if (Array.isArray(v)) {
+    if (v.some((x) => typeof x !== 'string')) return undefined;
+    s = v.map((x) => x.trim()).filter(Boolean).slice(0, 3).join(', ');
+  } else if (typeof v === 'string') s = v;
+  else return undefined;
+  return cleanString(s, max).replace(/^[\s*_"'“”‘’()[\]]+/, '').replace(/[\s*_"'“”‘’()[\]]+$/, '').replace(/[.;,!?\s]+$/, '');
+}
+
+/** Cuts at a word boundary and marks the cut with "…". */
+const clipWords = (s, max) => (s.length > max ? `${s.slice(0, max).replace(/\s+\S*$/, '')}…` : s);
+
 // ---- location: a short phrase that already starts with in / at / on ("in the kitchen", "at the hospital")
 const EN_PREP = 'in|inside|at|on|outside|near|nearby|by|under|over|above|below|around|across|along|between|beside|behind|next|close|through|from|to|towards?|back|upstairs|downstairs';
 const MOTION = 'heading|going|walking|driving|travell?ing|commuting|returning|coming|leaving|riding|flying|running|jogging|cycling|biking|sailing';
@@ -112,18 +130,9 @@ const MAX_LOCATION = 120;
  * "while reading", "wearing a robe"), or a list instead of a text.
  */
 export function cleanLocation(v) {
-  if (v === null || v === undefined) return null;
-  let s;
-  if (Array.isArray(v)) {
-    if (v.some((x) => typeof x !== 'string')) return undefined;
-    s = v.map((x) => x.trim()).filter(Boolean).slice(0, 3).join(', ');
-  } else if (typeof v === 'string') s = v;
-  else return undefined;
-
-  s = cleanString(s, 400)
-    .replace(/^[\s*_"'“”‘’()[\]]+/, '').replace(/[\s*_"'“”‘’()[\]]+$/, '')
-    .replace(/[.;,!?\s]+$/, '');
-  s = s.replace(/\s*[,;–—-]?\s*\b(wearing|dressed)\b.*$/i, '')            // clothes do not belong here
+  let s = rawText(v, 400);
+  if (s === null || s === undefined) return s;
+  s = s.replace(CLOTHES_CLAUSE, '')                                          // clothes do not belong here
     .replace(/\s*[,;]\s*[A-Za-z]+ing\b.*$/i, '')                           // ", cooking dinner"
     .replace(/\s+(while|as|and)\s+[A-Za-z]+ing\b.*$/i, '')                 // "while reading"
     .replace(/[.;,!?\s]+$/, '');
@@ -135,8 +144,7 @@ export function cleanLocation(v) {
     else return null; // a posture with no place in it
   }
   if (!s || NO_PLACE.test(s)) return null;
-  if (s.length > MAX_LOCATION) s = `${s.slice(0, MAX_LOCATION).replace(/\s+\S*$/, '')}…`;
-  return s;
+  return clipWords(s, MAX_LOCATION);
 }
 
 /**
@@ -166,27 +174,13 @@ const PLACE_ONLY_START = /^(in|at|inside|outside|near|nearby)\b/i;
 const POSTURE_WORD = /\b(sitting|seated|standing|lying|laying|leaning|kneeling|crouching|squatting|reclining|resting|lounging|walking|sleeping|slouching|perched|curled|stretched)\b/i;
 const MAX_DOING = 80;
 
-/** Shared first step: text, a list of texts (joined) or nothing. Returns string | null | undefined (wrong type). */
-function rawText(v, max) {
-  if (v === null || v === undefined) return null;
-  let s;
-  if (Array.isArray(v)) {
-    if (v.some((x) => typeof x !== 'string')) return undefined;
-    s = v.map((x) => x.trim()).filter(Boolean).slice(0, 3).join(', ');
-  } else if (typeof v === 'string') s = v;
-  else return undefined;
-  return cleanString(s, max).replace(/^[\s*_"'“”‘’()[\]]+/, '').replace(/[\s*_"'“”‘’()[\]]+$/, '').replace(/[.;,!?\s]+$/, '');
-}
-
-const capWords = (s) => (s.length > MAX_DOING ? `${s.slice(0, MAX_DOING).replace(/\s+\S*$/, '')}…` : s);
-
 /** The body position ("sitting on the sofa"). Returns string | null | undefined. */
 export function cleanPose(v) {
   let s = rawText(v, 400);
   if (s === null || s === undefined) return s;
-  s = s.replace(/\s*[,;–—-]?\s*\b(wearing|dressed)\b.*$/i, '').replace(/[.;,!?\s]+$/, '');
+  s = s.replace(CLOTHES_CLAUSE, '').replace(/[.;,!?\s]+$/, '');
   if (!s || NO_VALUE.test(s) || NO_ACTION.test(s)) return null;
-  return capWords(s);
+  return clipWords(s, MAX_DOING);
 }
 
 /** What the Kin is doing now ("drinking coffee"). Plans and things already finished are not an action. */
@@ -197,7 +191,7 @@ export function cleanAction(v) {
   do { prev = s; s = s.replace(/^((currently|right now|now|just|still|actually)\s+)+/i, '').replace(SUBJECT, ''); } while (s !== prev);
   s = s.replace(/[.;,!?\s]+$/, '');
   if (!s || NO_VALUE.test(s) || NO_ACTION.test(s) || PLAN_OR_PAST.test(s) || GOING_TO_VERB.test(s) || FUTURE_WORD.test(s) || FEELING.test(s)) return null;
-  return capWords(s);
+  return clipWords(s, MAX_DOING);
 }
 
 /** "Sitting on the sofa, drinking coffee." Pose first, then the action; an action already inside the pose is not repeated. */
@@ -272,5 +266,3 @@ export function describeOutfit(outfit) {
   const text = `Wearing ${joinNatural(clothing)}${accessories.length ? `, with ${joinNatural(accessories)}` : ''}.`;
   return capitalizeFirst(text);
 }
-
-export { CLOTHING_SLOTS, ACCESSORY_SLOTS };

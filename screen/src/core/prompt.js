@@ -23,7 +23,10 @@ topwear = shirts, sweaters, jackets, coats, dresses; bottomwear = trousers, jean
 Leave out keys with nothing. If the chat says nothing about either, answer {}.
 The example only shows the format; never copy its values.
 Example: {"location":"at a bookstore","pose":"standing by a shelf","action":"flipping through a book","topwear":["a grey hoodie"],"bottomwear":["black leggings"],"footwear":["white sneakers"]}
-{{recent_chat}}`;export function buildOutfitPrompt({ name, chat = '', template = OUTFIT_PROMPT }) {
+{{recent_chat}}`;
+
+/** Fills in the Kin's name (max 60 characters) and, in local mode, the pasted chat. */
+export function buildOutfitPrompt({ name, chat = '', template = OUTFIT_PROMPT }) {
   const who = String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, 60) || 'the character';
   const recent = String(chat ?? '').trim();
   return template.replace(/\{\{(\w+)\}\}/g, (m, k) => ({

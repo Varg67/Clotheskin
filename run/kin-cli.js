@@ -13,6 +13,7 @@ export function runKin(args, { input, bin = process.env.KIN_BIN || 'kin', timeou
     child.stderr.on('data', (d) => { stderr += d; });
     child.on('error', (e) => { clearTimeout(timer); reject(e); });
     child.on('close', (code) => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
+    child.stdin.on('error', () => {}); // the CLI may exit without reading stdin (EPIPE); its exit code tells what happened
     child.stdin.end(input ?? '');
   });
 }

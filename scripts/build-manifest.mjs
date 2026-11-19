@@ -5,13 +5,13 @@ export function buildManifest() {
   return {
     kin: 1,
     name: 'Clotheskin',
-    purpose: 'Shows what a Kin says it is wearing, as one natural sentence read from its recent chat.',
+    purpose: 'Shows where a Kin is, what it is doing and what it is wearing, as three short sentences read from its recent chat.',
     run: { entry: 'node main.js', timeout: '2m' },
     screens: [{ slot: 'panel', entry: 'screen/index.html', title: 'Clotheskin' }],
     actions: [
       {
         name: 'read_outfit',
-        description: 'Reads the Kin’s recent chat and describes what it is wearing in one sentence.',
+        description: 'Reads the Kin’s recent chat and describes where it is, its pose and action, and what it is wearing.',
         input: { type: 'object', properties: { kin: { type: 'string' }, name: { type: 'string' } }, required: ['kin'] },
         by: ['user'],
       },

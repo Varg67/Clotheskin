@@ -39,8 +39,8 @@ export function keepFocus(root, fn) {
  * Modal sheet with Save / Cancel. Escape and Cancel discard.
  * `build(body, api)` fills the body; `onSave()` may return a string to show as an error and keep the sheet open.
  */
-export function openSheet({ title, build, onSave, saveLabel = 'Save', cancelLabel = 'Cancel', onClose = () => {}, wide = false }) {
-  const dlg = h('dialog', { class: `sheet${wide ? ' wide' : ''}`, 'aria-labelledby': 'sheet-title' });
+export function openSheet({ title, build, onSave, saveLabel = 'Save', cancelLabel = 'Cancel', onClose = () => {} }) {
+  const dlg = h('dialog', { class: 'sheet', 'aria-labelledby': 'sheet-title' });
   const body = h('div', { class: 'sheet-body' });
   const error = h('p', { class: 'form-error', role: 'alert', hidden: '' });
   const close = () => { dlg.close(); dlg.remove(); onClose(); };

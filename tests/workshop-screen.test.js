@@ -57,6 +57,42 @@ test('actions: the screen can run an action and gets the summary line back', asy
   assert.deepEqual(w.actionLog[0].input, { kin: 'k1', name: 'Isa' });
 });
 
+test('actions: two readings for different Kins never swap results, even if the second run would finish first', async () => {
+  // The reply names only the action, not the Kin, so the screen must not have two runs of one action in flight.
+  let listener = () => {};
+  const posted = [];
+  const channel = new WorkshopChannel({
+    post: (m) => {
+      if (m.kin !== 'action') return;
+      posted.push(m.input.kin);
+      const slow = m.input.kin === 'kA';
+      setTimeout(() => listener({ kin: 'action', name: m.name, ok: true, summary: `for ${m.input.kin}` }), slow ? 40 : 5);
+    },
+    subscribe: (fn) => { listener = fn; },
+    timeouts: { action: 500 },
+  });
+  const a = channel.runAction('read_outfit', { kin: 'kA' });
+  const b = channel.runAction('read_outfit', { kin: 'kB' });
+  await new Promise((r) => setTimeout(r, 15)); // long enough for kB's answer, had it been posted
+  assert.deepEqual(posted, ['kA'], 'the second run waits for the first');
+  assert.equal((await a).summary, 'for kA');
+  assert.equal((await b).summary, 'for kB');
+  assert.deepEqual(posted, ['kA', 'kB']);
+});
+
+test('actions: a failed run does not block the next one', async () => {
+  let listener = () => {};
+  let answer = false;
+  const channel = new WorkshopChannel({
+    post: (m) => { if (answer) queueMicrotask(() => listener({ kin: 'action', name: m.name, ok: true, summary: 'done' })); },
+    subscribe: (fn) => { listener = fn; },
+    timeouts: { action: 20 },
+  });
+  await assert.rejects(() => channel.runAction('read_outfit', { kin: 'k1' }), /did not answer/);
+  answer = true;
+  assert.deepEqual(await channel.runAction('read_outfit', { kin: 'k1' }), { ok: true, summary: 'done' });
+});
+
 test('settings work unchanged over the Workshop files; they survive a new Settings instance (a reload)', async () => {
   const w = fakeWorkshop();
   const first = new Settings(new WorkshopStorage(w.channel));

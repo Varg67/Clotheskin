@@ -12,6 +12,7 @@ export class WorkshopChannel {
     this.timeouts = { kins: 1500, file: 10000, action: 150000, ...timeouts };
     this.waiting = new Map(); // "kind:id" -> [{ resolve, timer }]
     this.kinsListeners = new Set();
+    this.actions = Promise.resolve(); // runs are posted one at a time (see runAction)
     subscribe((data) => this.#onMessage(data));
   }
 
@@ -68,9 +69,14 @@ export class WorkshopChannel {
     return true;
   }
 
-  /** Runs one of the program's actions. Resolves { ok, summary } (summary is the line the run ended with). */
-  async runAction(name, input) {
-    const r = await this.#request('action', name, { kin: 'action', name, input }, this.timeouts.action);
-    return { ok: r.ok !== false, summary: r.summary ?? '' };
+  /**
+   * Runs one of the program's actions. Resolves { ok, summary } (summary is the line the run ended with).
+   * The reply names the action but not its input, so two runs in flight could get each other's answer
+   * (a reading for one Kin shown on another). Runs are therefore posted one after the other.
+   */
+  runAction(name, input) {
+    const run = this.actions.then(() => this.#request('action', name, { kin: 'action', name, input }, this.timeouts.action));
+    this.actions = run.catch(() => {});
+    return run.then((r) => ({ ok: r.ok !== false, summary: r.summary ?? '' }));
   }
 }

@@ -1,11 +1,7 @@
 /**
  * Host adapter contract (everything the app needs from its environment):
- *   id, label
- *   capabilities: { autoUpdate, conversationIdentity, companionIdentity, structuredResponse }
- *   storage: async get/set/remove
- *
- * Only the local adapter exists. No Kindroid Workshop mechanism has been
- * verified yet (see README, "Pending verification"), so none is guessed here.
+ *   id, label, storage (async get/set), and in the Workshop also channel and kins (see workshop.js).
+ * Local mode is a plain page: preferences go to localStorage, or to memory when storage is blocked.
  */
 import { LocalStorageAdapter, MemoryStorage } from '../core/store.js';
 
@@ -17,10 +13,5 @@ export function createLocalHost() {
   } catch {
     storage = new MemoryStorage(); // storage blocked: still usable for the session
   }
-  return {
-    id: 'local',
-    label: 'local',
-    capabilities: { autoUpdate: false, conversationIdentity: false, companionIdentity: false, structuredResponse: false },
-    storage,
-  };
+  return { id: 'local', label: 'local', storage };
 }

@@ -5,16 +5,17 @@ const clip = (s, n = 480) => (s.length <= n ? s : `${s.slice(0, n - 1)}…`);
 const KIN_END_LIMIT = 500;
 
 /**
- * The line given back to the screen: both sentences as compact JSON, shortened so the whole line stays within
+ * The line given back to the screen: the three sentences as compact JSON, shortened so the whole line stays within
  * the 500 characters `kin end` allows. Location and pose/action are short by nature, so only the outfit is ever cut.
  */
 export function packReading({ location, doing, outfit }) {
-  const fits = (o) => JSON.stringify({ location, doing, outfit: o }).length <= KIN_END_LIMIT;
-  let text = outfit;
-  while (!fits(text) && text.length > 1) text = text.slice(0, Math.max(1, text.length - Math.max(1, JSON.stringify({ location, doing, outfit: text }).length - KIN_END_LIMIT + 1)));
-  if (text !== outfit) text = `${text.replace(/[\s,]+\S*$/, '').replace(/[.…]+$/, '')}…`;
-  while (!fits(text) && text.length > 1) text = `${text.slice(0, -2)}…`;
-  return JSON.stringify({ location, doing, outfit: text });
+  const pack = (o) => JSON.stringify({ location, doing, outfit: o });
+  if (pack(outfit).length <= KIN_END_LIMIT) return pack(outfit);
+  // JSON escaping only makes text longer, so the room left for the raw text is an upper bound.
+  let text = outfit.slice(0, Math.max(0, KIN_END_LIMIT - pack('…').length));
+  text = text.replace(/[\s,]+\S*$/, '').replace(/[.…]+$/, ''); // end on a whole word
+  while (text && pack(`${text}…`).length > KIN_END_LIMIT) text = text.slice(0, -1);
+  return pack(`${text.replace(/[\s,]+$/, '')}…`);
 }
 
 /**

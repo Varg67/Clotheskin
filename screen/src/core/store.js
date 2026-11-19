@@ -1,16 +1,14 @@
-/** Storage adapters share one async interface: get / set / remove. Only small settings are stored. */
+/** Storage adapters share one async interface: get / set. Only small settings are stored. */
 export class MemoryStorage {
   constructor() { this.map = new Map(); }
   async get(key) { return this.map.has(key) ? this.map.get(key) : null; }
   async set(key, value) { this.map.set(key, value); }
-  async remove(key) { this.map.delete(key); }
 }
 
 export class LocalStorageAdapter {
   constructor(ls = globalThis.localStorage) { this.ls = ls; }
   async get(key) { return this.ls.getItem(key); }
   async set(key, value) { this.ls.setItem(key, value); }
-  async remove(key) { this.ls.removeItem(key); }
 }
 
 export const SETTINGS_KEY = 'clotheskin:v2:settings';

@@ -1,4 +1,4 @@
-/** Maps storage keys to file paths in the app's own folder. Shared by the screen and the run. */
+/** Maps storage keys to file paths in the app's own folder. Used by WorkshopStorage. */
 export const DATA_DIR = 'cs';
 
 export function keyToPath(key) {

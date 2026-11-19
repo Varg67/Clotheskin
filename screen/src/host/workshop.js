@@ -9,7 +9,6 @@ export class WorkshopStorage {
     return typeof body === 'string' && body !== '' ? body : (body && typeof body === 'object' ? JSON.stringify(body) : null);
   }
   async set(key, value) { await this.channel.writeFile(keyToPath(key), value); }
-  async remove(key) { await this.channel.writeFile(keyToPath(key), ''); } // a screen cannot delete; empty = absent
 }
 
 /**
@@ -28,7 +27,6 @@ export async function detectWorkshopHost({ win = globalThis.window, timeouts } =
   return {
     id: 'workshop',
     label: 'Kindroid Workshop',
-    capabilities: { autoUpdate: false, kinReports: true, conversationIdentity: false, companionIdentity: true },
     storage: new WorkshopStorage(channel),
     channel,
     kins,

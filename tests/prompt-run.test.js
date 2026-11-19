@@ -94,7 +94,7 @@ test('the Kin id may come from the platform (a Kin used the action) or from the 
 
 test('unknown action, unsupported trigger and provider failure are reported in one clear line', async () => {
   assert.match((await handleRun({ event: { trigger: 'action', action: 'nope', input: { kin: 'k' } }, provider: answering('{}') })).message, /Unknown action/);
-  assert.match((await handleRun({ event: { trigger: 'schedule' }, provider: answering('{}') })).message, /Unsupported trigger/);
+  assert.match((await handleRun({ event: { trigger: 'inbound' }, provider: answering('{}') })).message, /Unsupported trigger/);
   const failing = { extract: async () => { throw new Error('The Kin could not be asked: grant missing'); } };
   const out = await handleRun({ event: ev(), provider: failing });
   assert.equal(out.ok, false);

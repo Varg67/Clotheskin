@@ -118,6 +118,12 @@ const step = async (name, fn) => {
     await page.screenshot({ path: path.join(SHOTS, '02b-local-nothing.png') });
   });
 
+  await step('automatic updates are visibly unavailable in local mode, with the reason', async () => {
+    assert.equal(await key('auto-enable').isDisabled(), true);
+    assert.equal(await page.locator('#auto-interval').isDisabled(), true);
+    assert.match(await page.locator('.auto-block').innerText(), /Not available in local mode/);
+  });
+
   await step('keyboard: Update status is reachable and activates with Enter', async () => {
     await page.locator('#chat').fill(PT_CHAT);
     await key('update').focus();

@@ -86,4 +86,5 @@ test('kin.json is generated, within the guide limits, with one user action and t
   assert.deepEqual(m.screens, [{ slot: 'panel', entry: 'screen/index.html', title: 'Clotheskin' }]);
   assert.deepEqual(m.actions.map((a) => [a.name, a.by]), [['read_outfit', ['user']]]);
   assert.deepEqual(m.grants, ['kin:read', 'chat:read:1']);
+  assert.deepEqual(m.triggers, [{ on: 'schedule', cron: '*/5 * * * *', tz: 'user' }], 'one fixed beat; the interval is applied by the run');
 });

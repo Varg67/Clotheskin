@@ -35,11 +35,18 @@ window.addEventListener('message', async (e) => {
 (async () => {
   const { createAppServer } = await import('../../server.mjs');
   const { handleRun } = await import('../../run/actions.js');
+  const { keyToPath } = await import('../../screen/src/host/paths.js');
   const files = new Map();
   let kins = [{ id: 'k-isa', name: 'Isa' }, { id: 'k-alex-1', name: 'Alex' }, { id: 'k-alex-2', name: 'Alex' }];
   let kinAnswer = async () => '{}';
   const asked = [];
   const provider = { extract: async ({ prompt, kinId }) => { asked.push({ prompt, kinId }); return kinAnswer({ prompt, kinId }); } };
+  // The run reads and writes the same files the screen does (the program folder), through the real adapters' interface.
+  const nodeStorage = {
+    get: async (k) => (files.has(keyToPath(k)) && files.get(keyToPath(k)) !== '' ? files.get(keyToPath(k)) : null),
+    set: async (k, v) => { files.set(keyToPath(k), v); },
+    remove: async (k) => { files.delete(keyToPath(k)); },
+  };
   let delay = 350;
   let plainSummary = false; // simulates an older run that ended with plain text
   const NONE = 'No outfit read yet. Press Update status.';
@@ -58,7 +65,9 @@ window.addEventListener('message', async (e) => {
   await page.exposeFunction('hostKins', () => kins);
   await page.exposeFunction('hostRead', (p) => (files.has(p) && files.get(p) !== '' ? files.get(p) : null));
   await page.exposeFunction('hostWrite', (p, body) => { files.set(p, body); });
-  await page.exposeFunction('hostAction', async (name, input) => { await new Promise((r) => setTimeout(r, delay)); const r = await handleRun({ event: { trigger: 'action', action: name, input }, provider }); return plainSummary && r.ok ? { ...r, message: JSON.parse(r.message).outfit } : r; });
+  // The platform's schedule beat. The test chooses the clock so time can pass without waiting.
+  await page.exposeFunction('hostSchedule', (iso) => handleRun({ event: { trigger: 'schedule' }, provider, storage: nodeStorage, clock: () => new Date(iso) }));
+  await page.exposeFunction('hostAction', async (name, input) => { await new Promise((r) => setTimeout(r, delay)); const r = await handleRun({ event: { trigger: 'action', action: name, input }, provider, storage: nodeStorage }); return plainSummary && r.ok ? { ...r, message: JSON.parse(r.message).outfit } : r; });
 
   await page.goto(`${base}/__parent.html`);
   const fr = page.frameLocator('#f');
@@ -154,6 +163,117 @@ window.addEventListener('message', async (e) => {
     assert.equal(await doing(), 'Standing, washing hands.');
   });
 
+  const SETTINGS = 'cs/clotheskin~3av2~3asettings.json';
+  const readingFile = (id) => JSON.parse(files.get(`cs/clotheskin~3av2~3areading~3a${id}.json`) || 'null');
+  const savedSettings = () => JSON.parse(files.get(SETTINGS) || '{}');
+  const beat = (minutes) => page.evaluate((iso) => window.hostSchedule(iso), new Date(Date.now() + minutes * 60000).toISOString());
+  const poll = () => frameEval(() => window.__clotheskin.pollNow());
+
+  await step('the latest reading is remembered: it shows again after a reload, without asking the Kin', async () => {
+    await pick('k-isa');
+    const before = asked.length;
+    await page.reload();
+    await key('update').waitFor();
+    await until(async () => (await outfit()) === 'Wearing a green cardigan.', 'the stored reading is shown');
+    assert.equal(await where(), 'At the hospital.');
+    assert.equal(asked.length, before, 'showing it cost no question');
+    assert.match(await fr.locator('[data-testid="last-checked"]').innerText(), /Last checked: \d{1,2}:\d{2} (AM|PM)/);
+    const stored = readingFile('k-isa');
+    assert.deepEqual(Object.keys(stored).sort(), ['at', 'attemptedAt', 'doing', 'error', 'location', 'outfit', 'source']);
+    assert.equal(stored.source, 'manual');
+  });
+
+  await step('automatic updates: the interval is validated and says what really happens', async () => {
+    await key('reader-summary').click();
+    const interval = fr.locator('#auto-interval');
+    assert.equal(await interval.inputValue(), '15');
+    await interval.fill('7'); await interval.blur();
+    await until(async () => /behaves like 10/.test(await fr.locator('#auto-interval-help').innerText()), 'rounding explained');
+    await interval.fill('1'); await interval.blur();
+    await until(async () => (await interval.inputValue()) === '5', 'clamped up to 5 minutes');
+    await interval.fill(''); await interval.blur();
+    await until(async () => (await interval.inputValue()) === '15', 'empty gives the default');
+    await interval.fill('99999'); await interval.blur();
+    await until(async () => (await interval.inputValue()) === '1440', 'clamped down to 24 hours');
+    await interval.fill('30'); await interval.blur();
+    await until(async () => savedSettings().autoIntervalMinutes === 30, 'saved for the run to read');
+    assert.equal(savedSettings().autoUpdate, false, 'still off until switched on');
+    await page.screenshot({ path: path.join(SHOTS, '11-workshop-auto-settings.png') });
+  });
+
+  await step('automatic updates: switching on ticks the selected Kin; the platform beat then asks it and the card shows the result', async () => {
+    kins = [{ id: 'k-isa', name: 'Isa' }, { id: 'k-alex-1', name: 'Alex' }, { id: 'k-alex-2', name: 'Alex' }];
+    await page.evaluate(() => window.pushKins());
+    await fr.locator('#auto-enable').check();
+    await until(async () => savedSettings().autoUpdate === true && (savedSettings().autoKins || []).some((k) => k.id === 'k-isa'), 'on, with the selected Kin ticked');
+    assert.deepEqual(savedSettings().autoKins, [{ id: 'k-isa', name: 'Isa' }]);
+    assert.equal(await fr.locator('#auto-kin-k-isa').isChecked(), true);
+    assert.equal(await fr.locator('#auto-kin-k-alex-1').isChecked(), false);
+    await fr.locator('#auto-kin-k-alex-1').check();
+    await until(async () => (savedSettings().autoKins || []).length === 2, 'second Kin ticked');
+
+    kinAnswer = async ({ kinId }) => JSON.stringify({ location: kinId === 'k-isa' ? 'in the garden' : 'on a bench', pose: 'standing', topwear: ['a raincoat'] });
+    const before = asked.length;
+    const r = await beat(31);
+    assert.equal(r.ok, true, r.message);
+    assert.match(r.message, /Checked 2/);
+    assert.equal(asked.length, before + 2, 'one question for each ticked Kin');
+    assert.deepEqual(asked.slice(-2).map((a) => a.kinId).sort(), ['k-alex-1', 'k-isa']);
+    assert.ok(!asked.slice(-2).some((a) => a.kinId === 'k-alex-2'), 'the unticked Kin is never asked');
+    await poll();
+    await until(async () => (await where()) === 'In the garden.', 'the automatic reading is shown on the card');
+    assert.equal(await outfit(), 'Wearing a raincoat.');
+    assert.match(await fr.locator('[data-testid="last-checked"]').innerText(), /automatic/);
+    assert.equal(readingFile('k-isa').source, 'auto');
+    await page.screenshot({ path: path.join(SHOTS, '12-workshop-auto-result.png') });
+  });
+
+  await step('the interval is respected by the beat: nothing before it, again after it', async () => {
+    const before = asked.length;
+    assert.match((await beat(35)).message, /No Kin is due yet/);
+    assert.equal(asked.length, before);
+    await new Promise((r) => setTimeout(r, 5));
+    const later = await beat(31 + 31);
+    assert.match(later.message, /Checked 2/);
+    assert.equal(asked.length, before + 2);
+  });
+
+  await step('an automatic failure keeps the last good sentences and says so; Try again recovers', async () => {
+    kinAnswer = async () => '*giggles* No forms today!';
+    const r = await beat(31 + 31 + 31);
+    assert.equal(r.ok, false);
+    await poll();
+    const banner = fr.locator('[data-testid="banner"]');
+    await banner.waitFor();
+    assert.equal(await banner.getAttribute('role'), 'alert');
+    assert.match(await banner.innerText(), /The last automatic check failed: .*not valid JSON/);
+    assert.equal(await where(), 'In the garden.', 'the last good place is still shown');
+    assert.ok((await fr.locator('[data-testid="auto-status"]').innerText()).includes('(failed)'));
+    kinAnswer = async () => JSON.stringify({ location: 'at the library', topwear: ['a cardigan'] });
+    await key('retry').click(); await idle();
+    assert.equal(await where(), 'At the library.');
+    assert.equal(await fr.locator('[data-testid="banner"]').count(), 0);
+  });
+
+  await step('another Kin\'s automatic reading shows when that Kin is selected, and not before', async () => {
+    assert.equal(await where(), 'At the library.', 'Isa still shows her own');
+    await pick('k-alex-1');
+    await until(async () => (await where()) === 'On a bench.', 'Alex 1 has its own automatic reading');
+    await pick('k-alex-2');
+    await until(async () => (await outfit()) === NONE, 'Alex 2 (not ticked) has nothing');
+    await pick('k-isa');
+  });
+
+  await step('switching automatic updates off stops the questions', async () => {
+    await key('reader-summary').click().catch(() => {});
+    if (!(await fr.locator('#auto-enable').isVisible())) await key('reader-summary').click();
+    await fr.locator('#auto-enable').uncheck();
+    await until(async () => savedSettings().autoUpdate === false, 'saved as off');
+    const before = asked.length;
+    assert.equal((await beat(500)).message, 'Automatic updates are off.');
+    assert.equal(asked.length, before);
+  });
+
   await step('an older run that ended with plain text is still shown (as the outfit, without place, pose or action)', async () => {
     plainSummary = true;
     kinAnswer = async () => '{"location":"at home","topwear":["a hoodie"]}';
@@ -178,13 +298,19 @@ window.addEventListener('message', async (e) => {
     await until(async () => /Isa/.test(await fr.locator('.card-top .name').innerText()), 'Isa still selected after the list changed');
   });
 
-  await step('the only thing in the Workshop files is the settings; the theme works in the frame', async () => {
-    await key('reader-summary').click();
+  await step('the Workshop files hold only preferences and each Kin\'s latest reading (sentences and times); the theme works in the frame', async () => {
+    if (!(await fr.locator('#theme-pick').isVisible())) await key('reader-summary').click();
     await fr.locator('#theme-pick').selectOption('sage');
     await until(async () => (await frameEval(() => document.documentElement.dataset.theme)) === 'sage', 'sage applied');
-    await until(async () => /"theme":"sage"/.test(files.get('cs/clotheskin~3av2~3asettings.json') || ''), 'theme saved');
-    assert.deepEqual([...files.keys()], ['cs/clotheskin~3av2~3asettings.json']);
-    assert.ok(!/jeans|cardigan|boots|jacket|hoodie|hospital|living room|college|sofa|coffee|washing|window/.test([...files.values()].join('')), 'no garment, place, pose or action was stored');
+    await until(async () => savedSettings().theme === 'sage', 'theme saved');
+    const names = [...files.keys()].sort();
+    assert.ok(names.every((n) => /^cs\/clotheskin~3av2~3a(settings|reading~3ak-[a-z0-9-]+)\.json$/.test(n)), names.join(', '));
+    assert.ok(names.includes(SETTINGS));
+    for (const n of names.filter((x) => x !== SETTINGS)) {
+      const o = JSON.parse(files.get(n));
+      assert.deepEqual(Object.keys(o).sort(), ['at', 'attemptedAt', 'doing', 'error', 'location', 'outfit', 'source'], n);
+    }
+    assert.deepEqual(Object.keys(savedSettings()).sort(), ['autoIntervalMinutes', 'autoKins', 'autoUpdate', 'localName', 'selectedKinId', 'theme']);
     await page.screenshot({ path: path.join(SHOTS, '10-workshop-settings-sage.png') });
   });
 

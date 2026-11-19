@@ -1,8 +1,9 @@
 // Adapter over the `kin` command available inside a run. Everything that depends on the exact behaviour of
 // that CLI is in this file, so a correction is local. See README "Pending verification".
 import { spawn } from 'node:child_process';
+import { keyToPath } from '../screen/src/host/paths.js';
 
-export function runKin(args, { input, bin = process.env.KIN_BIN || 'kin', timeoutMs = 110000 } = {}) {
+export function runKin(args, { input, bin = process.env.KIN_BIN || 'kin', timeoutMs = 70000 } = {}) {
   return new Promise((resolve, reject) => {
     const cmd = bin.endsWith('.mjs') ? 'node' : bin;
     const full = bin.endsWith('.mjs') ? [bin, ...args] : args;
@@ -15,6 +16,32 @@ export function runKin(args, { input, bin = process.env.KIN_BIN || 'kin', timeou
     child.on('close', (code) => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
     child.stdin.end(input ?? '');
   });
+}
+
+/**
+ * Storage over `kin files`, for the settings the screen wrote and the latest readings.
+ * ASSUMES: `get` prints the file to stdout, `put` reads it from stdin, `ls` lists paths, and the screen's
+ * files.read / files.write use this same folder.
+ */
+export class KinFilesStorage {
+  constructor(run = runKin) { this.run = run; }
+
+  async get(key) {
+    const path = keyToPath(key);
+    const r = await this.run(['files', 'get', path]);
+    if (r.code === 0) return r.stdout === '' ? null : r.stdout;
+    // A failed read must not be mistaken for "no file yet": a later save would then overwrite real data.
+    const ls = await this.run(['files', 'ls']);
+    if (ls.code === 0 && !ls.stdout.split(/\r?\n/).some((l) => l.includes(path))) return null;
+    throw new Error(`Could not read ${path}: ${(r.stderr || r.stdout).trim().slice(0, 200)}`);
+  }
+
+  async set(key, value) {
+    const r = await this.run(['files', 'put', keyToPath(key)], { input: value });
+    if (r.code !== 0) throw new Error(`Could not save ${keyToPath(key)}: ${(r.stderr || r.stdout).trim().slice(0, 200)}`);
+  }
+
+  async remove(key) { await this.run(['files', 'rm', keyToPath(key)]); }
 }
 
 /** The Kin as the extraction model. ASSUMES: the answer is printed on stdout. */

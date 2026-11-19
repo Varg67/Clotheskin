@@ -4,6 +4,8 @@ import { buildOutfitPrompt } from '../core/prompt.js';
 import { parseReading, describeReading, poseIcon } from '../core/outfit.js';
 import { formatClock, formatRelative } from '../core/format.js';
 import { DEMO_SCENES } from '../demo/demo.js';
+import { ReadingStore } from '../core/readings.js';
+import { normalizeInterval, effectiveMinutes, SCHEDULE_TICK_MINUTES, AUTO_MIN_MINUTES, AUTO_MAX_MINUTES } from '../core/auto.js';
 
 export const THEMES = [
   { id: 'warm', label: 'Kindroid warm (default)' },
@@ -21,8 +23,9 @@ function applyTheme(id) {
 const LOCAL_ID = 'local';
 
 /**
- * The tracker: ask the Kin what it is wearing, show the answer as one sentence. Nothing about outfits is
- * stored; results live in memory for the session, per Kin id.
+ * The tracker: ask the Kin where it is, what it is doing and what it is wearing; show the answer as sentences.
+ * In local mode nothing is stored. In the Workshop only the latest reading per Kin is kept (so an automatic reading
+ * made in the background can be shown later), plus small preferences.
  */
 export async function startApp({ root, settings, host, clock = () => new Date() }) {
   document.documentElement.lang = 'en';
@@ -32,7 +35,8 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
 
   const S = {
     kins: isWorkshop ? (host.kins || []) : [{ id: LOCAL_ID, name: settings.value.localName }],
-    results: new Map(), // kin id -> { location, doing, outfit, at }  (three sentences)
+    results: new Map(), // kin id -> { location, doing, outfit, at, source }  (three sentences)
+    cached: new Map(), // Workshop: kin id -> the stored reading, including the last attempt and its error
     errors: new Map(), // kin id -> message
     reading: new Set(), // kin ids with a reading in progress
     info: null, // { kind, text } for the selected Kin
@@ -42,11 +46,14 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     readerOpen: !isWorkshop,
   };
 
+  const readings = isWorkshop ? new ReadingStore(host.storage) : null;
   const live = h('div', { class: 'sr-only', role: 'status', 'aria-live': 'polite' });
   document.body.append(live);
   const announce = (t) => { live.textContent = ''; setTimeout(() => { live.textContent = t; }, 30); };
 
   // ---------------------------------------------------------------- selection
+  /** Two Kins may share a name: then the end of their id tells them apart. */
+  const displayName = (k) => (S.kins.filter((x) => x.name === k.name).length > 1 ? `${k.name} (…${String(k.id).slice(-4)})` : k.name);
   function selectedKin() {
     if (!isWorkshop) return { id: LOCAL_ID, name: settings.value.localName || 'the character' };
     const found = S.kins.find((k) => k.id === settings.value.selectedKinId);
@@ -54,8 +61,35 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     return S.kins.length === 1 ? S.kins[0] : null; // several Kins: the person chooses
   }
 
+  /** Workshop: pick up the stored reading (made by a manual run or by the schedule). Returns true if something changed. */
+  async function loadReading(kin) {
+    if (!readings || !kin) return false;
+    let stored;
+    try { stored = await readings.get(kin.id); } catch { return false; }
+    if (!stored) return false;
+    const before = JSON.stringify(S.cached.get(kin.id) ?? null);
+    S.cached.set(kin.id, stored);
+    const mine = S.results.get(kin.id);
+    const newer = stored.at && stored.location !== null && (!mine || Date.parse(stored.at) > Date.parse(mine.at));
+    if (newer) S.results.set(kin.id, { location: stored.location, doing: stored.doing, outfit: stored.outfit, at: stored.at, source: stored.source });
+    return newer || JSON.stringify(stored) !== before;
+  }
+
+  async function pollReading() {
+    const kin = selectedKin();
+    if (!isWorkshop || !kin || S.reading.has(kin.id)) return;
+    if (await loadReading(kin)) render();
+  }
+
+  /** Keep the ticked Kins in the settings in step with the Kins the host reports (names change, Kins get detached). */
+  async function syncAutoKins() {
+    const ticked = settings.value.autoKins || [];
+    const next = ticked.filter((k) => S.kins.some((x) => x.id === k.id)).map((k) => ({ id: k.id, name: S.kins.find((x) => x.id === k.id).name }));
+    if (JSON.stringify(next) !== JSON.stringify(ticked)) await settings.save({ autoKins: next });
+  }
+
   if (isWorkshop) {
-    host.channel.onKinsChange((kins) => { S.kins = kins; render(); });
+    host.channel.onKinsChange(async (kins) => { S.kins = kins; await syncAutoKins(); await loadReading(selectedKin()); render(); });
   }
 
   function chooseKin(opener) {
@@ -66,8 +100,8 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
         body.append(
           h('ul', { class: 'profile-list', role: 'list' }, ...S.kins.map((k) => h('li', {},
             h('button', { type: 'button', class: `profile-pick${k.id === selectedKin()?.id ? ' selected' : ''}`, 'aria-pressed': String(k.id === selectedKin()?.id), 'data-key': `pick-${k.id}`,
-              onClick: async () => { S.info = null; await settings.save({ selectedKinId: k.id }); api.close(); render(); announce(`Selected ${k.name}`); } },
-            avatar(36), h('span', { class: 'pp-text' }, h('strong', {}, k.name), h('span', { class: 'muted' }, 'From Kindroid')),
+              onClick: async () => { S.info = null; await settings.save({ selectedKinId: k.id }); await loadReading(k); api.close(); render(); announce(`Selected ${k.name}`); } },
+            avatar(36), h('span', { class: 'pp-text' }, h('strong', {}, displayName(k)), h('span', { class: 'muted' }, 'From Kindroid')),
             k.id === selectedKin()?.id ? h('span', { class: 'tag' }, 'Selected') : null)))),
           h('p', { class: 'help' }, 'These are the Kins attached to this app. To add or remove one, open the app’s settings in Kindroid Apps and use Kins.'));
       },
@@ -76,8 +110,12 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
 
   // ------------------------------------------------------------------ reading
   function show(kinId, outcome) {
-    if (outcome.ok) { S.results.set(kinId, { location: outcome.location, doing: outcome.doing, outfit: outcome.outfit, at: clock().toISOString() }); S.errors.delete(kinId); }
-    else S.errors.set(kinId, outcome.error);
+    if (outcome.ok) {
+      S.results.set(kinId, { location: outcome.location, doing: outcome.doing, outfit: outcome.outfit, at: clock().toISOString(), source: 'manual' });
+      S.errors.delete(kinId);
+      const c = S.cached.get(kinId);
+      if (c) S.cached.set(kinId, { ...c, error: null }); // a success clears an earlier automatic failure, even if it could not be stored
+    } else S.errors.set(kinId, outcome.error);
   }
 
   /** The run ends with {"location":"…","doing":"…","outfit":"…"}. Plain text (an older run) is shown as the outfit. */
@@ -166,11 +204,15 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     }
     const reading = S.reading.has(kin.id);
     const result = S.results.get(kin.id);
-    const error = S.errors.get(kin.id);
+    const stored = S.cached.get(kin.id);
+    // A stored error stands until a later success clears it (the run does that). No clocks are compared: the screen
+    // and the run may disagree about the time.
+    const autoFailed = !S.errors.has(kin.id) && stored?.error ? `The last automatic check failed: ${stored.error}` : null;
+    const error = S.errors.get(kin.id) || autoFailed;
     const now = clock();
     return h('section', { class: 'card', 'aria-label': `${kin.name} status` },
       h('div', { class: 'card-top' },
-        h('div', { class: 'toggle static' }, avatar(48), h('span', { class: 'who' }, h('span', { class: 'name' }, kin.name))),
+        h('div', { class: 'toggle static' }, avatar(48), h('span', { class: 'who' }, h('span', { class: 'name' }, displayName(kin)))),
         isWorkshop && S.kins.length > 1 ? h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Switch Kin', 'data-key': 'switch', onClick: (e) => chooseKin(e.currentTarget) }, icon('users', { size: 20 })) : null),
       h('div', { class: 'card-body' },
         h('h2', { class: 'section-title' }, 'Current status'),
@@ -190,7 +232,7 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
         h('button', { type: 'button', class: 'btn primary block', 'data-key': 'update', 'aria-busy': String(reading), onClick: update },
           reading ? [spinner(), isWorkshop ? 'Reading…' : 'Waiting for the answer…'] : [icon('refresh', { size: 18 }), 'Update status']),
         h('p', { class: 'meta', 'data-testid': 'last-checked' }, 'Last checked: ',
-          result ? [h('time', { datetime: result.at }, formatClock(result.at, { now })), ' · ', h('span', { class: 'rel', 'data-iso': result.at }, formatRelative(result.at, now))] : 'never'),
+          result ? [h('time', { datetime: result.at }, formatClock(result.at, { now })), ' · ', h('span', { class: 'rel', 'data-iso': result.at }, formatRelative(result.at, now)), result.source === 'auto' ? ' · automatic' : null] : 'never'),
         error ? h('div', { class: 'banner error', role: 'alert', 'data-testid': 'banner' }, icon('alert', { size: 18 }), h('span', { class: 'banner-text' }, error),
           h('button', { type: 'button', class: 'btn small', 'data-key': 'retry', onClick: update }, 'Try again'))
           : S.info ? h('div', { class: `banner ${S.info.kind}`, role: 'status', 'data-testid': 'banner' }, icon('refresh', { size: 18 }), h('span', { class: 'banner-text' }, S.info.text)) : null));
@@ -230,7 +272,46 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
             h('div', { class: 'btn-row' },
               h('button', { type: 'button', class: 'btn', 'data-key': 'demo-load', onClick: async () => { const s = DEMO_SCENES.find((x) => x.id === sceneSel.value); S.chatDraft = s.chat; S.responseDraft = s.response; S.info = { kind: 'info', text: `Loaded “${s.title}”. Prepare the prompt, then press Show status.` }; render(); } }, 'Load scene'),
               h('button', { type: 'button', class: 'btn', 'data-key': 'demo-run', onClick: async () => { const s = DEMO_SCENES.find((x) => x.id === sceneSel.value); S.chatDraft = s.chat; S.responseDraft = s.response; S.pending = { id: kin.id, prompt: buildOutfitPrompt({ name: kin.name, chat: s.chat }) }; applyLocal(s.response); } }, 'Run demo scene'))),
+          renderAutoSettings(),
           renderThemePicker())));
+  }
+
+  function renderAutoSettings() {
+    const on = !!settings.value.autoUpdate;
+    const minutes = normalizeInterval(settings.value.autoIntervalMinutes);
+    const eff = effectiveMinutes(minutes);
+    const ticked = new Set((settings.value.autoKins || []).map((k) => k.id));
+    const kin = selectedKin();
+    const stored = kin ? S.cached.get(kin.id) : null;
+    const saveKins = (set) => settings.save({ autoKins: S.kins.filter((k) => set.has(k.id)).map((k) => ({ id: k.id, name: k.name })) });
+    return h('div', { class: 'auto-block' },
+      h('h3', { class: 'sub' }, 'Automatic updates'),
+      isWorkshop ? null : h('p', { class: 'help' }, 'Not available in local mode. In the Kindroid Workshop the app asks the Kin on a schedule you choose here.'),
+      h('label', { class: 'check' },
+        h('input', { type: 'checkbox', id: 'auto-enable', 'data-key': 'auto-enable', disabled: !isWorkshop, checked: isWorkshop && on,
+          onChange: async (e) => {
+            const enable = e.target.checked;
+            if (enable && !ticked.size && kin) ticked.add(kin.id); // switching it on must ask someone: start with the selected Kin
+            await settings.save({ autoUpdate: enable });
+            if (enable) await saveKins(ticked);
+            announce(enable ? 'Automatic updates on' : 'Automatic updates off'); render();
+          } }),
+        'Update automatically'),
+      h('label', { class: 'label', for: 'auto-interval' }, 'Ask every (minutes)'),
+      h('input', { type: 'number', id: 'auto-interval', class: 'text-input', 'data-key': 'auto-interval', min: String(AUTO_MIN_MINUTES), max: String(AUTO_MAX_MINUTES), step: '1', value: String(minutes), disabled: !isWorkshop,
+        'aria-describedby': 'auto-interval-help',
+        onChange: async (e) => { const n = normalizeInterval(e.target.value); e.target.value = String(n); await settings.save({ autoIntervalMinutes: n }); render(); } }),
+      h('p', { class: 'help', id: 'auto-interval-help' }, eff === minutes
+        ? `Between ${AUTO_MIN_MINUTES} minutes and 24 hours.`
+        : `The Workshop wakes the app every ${SCHEDULE_TICK_MINUTES} minutes, so ${minutes} minutes behaves like ${eff}.`),
+      isWorkshop && S.kins.length ? h('fieldset', { class: 'auto-kins' },
+        h('legend', {}, 'Which Kins'),
+        ...S.kins.map((k) => h('label', { class: 'check' },
+          h('input', { type: 'checkbox', id: `auto-kin-${k.id}`, 'data-key': `auto-kin-${k.id}`, checked: ticked.has(k.id),
+            onChange: async (e) => { if (e.target.checked) ticked.add(k.id); else ticked.delete(k.id); await saveKins(ticked); render(); } }),
+          displayName(k)))) : null,
+      isWorkshop && kin && stored?.attemptedAt ? h('p', { class: 'help', 'data-testid': 'auto-status' }, `Last check for ${displayName(kin)}: `, h('span', { class: 'rel', 'data-iso': stored.attemptedAt }, formatRelative(stored.attemptedAt, clock())), stored.error ? ' (failed)' : '') : null,
+      h('p', { class: 'help' }, 'Each check asks the Kin one question and uses running time from your credits. Only the latest reading of each Kin is kept, so it can be shown when you open the app.'));
   }
 
   function renderWorkshopSettings() {
@@ -239,7 +320,8 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
       h('div', { class: 'reader-body' },
         h('div', { class: 'full' },
           h('h3', { class: 'sub' }, 'How it works'),
-          h('p', { class: 'help' }, 'Update status asks the selected Kin to look at its recent chat and say where it is, how it is positioned, what it is doing and what it is wearing. Each answer is shown as one sentence. Nothing is saved.'),
+          h('p', { class: 'help' }, 'Update status asks the selected Kin to look at its recent chat and say where it is, how it is positioned, what it is doing and what it is wearing. Each answer is shown as one sentence.'),
+          renderAutoSettings(),
           renderThemePicker())));
   }
 
@@ -259,6 +341,13 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     for (const el of root.querySelectorAll('.rel[data-iso]')) el.textContent = formatRelative(el.dataset.iso, clock());
   }, 30000);
 
+  if (isWorkshop) {
+    await loadReading(selectedKin());
+    setInterval(() => { pollReading().catch(() => {}); }, 20000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) pollReading().catch(() => {}); });
+    window.addEventListener('focus', () => { pollReading().catch(() => {}); });
+  }
+
   render();
-  return { S, render, selectedKin };
+  return { S, render, selectedKin, pollNow: pollReading };
 }

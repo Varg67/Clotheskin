@@ -1,10 +1,17 @@
 {
   "kin": 1,
   "name": "Clotheskin",
-  "purpose": "Shows what a Kin says it is wearing, as one natural sentence read from its recent chat.",
+  "purpose": "Shows where a Kin is, what it is doing and what it is wearing, read from its recent chat, now or on a schedule.",
+  "triggers": [
+    {
+      "on": "schedule",
+      "cron": "*/5 * * * *",
+      "tz": "user"
+    }
+  ],
   "run": {
     "entry": "node main.js",
-    "timeout": "2m"
+    "timeout": "4m"
   },
   "screens": [
     {

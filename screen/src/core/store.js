@@ -18,9 +18,13 @@ export const DEFAULT_SETTINGS = {
   theme: 'warm', // 'warm' (stock Kindroid) | 'sage' (green, sampled from a customised desktop window)
   selectedKinId: null,
   localName: 'Isa',
+  // automatic updates (Workshop only): the screen writes these, the scheduled run reads them
+  autoUpdate: false,
+  autoIntervalMinutes: 15,
+  autoKins: [], // [{ id, name }]
 };
 
-/** Preferences only (theme, which Kin is selected, the local-mode name). No outfit and no chat is ever stored. */
+/** Preferences only (theme, which Kin is selected, the local-mode name, the automatic-update schedule). */
 export class Settings {
   constructor(storage) { this.storage = storage; this.value = { ...DEFAULT_SETTINGS }; this.queue = Promise.resolve(); }
   async load() {

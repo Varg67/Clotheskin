@@ -1,12 +1,15 @@
 // Generates kin.json. `node scripts/build-manifest.mjs` writes it; the tests check it is up to date.
 import { readFileSync, writeFileSync } from 'node:fs';
+import { SCHEDULE_TICK_MINUTES } from '../screen/src/core/auto.js';
 
 export function buildManifest() {
   return {
     kin: 1,
     name: 'Clotheskin',
-    purpose: 'Shows what a Kin says it is wearing, as one natural sentence read from its recent chat.',
-    run: { entry: 'node main.js', timeout: '2m' },
+    purpose: 'Shows where a Kin is, what it is doing and what it is wearing, read from its recent chat, now or on a schedule.',
+    // The schedule beat is fixed here; the person's interval is applied by the run (see screen/src/core/auto.js).
+    triggers: [{ on: 'schedule', cron: `*/${SCHEDULE_TICK_MINUTES} * * * *`, tz: 'user' }],
+    run: { entry: 'node main.js', timeout: '4m' },
     screens: [{ slot: 'panel', entry: 'screen/index.html', title: 'Clotheskin' }],
     actions: [
       {

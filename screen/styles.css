@@ -192,3 +192,8 @@ dialog.sheet.wide { width: min(760px, 100vw - 64px); }
 .fact-value { font-size: 1.05rem; line-height: 1.4; overflow-wrap: anywhere; }
 .fact.empty .fact-value { color: var(--muted); font-style: italic; font-size: .98rem; }
 .toggle.static { cursor: default; }
+
+/* Automatic updates */
+.auto-block { display: grid; gap: 6px; }
+.auto-kins { border: 1px solid var(--line-soft); border-radius: var(--radius-sm); padding: 6px 14px 10px; margin: 4px 0; }
+.auto-kins legend { padding: 0 6px; font-size: .85rem; color: var(--muted); font-weight: 650; }

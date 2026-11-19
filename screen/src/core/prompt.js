@@ -70,16 +70,21 @@ export const KIN_ASK_BUDGET = 7000;
  */
 export const HOST_CHAT_PROMPT = `You are filling in a scene tracker about yourself, {{target_character}}.
 Look at your recent chat with the person and update the tracker as of the last message.
-Read both Portuguese and English. Dialogue and narrated actions are scene evidence.
+The chat may be in Portuguese or English: understand both, but write everything you return in English only.
 Track only yourself, not the person or anyone else in the scene.
 
 Start from PREVIOUS STATE. Report completed actions and facts established by the chat.
 Plans, questions, suggestions, memories and hypothetical outfits do not change the state.
 Keep the last established location until the chat establishes a move. Leave unmentioned details unknown.
-Write every description in English, keeping proper names. Describe items by known id, or by an
-ordinary name on first appearance. If a reference is ambiguous, say so in "unresolved" and leave it unchanged.
-With no changes, return empty collections.
-Answer with the JSON object only: no narration, no roleplay, no commentary.
+Describe items by known id, or by an ordinary name on first appearance. If a reference is ambiguous,
+say so in "unresolved" and leave it unchanged.
+
+Be concise: this is data, not conversation. Use short noun phrases ("low bun", "sitting on the sofa"),
+at most 6 words per value, and one short sentence (at most 15 words) per unresolved note.
+Never repeat what PREVIOUS STATE already says. Keep the whole answer under 600 characters;
+if there is too much, report only the latest changes. Keep proper names as written.
+Answer with minified JSON only, on one line: no code fence, no narration, no roleplay, no commentary.
+Leave out keys with nothing in them; if nothing changed, answer {}.
 
 {{operation_contract}}
 

@@ -138,7 +138,7 @@ const REF_NAMES = (name) => `${name}_id|${name}_name`;
 /** Short form of the contract, for channels with a hard size limit (kin ask: 8,000 characters). */
 export function renderCompactContract() {
   const lines = [];
-  lines.push('Reply with {"state_updates":{},"item_changes":[],"unresolved":[]}.');
+  lines.push('Reply with {"state_updates":{...},"item_changes":[...],"unresolved":[...]}, leaving out any key that has nothing.');
   lines.push(`state_updates: only changed ${STATE_FIELDS.join(', ')}; short English strings, never null; makeup "none" = confirmed no makeup.`);
   lines.push('item_changes: operations {"op":...}. Fields marked * are required; refs are item_id or item_name (use known ids).');
   for (const [op, spec] of Object.entries(OP_SPECS)) {

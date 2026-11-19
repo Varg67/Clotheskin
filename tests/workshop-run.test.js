@@ -158,3 +158,22 @@ test('a wardrobe too large for the budget fails with advice instead of sending a
   assert.match(out.message, /too large to send in one question/);
   assert.ok(out.message.length <= 500);
 });
+
+test('the Workshop prompt demands English-only, concise, minified answers with a character cap', async () => {
+  const { HOST_CHAT_PROMPT } = await import('../screen/src/core/prompt.js');
+  assert.match(HOST_CHAT_PROMPT, /write everything you return in English only/);
+  assert.match(HOST_CHAT_PROMPT, /Be concise/);
+  assert.match(HOST_CHAT_PROMPT, /under 600 characters/);
+  assert.match(HOST_CHAT_PROMPT, /minified JSON only, on one line/);
+  assert.match(HOST_CHAT_PROMPT, /if nothing changed, answer \{\}/);
+  assert.ok(!/Read both Portuguese and English/.test(HOST_CHAT_PROMPT), 'the old bilingual output instruction is gone');
+});
+
+test('the shortest answers the prompt asks for are accepted: {} and minified JSON', async () => {
+  const repo = makeRepo();
+  assert.equal((await handleRun({ event: askEvent('c'), repo, provider: answer('{}'), clock })).ok, true);
+  const min = '{"state_updates":{"hair":"low bun"},"item_changes":[{"op":"wear","item_name":"cap","slot":"headwear"}]}';
+  const out = await handleRun({ event: askEvent('c'), repo, provider: answer(min), clock });
+  assert.equal(out.ok, true);
+  assert.deepEqual(names(await repo.getRecord('c'), 'headwear'), ['cap']);
+});

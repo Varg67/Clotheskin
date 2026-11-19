@@ -27,15 +27,28 @@ export const DEFAULT_SETTINGS = {
 /** Preferences only (theme, which Kin is selected, the local-mode name, the automatic-update schedule). */
 export class Settings {
   constructor(storage) { this.storage = storage; this.value = { ...DEFAULT_SETTINGS }; this.queue = Promise.resolve(); }
-  async load() {
-    try { this.value = { ...DEFAULT_SETTINGS, ...(JSON.parse(await this.storage.get(SETTINGS_KEY)) || {}) }; } catch { /* first run or unreadable: defaults */ }
+
+  /** Loads the saved preferences. Unreadable content gives the defaults; with `strict`, a storage failure is thrown. */
+  async load({ strict = false } = {}) {
+    let text;
+    try { text = await this.storage.get(SETTINGS_KEY); } catch (e) { if (strict) throw e; return this.value; }
+    try { this.value = { ...DEFAULT_SETTINGS, ...(JSON.parse(text) || {}) }; } catch { /* first run or corrupt: defaults */ }
     return this.value;
   }
-  /** Updates and saves; writes are serialised so two quick changes cannot overwrite each other. */
+
+  /**
+   * Updates and saves; writes are serialised so two quick changes cannot overwrite each other.
+   * Resolves true when the change was stored. If storing fails, the change is taken back and false is returned,
+   * so the screen never claims a setting the scheduled run cannot see.
+   */
   save(patch) {
+    const before = Object.fromEntries(Object.keys(patch).map((k) => [k, this.value[k]]));
     this.value = { ...this.value, ...patch };
     const snapshot = JSON.stringify(this.value);
-    this.queue = this.queue.then(() => this.storage.set(SETTINGS_KEY, snapshot)).catch(() => {});
-    return this.queue;
+    const done = this.queue
+      .then(() => this.storage.set(SETTINGS_KEY, snapshot))
+      .then(() => true, () => { this.value = { ...this.value, ...before }; return false; });
+    this.queue = done;
+    return done;
   }
 }

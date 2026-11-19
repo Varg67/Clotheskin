@@ -5,7 +5,8 @@ import { parseReading, describeReading, poseIcon } from '../core/outfit.js';
 import { formatClock, formatRelative } from '../core/format.js';
 import { DEMO_SCENES } from '../demo/demo.js';
 import { ReadingStore } from '../core/readings.js';
-import { normalizeInterval, effectiveMinutes, SCHEDULE_TICK_MINUTES, AUTO_MIN_MINUTES, AUTO_MAX_MINUTES } from '../core/auto.js';
+import { normalizeInterval, effectiveMinutes, retryWaitMinutes, SCHEDULE_TICK_MINUTES, AUTO_MIN_MINUTES, AUTO_MAX_MINUTES } from '../core/auto.js';
+import { PERMANENT_KINDS } from '../core/errors.js';
 
 export const THEMES = [
   { id: 'warm', label: 'Kindroid warm (default)' },
@@ -41,6 +42,9 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     reading: new Set(), // kin ids with a reading in progress
     info: null, // { kind, text } for the selected Kin
     pending: null, // local mode: { id, prompt } waiting for the pasted answer
+    slow: new Set(), // Workshop: Kins whose reading is taking longer than usual
+    slowAfterMs: 15000,
+    autoNote: null, // a message inside the automatic-updates settings (e.g. a setting that could not be saved)
     responseDraft: '',
     chatDraft: '', // memory only: a pasted conversation is never written to storage
     readerOpen: !isWorkshop,
@@ -133,16 +137,25 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
 
   const announceResult = (id) => S.errors.get(id) || (S.results.get(id) ? `${S.results.get(id).location} ${S.results.get(id).doing} ${S.results.get(id).outfit}` : '');
 
+  /** What the person should read when the Workshop itself does not answer (the connection, not the Kin). */
+  const friendlyHostError = (e) => (/did not answer/i.test(e.message)
+    ? 'Kindroid did not answer in time. Check your connection and try again. Your last reading is still shown.'
+    : e.message);
+
   /** Workshop: the run asks the Kin about its recent chat. The reading belongs to the Kin it started for. */
   async function readInWorkshop(kin) {
     if (S.reading.has(kin.id)) return; // repeated clicks join the reading in progress
     S.reading.add(kin.id); S.info = null; render();
+    // A slow Kin is not a failed Kin: say so after a while, instead of leaving a spinner with no explanation.
+    const slowTimer = setTimeout(() => { if (S.reading.has(kin.id)) { S.slow.add(kin.id); render(); } }, S.slowAfterMs);
     try {
       const r = await host.channel.runAction('read_outfit', { kin: kin.id, name: kin.name });
       show(kin.id, r.ok ? readSummary(r.summary) : { ok: false, error: r.summary || 'The reading could not be completed.' });
     } catch (e) {
-      show(kin.id, { ok: false, error: e.message });
+      show(kin.id, { ok: false, error: friendlyHostError(e) });
     }
+    clearTimeout(slowTimer);
+    S.slow.delete(kin.id);
     S.reading.delete(kin.id);
     announce(announceResult(kin.id));
     render();
@@ -191,6 +204,18 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
       h('p', { class: 'help' }, 'Kindroid themes are customisable. Matching yours automatically depends on the Workshop exposing theme colours, which has not been confirmed yet.'));
   }
 
+  /** Why the last automatic check failed and what happens next, without comparing clocks. */
+  function autoFailureText(stored) {
+    const interval = normalizeInterval(settings.value.autoIntervalMinutes);
+    const wait = retryWaitMinutes(stored, interval);
+    const rows = [`The last automatic check failed: ${stored.error}`];
+    if (stored.failures > 1) rows.push(`${stored.failures} checks in a row have failed.`);
+    rows.push(PERMANENT_KINDS.has(stored.errorKind)
+      ? 'Retrying sooner will not help: fix the cause, then press Try again.'
+      : `Trying again about ${wait} minutes after the last attempt.`);
+    return rows; // one line each: the reason, how many in a row, what happens next
+  }
+
   function renderCard() {
     const kin = selectedKin();
     if (!kin) {
@@ -207,7 +232,7 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     const stored = S.cached.get(kin.id);
     // A stored error stands until a later success clears it (the run does that). No clocks are compared: the screen
     // and the run may disagree about the time.
-    const autoFailed = !S.errors.has(kin.id) && stored?.error ? `The last automatic check failed: ${stored.error}` : null;
+    const autoFailed = !S.errors.has(kin.id) && stored?.error ? autoFailureText(stored) : null;
     const error = S.errors.get(kin.id) || autoFailed;
     const now = clock();
     return h('section', { class: 'card', 'aria-label': `${kin.name} status` },
@@ -230,10 +255,11 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
             h('span', { class: 'fact-text' }, h('span', { class: 'row-label' }, 'Outfit'),
               h('span', { class: 'fact-value', 'data-testid': 'outfit' }, result ? result.outfit : 'No outfit read yet. Press Update status.')))),
         h('button', { type: 'button', class: 'btn primary block', 'data-key': 'update', 'aria-busy': String(reading), onClick: update },
-          reading ? [spinner(), isWorkshop ? 'Reading…' : 'Waiting for the answer…'] : [icon('refresh', { size: 18 }), 'Update status']),
+          reading ? [spinner(), isWorkshop ? (S.slow.has(kin.id) ? 'Still waiting for the Kin…' : 'Reading…') : 'Waiting for the answer…'] : [icon('refresh', { size: 18 }), 'Update status']),
+        reading && S.slow.has(kin.id) ? h('p', { class: 'help', 'data-testid': 'slow-note' }, 'The Kin is taking longer than usual. This can take up to a minute. You can keep using the app.') : null,
         h('p', { class: 'meta', 'data-testid': 'last-checked' }, 'Last checked: ',
           result ? [h('time', { datetime: result.at }, formatClock(result.at, { now })), ' · ', h('span', { class: 'rel', 'data-iso': result.at }, formatRelative(result.at, now)), result.source === 'auto' ? ' · automatic' : null] : 'never'),
-        error ? h('div', { class: 'banner error', role: 'alert', 'data-testid': 'banner' }, icon('alert', { size: 18 }), h('span', { class: 'banner-text' }, error),
+        error ? h('div', { class: 'banner error', role: 'alert', 'data-testid': 'banner' }, icon('alert', { size: 18 }), h('span', { class: 'banner-text' }, ...[].concat(error).map((line, i) => h('span', { class: `banner-line${i === 0 ? ' first' : ''}` }, line))),
           h('button', { type: 'button', class: 'btn small', 'data-key': 'retry', onClick: update }, 'Try again'))
           : S.info ? h('div', { class: `banner ${S.info.kind}`, role: 'status', 'data-testid': 'banner' }, icon('refresh', { size: 18 }), h('span', { class: 'banner-text' }, S.info.text)) : null));
   }
@@ -283,6 +309,8 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     const ticked = new Set((settings.value.autoKins || []).map((k) => k.id));
     const kin = selectedKin();
     const stored = kin ? S.cached.get(kin.id) : null;
+    // A setting the Workshop could not store is taken back (see Settings.save): say so, because the scheduled run would not see it.
+    const noteSave = (ok) => { S.autoNote = ok ? null : 'Could not save this setting: the Workshop did not respond. Nothing was changed; try again.'; };
     const saveKins = (set) => settings.save({ autoKins: S.kins.filter((k) => set.has(k.id)).map((k) => ({ id: k.id, name: k.name })) });
     return h('div', { class: 'auto-block' },
       h('h3', { class: 'sub' }, 'Automatic updates'),
@@ -292,15 +320,15 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
           onChange: async (e) => {
             const enable = e.target.checked;
             if (enable && !ticked.size && kin) ticked.add(kin.id); // switching it on must ask someone: start with the selected Kin
-            await settings.save({ autoUpdate: enable });
-            if (enable) await saveKins(ticked);
-            announce(enable ? 'Automatic updates on' : 'Automatic updates off'); render();
+            const ok = (await settings.save({ autoUpdate: enable })) && (!enable || (await saveKins(ticked)));
+            noteSave(ok);
+            announce(ok ? (enable ? 'Automatic updates on' : 'Automatic updates off') : S.autoNote); render();
           } }),
         'Update automatically'),
       h('label', { class: 'label', for: 'auto-interval' }, 'Ask every (minutes)'),
       h('input', { type: 'number', id: 'auto-interval', class: 'text-input', 'data-key': 'auto-interval', min: String(AUTO_MIN_MINUTES), max: String(AUTO_MAX_MINUTES), step: '1', value: String(minutes), disabled: !isWorkshop,
         'aria-describedby': 'auto-interval-help',
-        onChange: async (e) => { const n = normalizeInterval(e.target.value); e.target.value = String(n); await settings.save({ autoIntervalMinutes: n }); render(); } }),
+        onChange: async (e) => { const n = normalizeInterval(e.target.value); e.target.value = String(n); noteSave(await settings.save({ autoIntervalMinutes: n })); render(); } }),
       h('p', { class: 'help', id: 'auto-interval-help' }, eff === minutes
         ? `Between ${AUTO_MIN_MINUTES} minutes and 24 hours.`
         : `The Workshop wakes the app every ${SCHEDULE_TICK_MINUTES} minutes, so ${minutes} minutes behaves like ${eff}.`),
@@ -308,9 +336,10 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
         h('legend', {}, 'Which Kins'),
         ...S.kins.map((k) => h('label', { class: 'check' },
           h('input', { type: 'checkbox', id: `auto-kin-${k.id}`, 'data-key': `auto-kin-${k.id}`, checked: ticked.has(k.id),
-            onChange: async (e) => { if (e.target.checked) ticked.add(k.id); else ticked.delete(k.id); await saveKins(ticked); render(); } }),
+            onChange: async (e) => { if (e.target.checked) ticked.add(k.id); else ticked.delete(k.id); noteSave(await saveKins(ticked)); render(); } }),
           displayName(k)))) : null,
       isWorkshop && kin && stored?.attemptedAt ? h('p', { class: 'help', 'data-testid': 'auto-status' }, `Last check for ${displayName(kin)}: `, h('span', { class: 'rel', 'data-iso': stored.attemptedAt }, formatRelative(stored.attemptedAt, clock())), stored.error ? ' (failed)' : '') : null,
+      S.autoNote ? h('p', { class: 'form-error', role: 'alert', 'data-testid': 'auto-note' }, S.autoNote) : null,
       h('p', { class: 'help' }, 'Each check asks the Kin one question and uses running time from your credits. Only the latest reading of each Kin is kept, so it can be shown when you open the app.'));
   }
 
@@ -349,5 +378,5 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
   }
 
   render();
-  return { S, render, selectedKin, pollNow: pollReading };
+  return { S, render, selectedKin, pollNow: pollReading, host };
 }

@@ -197,3 +197,10 @@ dialog.sheet.wide { width: min(760px, 100vw - 64px); }
 .auto-block { display: grid; gap: 6px; }
 .auto-kins { border: 1px solid var(--line-soft); border-radius: var(--radius-sm); padding: 6px 14px 10px; margin: 4px 0; }
 .auto-kins legend { padding: 0 6px; font-size: .85rem; color: var(--muted); font-weight: 650; }
+
+/* Banners with several lines (a failure: the reason, how many in a row, what happens next) */
+.banner { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 8px; align-items: start; }
+.banner .btn { grid-column: 2; justify-self: start; }
+.banner-line { display: block; }
+.banner-line.first { font-weight: 600; }
+.banner-line + .banner-line { margin-top: 2px; color: var(--muted); font-size: .88rem; }

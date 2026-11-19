@@ -47,12 +47,32 @@ Stored: small preferences (theme, selected Kin, local character name, the automa
 In **Settings → Automatic updates**: switch it on, set **Ask every (minutes)** (5 to 1,440; default 15) and tick the Kins to follow. Switching it on ticks the selected Kin.
 
 - The Workshop cannot change a schedule at run time (`kin.json` is fixed), so the program is woken on one fixed beat (every 5 minutes, `*/5 * * * *`, set in `scripts/build-manifest.mjs`). Each run reads your settings and asks only the Kins that are due, so any interval is possible, rounded up to a multiple of 5 (the screen says so: "7 minutes behaves like 10").
-- A Kin is due when the interval has passed since its last **attempt**. A failure counts as an attempt, so a failing Kin is retried at the next interval, not on every beat, and keeps its last good sentences. A manual **Update status** restarts the clock, so a Kin is not asked twice in a row.
+- A Kin is due when the interval has passed since its last **attempt**. A failed attempt keeps the last good sentences and is retried after a short backoff (5, 10, 20… minutes, never more than the interval), not on every beat; a permission problem waits the whole interval. A manual **Update status** restarts the clock, so a Kin is not asked twice in a row.
 - At most 3 Kins are asked per beat (each is one question and a run has a time limit); the rest follow on the next beats, longest-waiting first. The attempt is marked **before** the question is sent, so a beat that starts while a previous one is still waiting for the Kin skips it. Two runs that start at the very same instant could still both ask; the platform may or may not serialise runs, which the guide does not say.
 - The screen shows the stored reading when you open it ("Last checked … · automatic") and notices a new one every 20 seconds and when it regains focus. A failed automatic check shows "The last automatic check failed: …" under the card without erasing the last good sentences.
 - Logic: `screen/src/core/auto.js` (interval, who is due), `screen/src/core/readings.js` (the stored reading), `run/actions.js` (the beat). Corrupt or missing settings mean **off**, never a burst of questions.
 - **Cost:** every check is a `kin ask` plus running time, which the guide says uses your credits; it does not say how much. The beat itself also wakes the app every 5 minutes even when automatic updates are off (a run that does nothing and ends at once). Nothing is asked unless the setting is on.
 - Local mode shows the section disabled with the reason: there is no Kin to ask on a schedule.
+
+## When something goes wrong
+
+The Kin or the connection can fail at any time: the model down or overloaded, a lag, a dropped connection, a rate limit, a missing permission. The app never loses the **last good reading** because of a failure, never hammers a failing Kin, and says what happened in plain English.
+
+| What happened | What the app does |
+|---|---|
+| The `kin ask` takes too long (70 s) | the process is stopped (SIGTERM, then SIGKILL two seconds later if it ignores it), reported as "The Kin did not answer in time"; not retried at once, because it already cost a minute |
+| Connection error, model unavailable or overloaded, rate limit | classified (`screen/src/core/errors.js`) and reported ("The Kin or its model is unavailable right now"); **Update status** retries once after 2 seconds, scheduled beats do not retry inside the run |
+| Missing permission (`403`, `grant`) | reported with what to do ("check Apps, Waiting for you"); **not** retried sooner than the interval, since asking again cannot help |
+| The `kin` command cannot start | reported as such; same as a permission problem |
+| The Kin answers in character or the answer is cut | "not valid JSON … Nothing was changed"; counts as a failure |
+| The Workshop itself does not answer the screen | "Kindroid did not answer in time. Check your connection and try again. Your last reading is still shown."; a reply that arrives late, after the screen gave up, is ignored |
+| The Kin is just slow | after 15 s the button says "Still waiting for the Kin…" and a note says it can take up to a minute |
+| A stored file cannot be **read** (not "missing") | that Kin is skipped, never overwritten: asking and saving could replace sentences that are fine. Unreadable **settings** end the beat as failed ("Could not read the settings"), they are not guessed as on or off |
+| A setting cannot be **saved** | it is taken back and the screen says "Could not save this setting…", so you never believe automatic updates are on when the scheduled run cannot see it |
+
+**Automatic checks after a failure** do not wait a whole interval, because a two-minute outage should not mean an hour without updates. The wait starts at one beat and doubles (5, 10, 20, 40 minutes…) up to your interval, then resets on the first success. A failure also shows under the card: the reason, how many checks in a row failed, and when it will try again. A beat stops starting new questions when there is not room left in the run's time limit; whoever is left goes first next time.
+
+`tests/failures.test.js` covers all of this, including a fake `kin` process that hangs and one that ignores the stop signal.
 
 ## Look and feel
 

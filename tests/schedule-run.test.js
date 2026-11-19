@@ -73,25 +73,29 @@ test('changing the interval changes what happens at the next beat', async () => 
   assert.equal(t.asked.length, 2, 'switched off: nothing more');
 });
 
-test('a failing Kin is retried at the next interval, not on every beat, and keeps its last good sentences', async () => {
-  const t = await setup();
+test('a failing Kin is retried SOONER than the interval (a short backoff), and keeps its last good sentences', async () => {
+  const t = await setup({ autoIntervalMinutes: 60 });
   await t.run(T0); // good reading
   t.setAnswer(async () => '*giggles* No forms today!');
-  const out = await t.run(plus(15));
+  const out = await t.run(plus(60));
   assert.equal(out.ok, false);
   assert.match(out.message, /Isa failed/);
   assert.match(out.message, /not valid JSON/);
   let r = await t.readings.get('k-isa');
   assert.equal(r.location, 'In the kitchen.');
-  assert.equal(r.at, T0.toISOString());
-  assert.equal(r.attemptedAt, plus(15).toISOString());
-  assert.match(r.error, /not valid JSON/);
-  assert.equal((await t.run(plus(20))).message, 'No Kin is due yet.', 'no retry storm');
+  assert.equal(r.at, T0.toISOString(), 'the time of the last GOOD reading is kept');
+  assert.equal(r.attemptedAt, plus(60).toISOString());
+  assert.deepEqual([r.failures, r.errorKind], [1, 'bad-answer']);
+  assert.equal((await t.run(plus(60 + 2))).message, 'No Kin is due yet.', 'not on every beat');
+  const asked = t.asked.length;
+  await t.run(plus(60 + 5)); // first backoff: one beat
+  assert.equal(t.asked.length, asked + 1, 'asked again after 5 minutes, not after an hour');
+  assert.equal((await t.readings.get('k-isa')).failures, 2);
+  assert.equal((await t.run(plus(60 + 10))).message, 'No Kin is due yet.', 'the second backoff is longer (10 minutes)');
   t.setAnswer(async () => '{"location":"at the park"}');
-  await t.run(plus(30));
+  await t.run(plus(60 + 15));
   r = await t.readings.get('k-isa');
-  assert.equal(r.location, 'At the park.');
-  assert.equal(r.error, null);
+  assert.deepEqual([r.location, r.error, r.failures, r.errorKind], ['At the park.', null, 0, null], 'a success resets everything');
 });
 
 test('several Kins: each is asked on its own, one failure does not stop the others, same-name Kins stay apart', async () => {
@@ -192,7 +196,7 @@ test('a beat that starts while the previous one is still waiting for the Kin doe
   assert.equal((await t.readings.get('k-isa')).location, 'In the kitchen.');
 });
 
-test('a run that dies after claiming leaves the last good sentences and retries at the next interval, not at once', async () => {
+test('a run that dies after claiming leaves the last good sentences and is retried by the backoff, not at once', async () => {
   const t = await setup();
   await t.run(T0);
   t.setAnswer(async () => { throw new Error('the container was stopped'); });
@@ -200,5 +204,28 @@ test('a run that dies after claiming leaves the last good sentences and retries 
   const r = await t.readings.get('k-isa');
   assert.equal(r.location, 'In the kitchen.');
   assert.equal(r.attemptedAt, plus(15).toISOString());
-  assert.equal((await t.run(plus(20))).message, 'No Kin is due yet.');
+  assert.equal((await t.run(plus(17))).message, 'No Kin is due yet.');
+});
+
+test('the end line of a beat fits the 500 characters kin end allows, even with many long names', async () => {
+  const kins = Array.from({ length: 3 }, (_, i) => ({ id: `k${i}`, name: `A Kin With A Really Quite Long Name Number ${i} `.repeat(3) }));
+  const t = await setup({ autoKins: kins });
+  t.setAnswer(async () => { throw new Error('x'.repeat(900)); });
+  const out = await t.run(T0);
+  assert.ok(out.message.length <= 480, `${out.message.length}`);
+});
+
+test('a beat that starts while the previous one is still waiting for the Kin does not ask the same Kin again', async () => {
+  const t = await setup();
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  t.setAnswer(async () => { await gate; return '{"location":"in the kitchen"}'; });
+  const first = t.run(T0);
+  while (t.asked.length === 0) await new Promise((r) => setTimeout(r, 1)); // the first beat is now waiting for the Kin
+  const second = await t.run(plus(5));
+  assert.equal(second.message, 'No Kin is due yet.', 'the claim is already stored');
+  assert.equal(t.asked.length, 1);
+  release();
+  assert.equal((await first).ok, true);
+  assert.equal((await t.readings.get('k-isa')).location, 'In the kitchen.');
 });

@@ -27,7 +27,7 @@ window.addEventListener('message', async (e) => {
   const m = e.data; if (!m || typeof m.kin !== 'string') return;
   if (m.kin === 'kins') return window.pushKins();
   if (m.kin === 'files.read') return reply({ kin: 'files.read', path: m.path, body: await window.hostRead(m.path) });
-  if (m.kin === 'files.write') { await window.hostWrite(m.path, m.body); return reply({ kin: 'files.write', path: m.path, ok: true }); }
+  if (m.kin === 'files.write') { const ok = await window.hostWrite(m.path, m.body); return reply({ kin: 'files.write', path: m.path, ok: ok !== false }); }
   if (m.kin === 'action') { const r = await window.hostAction(m.name, m.input); return reply({ kin: 'action', name: m.name, ok: r.ok, summary: r.message }); }
 });
 </script></body></html>`;
@@ -64,10 +64,11 @@ window.addEventListener('message', async (e) => {
   await page.route('**/__parent.html', (route) => route.fulfill({ contentType: 'text/html', body: PARENT }));
   await page.exposeFunction('hostKins', () => kins);
   await page.exposeFunction('hostRead', (p) => (files.has(p) && files.get(p) !== '' ? files.get(p) : null));
-  await page.exposeFunction('hostWrite', (p, body) => { files.set(p, body); });
+  let failWrites = false; // the Workshop refuses to save: a flaky connection
+  await page.exposeFunction('hostWrite', (p, body) => { if (failWrites) return false; files.set(p, body); return true; });
   // The platform's schedule beat. The test chooses the clock so time can pass without waiting.
-  await page.exposeFunction('hostSchedule', (iso) => handleRun({ event: { trigger: 'schedule' }, provider, storage: nodeStorage, clock: () => new Date(iso) }));
-  await page.exposeFunction('hostAction', async (name, input) => { await new Promise((r) => setTimeout(r, delay)); const r = await handleRun({ event: { trigger: 'action', action: name, input }, provider, storage: nodeStorage }); return plainSummary && r.ok ? { ...r, message: JSON.parse(r.message).outfit } : r; });
+  await page.exposeFunction('hostSchedule', (iso) => handleRun({ event: { trigger: 'schedule' }, provider, storage: nodeStorage, clock: () => new Date(iso), sleep: async () => {} }));
+  await page.exposeFunction('hostAction', async (name, input) => { await new Promise((r) => setTimeout(r, delay)); const r = await handleRun({ event: { trigger: 'action', action: name, input }, provider, storage: nodeStorage, sleep: async () => {} }); return plainSummary && r.ok ? { ...r, message: JSON.parse(r.message).outfit } : r; });
 
   await page.goto(`${base}/__parent.html`);
   const fr = page.frameLocator('#f');
@@ -179,7 +180,7 @@ window.addEventListener('message', async (e) => {
     assert.equal(asked.length, before, 'showing it cost no question');
     assert.match(await fr.locator('[data-testid="last-checked"]').innerText(), /Last checked: \d{1,2}:\d{2} (AM|PM)/);
     const stored = readingFile('k-isa');
-    assert.deepEqual(Object.keys(stored).sort(), ['at', 'attemptedAt', 'doing', 'error', 'location', 'outfit', 'source']);
+    assert.deepEqual(Object.keys(stored).sort(), ['at', 'attemptedAt', 'doing', 'error', 'errorKind', 'failures', 'location', 'outfit', 'source']);
     assert.equal(stored.source, 'manual');
   });
 
@@ -274,6 +275,123 @@ window.addEventListener('message', async (e) => {
     assert.equal(asked.length, before);
   });
 
+  const openSettings = async () => { if (!(await fr.locator('#auto-enable').isVisible())) await key('reader-summary').click(); };
+
+  await step('the model is down: Update status says so plainly, retries once, keeps the last reading, and recovers', async () => {
+    await pick('k-isa');
+    const prev = { where: await where(), doing: await doing(), outfit: await outfit() };
+    const before = asked.length;
+    kinAnswer = async () => { throw new Error('503 Service Unavailable: the model is overloaded'); };
+    await key('update').click(); await idle();
+    const b = fr.locator('[data-testid="banner"]');
+    assert.equal(await b.getAttribute('role'), 'alert');
+    assert.match(await b.innerText(), /The Kin or its model is unavailable right now\./);
+    assert.match(await b.innerText(), /503/);
+    assert.equal(asked.length, before + 2, 'one quick retry, then it gives up');
+    assert.deepEqual({ where: await where(), doing: await doing(), outfit: await outfit() }, prev, 'the last reading is still shown');
+    kinAnswer = async () => JSON.stringify({ location: 'in the lab', topwear: ['a lab coat'] });
+    await key('retry').click(); await idle();
+    assert.equal(await where(), 'In the lab.');
+    assert.equal(await fr.locator('[data-testid="banner"]').count(), 0);
+  });
+
+  await step('a slow Kin is not a failed Kin: the card says it is still waiting, and the answer still arrives', async () => {
+    await frameEval(() => { window.__clotheskin.S.slowAfterMs = 300; });
+    delay = 1500;
+    kinAnswer = async () => JSON.stringify({ location: 'in the lab', pose: 'sitting', action: 'writing notes', topwear: ['a lab coat'] });
+    await key('update').click();
+    await until(async () => /Still waiting for the Kin/.test(await key('update').innerText()), 'the slow message');
+    assert.match(await fr.locator('[data-testid="slow-note"]').innerText(), /taking longer than usual/);
+    assert.equal(await key('update').getAttribute('aria-busy'), 'true');
+    await idle();
+    assert.equal(await fr.locator('[data-testid="slow-note"]').count(), 0);
+    assert.equal(await doing(), 'Sitting, writing notes.');
+    assert.match(await key('update').innerText(), /Update status/);
+    delay = 350;
+    await frameEval(() => { window.__clotheskin.S.slowAfterMs = 15000; });
+  });
+
+  await step('Kindroid itself does not answer (the connection): a clear message, the last reading kept, late answers ignored', async () => {
+    const prev = await where();
+    await frameEval(() => { window.__clotheskin.host.channel.timeouts.action = 400; });
+    delay = 2500;
+    kinAnswer = async () => JSON.stringify({ location: 'on the moon' });
+    await key('update').click(); await idle();
+    const b = fr.locator('[data-testid="banner"]');
+    assert.match(await b.innerText(), /Kindroid did not answer in time\. Check your connection and try again\. Your last reading is still shown\./);
+    assert.equal(await where(), prev, 'nothing changed');
+    await frameEval(() => { window.__clotheskin.host.channel.timeouts.action = 150000; });
+    delay = 350;
+    await page.waitForTimeout(2400); // the slow run finishes in the background and its late reply must be ignored
+    assert.equal(await where(), prev, 'a late answer to a request already given up on does not appear');
+    kinAnswer = async () => JSON.stringify({ location: 'in the lab', pose: 'sitting', action: 'writing notes', topwear: ['a lab coat'] });
+    await key('retry').click(); await idle();
+    assert.equal(await fr.locator('[data-testid="banner"]').count(), 0);
+  });
+
+  await step('automatic failures: the card says why and when it will try again; a permission problem says it will not retry sooner', async () => {
+    await openSettings();
+    await fr.locator('#auto-interval').fill('60'); await fr.locator('#auto-interval').blur();
+    await until(async () => savedSettings().autoIntervalMinutes === 60, 'interval 60 saved');
+    await fr.locator('#auto-enable').check();
+    await until(async () => savedSettings().autoUpdate === true, 'on');
+    kinAnswer = async () => { throw new Error('503 Service Unavailable'); };
+    const before = asked.length;
+    let r = await beat(61);
+    assert.equal(r.ok, false);
+    await poll();
+    const b = fr.locator('[data-testid="banner"]');
+    await b.waitFor();
+    let text = await b.innerText();
+    assert.match(text, /The last automatic check failed: The Kin or its model is unavailable right now\./);
+    assert.match(text, /Trying again about 5 minutes after the last attempt\./);
+    assert.ok(!/in a row/.test(text), 'one failure is not "in a row"');
+    const asks = asked.slice(before);
+    assert.equal(new Set(asks).size, asks.length, 'scheduled beats do not retry inside the run: each ticked Kin is asked once');
+    assert.match((await beat(61 + 2)).message, /No Kin is due yet/, 'not on every beat');
+    r = await beat(61 + 6);
+    assert.equal(r.ok, false);
+    await poll();
+    await until(async () => /2 checks in a row have failed\.\s+Trying again about 10 minutes/.test(await b.innerText()), 'second failure explained');
+    kinAnswer = async () => { throw new Error('403 Forbidden: grant chat:read is missing'); };
+    await beat(61 + 6 + 11);
+    await poll();
+    await until(async () => /3 checks in a row[\s\S]*Retrying sooner will not help: fix the cause, then press Try again\./.test(await b.innerText()), 'permission explained');
+    assert.match(await b.innerText(), /refused the question/);
+    await b.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(SHOTS, '13-workshop-failure-explained.png') });
+    const asked2 = asked.length;
+    assert.match((await beat(61 + 6 + 11 + 30)).message, /No Kin is due yet/, 'a permission problem is not retried at the backoff');
+    assert.equal(asked.length, asked2);
+    assert.equal(await where(), 'In the lab.', 'the last good place is still shown through all of it');
+    kinAnswer = async () => JSON.stringify({ location: 'at home', topwear: ['a hoodie'] });
+    await key('retry').click(); await idle();
+    assert.equal(await fr.locator('[data-testid="banner"]').count(), 0, 'a success clears the failure');
+    assert.equal(readingFile('k-isa').failures, 0);
+    await openSettings();
+    await fr.locator('#auto-enable').uncheck();
+    await until(async () => savedSettings().autoUpdate === false, 'off again');
+  });
+
+  await step('a setting the Workshop cannot save is taken back and reported; it works again once the connection does', async () => {
+    await openSettings();
+    failWrites = true;
+    await fr.locator('#auto-enable').check();
+    const note = fr.locator('[data-testid="auto-note"]');
+    await note.waitFor();
+    assert.equal(await note.getAttribute('role'), 'alert');
+    assert.match(await note.innerText(), /Could not save this setting: the Workshop did not respond\. Nothing was changed; try again\./);
+    assert.equal(await fr.locator('#auto-enable').isChecked(), false, 'the switch shows the truth: it is still off');
+    assert.equal(savedSettings().autoUpdate, false);
+    failWrites = false;
+    await fr.locator('#auto-enable').check();
+    await until(async () => savedSettings().autoUpdate === true, 'saved once the connection works');
+    assert.equal(await fr.locator('[data-testid="auto-note"]').count(), 0, 'the note goes away');
+    await fr.locator('#auto-enable').uncheck();
+    await until(async () => savedSettings().autoUpdate === false, 'off again');
+    await page.screenshot({ path: path.join(SHOTS, '14-workshop-save-failed.png') });
+  });
+
   await step('an older run that ended with plain text is still shown (as the outfit, without place, pose or action)', async () => {
     plainSummary = true;
     kinAnswer = async () => '{"location":"at home","topwear":["a hoodie"]}';
@@ -308,7 +426,7 @@ window.addEventListener('message', async (e) => {
     assert.ok(names.includes(SETTINGS));
     for (const n of names.filter((x) => x !== SETTINGS)) {
       const o = JSON.parse(files.get(n));
-      assert.deepEqual(Object.keys(o).sort(), ['at', 'attemptedAt', 'doing', 'error', 'location', 'outfit', 'source'], n);
+      assert.deepEqual(Object.keys(o).sort(), ['at', 'attemptedAt', 'doing', 'error', 'errorKind', 'failures', 'location', 'outfit', 'source'], n);
     }
     assert.deepEqual(Object.keys(savedSettings()).sort(), ['autoIntervalMinutes', 'autoKins', 'autoUpdate', 'localName', 'selectedKinId', 'theme']);
     await page.screenshot({ path: path.join(SHOTS, '10-workshop-settings-sage.png') });

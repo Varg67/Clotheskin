@@ -68,9 +68,10 @@ test('a stored reading keeps only sentences and times; a failure keeps the last 
   const good = afterAttempt(null, { now: T0, source: 'auto', sentences: { location: 'In the kitchen.', doing: 'Standing.', outfit: 'Wearing jeans.' } });
   await store.put('k', good);
   const got = await store.get('k');
-  assert.deepEqual(got, { at: T0.toISOString(), attemptedAt: T0.toISOString(), source: 'auto', location: 'In the kitchen.', doing: 'Standing.', outfit: 'Wearing jeans.', error: null });
-  assert.deepEqual(Object.keys(got).sort(), ['at', 'attemptedAt', 'doing', 'error', 'location', 'outfit', 'source']);
-  const failed = afterAttempt(got, { now: plus(15), source: 'auto', error: 'The Kin could not be asked' });
+  assert.deepEqual(got, { at: T0.toISOString(), attemptedAt: T0.toISOString(), source: 'auto', location: 'In the kitchen.', doing: 'Standing.', outfit: 'Wearing jeans.', error: null, failures: 0, errorKind: null });
+  assert.deepEqual(Object.keys(got).sort(), ['at', 'attemptedAt', 'doing', 'error', 'errorKind', 'failures', 'location', 'outfit', 'source']);
+  const failed = afterAttempt(got, { now: plus(15), source: 'auto', error: 'The Kin could not be asked', kind: 'unavailable' });
+  assert.deepEqual([failed.failures, failed.errorKind], [1, 'unavailable']);
   assert.equal(failed.location, 'In the kitchen.');
   assert.equal(failed.at, T0.toISOString(), 'the time of the last GOOD reading is kept');
   assert.equal(failed.attemptedAt, plus(15).toISOString());

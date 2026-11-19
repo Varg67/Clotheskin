@@ -1,3 +1,5 @@
+import { PERMANENT_KINDS } from './errors.js';
+
 // Automatic updates. The Workshop can only fire a schedule at a fixed beat (kin.json is not editable at run time),
 // so the program is woken every SCHEDULE_TICK_MINUTES and each run decides who is due, from the interval the person set.
 export const SCHEDULE_TICK_MINUTES = 5;
@@ -14,6 +16,18 @@ export function normalizeInterval(v) {
   const n = Math.round(Number(v));
   if (!Number.isFinite(n)) return AUTO_DEFAULT_MINUTES;
   return Math.min(AUTO_MAX_MINUTES, Math.max(AUTO_MIN_MINUTES, n));
+}
+
+/**
+ * How long to wait after the last attempt. Normally the interval. After failures the wait starts at one beat and
+ * doubles (5, 10, 20, 40 minutes…) up to the interval, so a short outage is noticed soon without hammering the Kin.
+ * A permanent failure (a missing permission) waits the whole interval: asking sooner cannot help.
+ */
+export function retryWaitMinutes(reading, intervalMinutes) {
+  const interval = normalizeInterval(intervalMinutes);
+  const failures = Math.max(0, Math.floor(Number(reading?.failures) || 0));
+  if (!failures || !reading?.error || PERMANENT_KINDS.has(reading.errorKind)) return interval;
+  return Math.min(interval, SCHEDULE_TICK_MINUTES * 2 ** Math.min(failures - 1, 12));
 }
 
 /** What really happens: checks only happen on the schedule beat, so the interval rounds up to a multiple of it. */
@@ -43,7 +57,7 @@ export function pickDue({ now, kins, readings, intervalMinutes, max = AUTO_MAX_K
     if (!k || typeof k.id !== 'string' || !k.id || seen.has(k.id)) continue;
     seen.add(k.id);
     const attemptedAt = readings?.[k.id]?.attemptedAt ?? null;
-    if (isDue({ now, attemptedAt, intervalMinutes })) due.push({ kin: { id: k.id, name: String(k.name || k.id) }, waited: ms(attemptedAt) ?? 0 });
+    if (isDue({ now, attemptedAt, intervalMinutes: retryWaitMinutes(readings?.[k.id], intervalMinutes) })) due.push({ kin: { id: k.id, name: String(k.name || k.id) }, waited: ms(attemptedAt) ?? 0 });
   }
   return due.sort((a, b) => a.waited - b.waited).slice(0, max).map((d) => d.kin);
 }

@@ -31,6 +31,7 @@ export const DEFAULT_SETTINGS = {
   conversationId: '',
   drafts: {},
   expanded: true,
+  theme: 'warm', // 'warm' (stock Kindroid) | 'sage' (green, sampled from a customised desktop window)
 };
 
 export class Repository {

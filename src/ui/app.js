@@ -13,6 +13,19 @@ import {
 } from '../core/summary.js';
 import { DEMO_SCENES, DEMO_PROFILE_ID, seedDemo } from '../demo/demo.js';
 
+export const THEMES = [
+  { id: 'warm', label: 'Kindroid warm (default)' },
+  { id: 'sage', label: 'Sage green' },
+];
+
+function applyTheme(id) {
+  const theme = THEMES.some((t) => t.id === id) ? id : 'warm';
+  if (theme === 'warm') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = theme;
+  const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', bg);
+}
+
 const REQUIRED_PLACEHOLDERS = ['{{target_character}}', '{{previous_state_json}}', '{{speaker_labeled_messages}}'];
 
 export async function startApp({ root, repo, host, clock = () => new Date() }) {
@@ -32,6 +45,7 @@ export async function startApp({ root, repo, host, clock = () => new Date() }) {
     promptEditor: false,
   };
 
+  applyTheme(S.settings.theme);
   await seedDemo(repo);
   const live = h('div', { class: 'sr-only', role: 'status', 'aria-live': 'polite' });
   document.body.append(live);
@@ -301,6 +315,14 @@ export async function startApp({ root, repo, host, clock = () => new Date() }) {
           h('button', { type: 'button', class: 'btn', 'data-key': 'demo-load', onClick: () => runDemoScene(sceneSel.value, { run: false }) }, 'Load scene'),
           h('button', { type: 'button', class: 'btn', 'data-key': 'demo-run', onClick: () => runDemoScene(sceneSel.value, { run: true }) }, 'Run demo scene'),
           demo ? h('button', { type: 'button', class: 'btn ghost', 'data-key': 'demo-reset', onClick: async () => { await seedDemo(repo, { reset: true, now: clock().toISOString() }); S.banner = { kind: 'info', text: 'Demo profile reset.' }; await refresh(); } }, 'Reset demo') : null)),
+        h('h3', { class: 'sub' }, 'Appearance'),
+        h('div', { class: 'demo-pick' },
+          h('label', { class: 'label', for: 'theme-pick' }, 'Theme'),
+          h('select', { id: 'theme-pick', class: 'text-input', 'data-key': 'theme-pick',
+            onChange: async (e) => { S.settings = await repo.saveSettings({ theme: e.target.value }); applyTheme(e.target.value); announce(`Theme: ${THEMES.find((t) => t.id === e.target.value)?.label}`); } },
+          ...THEMES.map((t) => h('option', { value: t.id, selected: S.settings.theme === t.id ? '' : undefined }, t.label)),
+          h('option', { value: 'host', disabled: '' }, 'Match my Kindroid theme (needs host support)'))),
+        h('p', { class: 'help' }, 'Kindroid themes are customisable. Matching yours automatically depends on the Workshop exposing theme colours, which has not been confirmed yet.'),
         h('h3', { class: 'sub' }, 'Automatic updates'),
         h('label', { class: 'check' },
           h('input', { type: 'checkbox', 'data-key': 'auto', disabled: !autoOk, checked: autoOk && S.settings.autoUpdate, onChange: async (e) => { S.settings = await repo.saveSettings({ autoUpdate: e.target.checked }); } }),

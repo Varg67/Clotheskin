@@ -12,13 +12,13 @@ Requires Node 20+. No dependencies.
 npm start
 ```
 
-Open <http://localhost:5173> in a desktop browser window (designed for about 1280×800 and wider).
+Open <http://localhost:5173> in a desktop browser window. The Workshop gives the app roughly 950×690 px when the Kindroid sidebar is open, so that is the design target; wider windows just get more room.
 
 ## Test it
 
 ```bash
 npm test            # unit + scene tests (Node's built-in runner)
-npm run test:e2e    # browser test in a pt-BR browser at 1280×800
+npm run test:e2e    # browser test in a pt-BR browser at 960×690 (the Workshop window beside the Kindroid sidebar)
 ```
 
 The browser test needs Playwright and Chromium. If they are not already installed: `npm i --no-save playwright && npx playwright install chromium`. Screenshots go to `tests/e2e/shots/`.
@@ -58,9 +58,15 @@ Design decisions worth knowing:
 
 ## Look and feel
 
-The Workshop is desktop-only for now, so the layout targets desktop proportions: the status card keeps its own 440 px width on the left (so it can later be embedded elsewhere, such as a status bar) and the workspace (scene reader, demo scenes, prompt, history) fills the right. Below 900 px it simply stacks; phone layouts are not a supported target yet.
+The Workshop is desktop-only for now, so the layout targets desktop proportions: the status card keeps its own 440 px width on the left (so it can later be embedded elsewhere, such as the Status Bar) and the workspace (scene reader, demo scenes, prompt, history) fills the right. Below 860 px it simply stacks; phone layouts are not a supported target yet. The visible app title is hidden (the Workshop sidebar already names the app) but kept for screen readers.
 
-The theme follows the Kindroid UI v2 login screen: warm off-white (`#f5f0eb`), translucent glass surfaces with white borders and coral-tinted shadows, pill-shaped controls, coral accent (`#c7503c`). Values were sampled from a screenshot, not from an official palette. `tests/theme.test.js` checks WCAG AA contrast for the token pairs. To retheme (for example a dark variant), override the variables in `theme.css`; `styles.css` uses no raw colours.
+Kindroid lets users customise their theme, so the palette is selectable under **Appearance** in the workspace:
+
+- **Kindroid warm (default):** sampled from the Kindroid UI v2 login screen: warm off-white `#f5f0eb`, translucent glass surfaces, coral accent `#c7503c`, pill-shaped controls.
+- **Sage green:** sampled from a customised Kindroid desktop window: page `#f4f6f5`, glow `#cfeae0`, text `#283e36`, glass `#f9faf9`. The accent (`#2c7a60`) is **inferred** from the same hue because the screenshot had no primary button. Send a screenshot with one if you want it exact.
+- **Match my Kindroid theme:** listed but disabled. It needs the Workshop to expose the host's theme colours, which is unverified.
+
+All colours, radii and shadows live in `theme.css`; `styles.css` uses no raw colours. A new theme is one `:root[data-theme="…"]` block. `tests/theme.test.js` checks WCAG AA contrast for every theme.
 
 ## Pending verification in the Kindroid Workshop
 
@@ -79,6 +85,6 @@ First real test in the Workshop: load the app, select a real Kin, confirm its id
 ## Limits of this first version
 
 - The reference image **Painel de estado da Isa.png** was not attached, so the layout follows the written description. Demo pictures are my own simple SVGs.
-- Only a light theme exists, because only a light Kindroid v2 reference was available.
+- Only light themes exist; no dark Kindroid reference was available.
 - No inventory screen: pockets and contents are read-only details inside an item.
 - Not exercised in a real Kindroid session.

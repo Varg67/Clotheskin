@@ -1,4 +1,4 @@
-// Browser test. Run: npm run test:e2e   (needs Playwright + Chromium; see README)
+// Browser test at desktop proportions (1280x800), in a pt-BR browser. Run: npm run test:e2e   (needs Playwright + Chromium; see README)
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -24,7 +24,7 @@ async function step(name, fn) {
   const url = `http://localhost:${server.address().port}/`;
   const browser = await chromium.launch();
   // Browser deliberately set to Brazilian Portuguese: the product must still be English.
-  const ctx = await browser.newContext({ viewport: { width: 360, height: 780 }, locale: 'pt-BR', timezoneId: 'America/Sao_Paulo', deviceScaleFactor: 2 });
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: 'pt-BR', timezoneId: 'America/Sao_Paulo', deviceScaleFactor: 1 });
   ctx.setDefaultTimeout(4000);
   const page = await ctx.newPage();
   const problems = [];
@@ -52,12 +52,17 @@ async function step(name, fn) {
     assert.match(await text(), /Makeup\s+Unknown/);
   });
 
-  await step('no horizontal overflow at 360 px (card, reader, dialogs)', async () => {
+  await step('desktop layout: status card left (440 px), workspace right, no horizontal overflow', async () => {
     const ov = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     assert.ok((await ov()) <= 0);
-    await openReader();
-    assert.ok((await ov()) <= 0);
-    await page.screenshot({ path: path.join(SHOTS, '01-main-360.png'), fullPage: true });
+    const card = await page.locator('.card').boundingBox();
+    const work = await page.locator('.reader').boundingBox();
+    assert.ok(Math.abs(card.width - 440) < 2, `card width ${card.width}`);
+    assert.ok(work.x >= card.x + card.width + 20, 'workspace sits to the right of the card');
+    assert.ok(work.width > 500, `workspace width ${work.width}`);
+    assert.ok(await page.locator('#conversation').isVisible(), 'workspace is open by default');
+    assert.ok(card.y + card.height <= 800 + 60, 'card fits (almost) one desktop screen');
+    await page.screenshot({ path: path.join(SHOTS, '01-main-desktop.png') });
   });
 
   await step('lab coat off onto the chair: T-shirt stays, coat keeps "wet" and is left at the chair', async () => {
@@ -241,7 +246,7 @@ async function step(name, fn) {
   });
 
   await step('first-time empty state: Select a companion', async () => {
-    const fresh = await browser.newContext({ viewport: { width: 360, height: 780 }, locale: 'pt-BR' });
+    const fresh = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: 'pt-BR' });
     fresh.setDefaultTimeout(4000);
     const p2 = await fresh.newPage();
     await p2.goto(url); await p2.waitForSelector('[data-key="update"]');

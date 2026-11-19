@@ -28,7 +28,7 @@ export async function startApp({ root, repo, host, clock = () => new Date() }) {
     lastResult: null,
     pending: null,
     responseDraft: '',
-    readerOpen: false,
+    readerOpen: true, // desktop: the workspace is visible by default
     promptEditor: false,
   };
 
@@ -270,9 +270,10 @@ export async function startApp({ root, repo, host, clock = () => new Date() }) {
     return h('details', { class: 'reader', open: S.readerOpen ? '' : undefined, onToggle: (e) => { S.readerOpen = e.currentTarget.open; } },
       h('summary', { 'data-key': 'reader-summary' }, 'Scene reader (local mode)'),
       h('div', { class: 'reader-body' },
-        h('p', { class: 'help' }, 'Paste a conversation as “Name: message”, copy the prompt into your model, then paste its JSON answer here. Nothing leaves this page.'),
+        h('p', { class: 'help full' }, 'Paste a conversation as “Name: message”, copy the prompt into your model, then paste its JSON answer here. Nothing leaves this page.'),
+        h('div', { class: 'col-a' },
         h('label', { class: 'label', for: 'conversation' }, 'Conversation'),
-        h('textarea', { id: 'conversation', class: 'text-input', rows: 6, 'data-key': 'conversation', placeholder: 'Isa: *sits on the sofa* I put on a green cardigan…', onInput: (e) => setDraft(e.target.value) }, draftText()),
+        h('textarea', { id: 'conversation', class: 'text-input', rows: 9, 'data-key': 'conversation', placeholder: 'Isa: *sits on the sofa* I put on a green cardigan…', onInput: (e) => setDraft(e.target.value) }, draftText()),
         h('label', { class: 'label', for: 'conv-id' }, 'Conversation ID (optional)'),
         h('input', { id: 'conv-id', class: 'text-input', type: 'text', 'data-key': 'conv-id', value: S.settings.conversationId || '', placeholder: 'Leave empty if your host gives none', autocomplete: 'off',
           onChange: async (e) => { S.settings = await repo.saveSettings({ conversationId: e.target.value.trim() }); S.banner = null; await refresh(); } }),
@@ -281,23 +282,25 @@ export async function startApp({ root, repo, host, clock = () => new Date() }) {
           h('button', { type: 'button', class: 'btn ghost', 'data-key': 'read-again', onClick: () => startReading({ force: true }) }, 'Read again')),
         S.pending ? h('div', { class: 'prompt-box' },
           h('label', { class: 'label', for: 'prompt-view' }, 'Prompt to send'),
-          h('textarea', { id: 'prompt-view', class: 'text-input mono', rows: 6, readOnly: true, 'data-key': 'prompt-view' }, S.pending.prompt),
+          h('textarea', { id: 'prompt-view', class: 'text-input mono', rows: 8, readOnly: true, 'data-key': 'prompt-view' }, S.pending.prompt),
           h('div', { class: 'btn-row' },
             h('button', { type: 'button', class: 'btn', 'data-key': 'copy-prompt', onClick: () => copyText(S.pending.prompt, 'Prompt copied.') }, icon('copy', { size: 16 }), 'Copy prompt'),
-            h('button', { type: 'button', class: 'btn ghost', 'data-key': 'cancel-read', onClick: () => provider.cancel() }, 'Cancel reading'))) : null,
+            h('button', { type: 'button', class: 'btn ghost', 'data-key': 'cancel-read', onClick: () => provider.cancel() }, 'Cancel reading'))) : null),
+        h('div', { class: 'col-b' },
         h('label', { class: 'label', for: 'response' }, 'JSON response'),
-        h('textarea', { id: 'response', class: 'text-input mono', rows: 6, 'data-key': 'response', placeholder: '{"state_updates": {}, "item_changes": [], "unresolved": []}', onInput: (e) => { S.responseDraft = e.target.value; } }, S.responseDraft),
+        h('textarea', { id: 'response', class: 'text-input mono', rows: 9, 'data-key': 'response', placeholder: '{"state_updates": {}, "item_changes": [], "unresolved": []}', onInput: (e) => { S.responseDraft = e.target.value; } }, S.responseDraft),
         h('button', { type: 'button', class: 'btn primary', 'data-key': 'apply', onClick: applyResponse }, 'Apply response'),
-
+),
+        h('div', { class: 'full' },
         h('h3', { class: 'sub' }, 'Demo scenes'),
         h('p', { class: 'help' }, 'Responses are marked as demo responses and only update the Isa demo profile.'),
-        h('label', { class: 'label', for: 'scene-pick' }, 'Scene'),
-        (sceneSel = h('select', { id: 'scene-pick', class: 'text-input', 'data-key': 'scene-pick' }, ...DEMO_SCENES.map((s) => h('option', { value: s.id }, s.title)))),
+        h('div', { class: 'demo-row' },
+        h('div', { class: 'demo-pick' }, h('label', { class: 'label', for: 'scene-pick' }, 'Scene'),
+          (sceneSel = h('select', { id: 'scene-pick', class: 'text-input', 'data-key': 'scene-pick' }, ...DEMO_SCENES.map((s) => h('option', { value: s.id }, s.title))))),
         h('div', { class: 'btn-row' },
           h('button', { type: 'button', class: 'btn', 'data-key': 'demo-load', onClick: () => runDemoScene(sceneSel.value, { run: false }) }, 'Load scene'),
           h('button', { type: 'button', class: 'btn', 'data-key': 'demo-run', onClick: () => runDemoScene(sceneSel.value, { run: true }) }, 'Run demo scene'),
-          demo ? h('button', { type: 'button', class: 'btn ghost', 'data-key': 'demo-reset', onClick: async () => { await seedDemo(repo, { reset: true, now: clock().toISOString() }); S.banner = { kind: 'info', text: 'Demo profile reset.' }; await refresh(); } }, 'Reset demo') : null),
-
+          demo ? h('button', { type: 'button', class: 'btn ghost', 'data-key': 'demo-reset', onClick: async () => { await seedDemo(repo, { reset: true, now: clock().toISOString() }); S.banner = { kind: 'info', text: 'Demo profile reset.' }; await refresh(); } }, 'Reset demo') : null)),
         h('h3', { class: 'sub' }, 'Automatic updates'),
         h('label', { class: 'check' },
           h('input', { type: 'checkbox', 'data-key': 'auto', disabled: !autoOk, checked: autoOk && S.settings.autoUpdate, onChange: async (e) => { S.settings = await repo.saveSettings({ autoUpdate: e.target.checked }); } }),
@@ -307,7 +310,7 @@ export async function startApp({ root, repo, host, clock = () => new Date() }) {
         h('details', { class: 'sub-details', open: S.promptEditor ? '' : undefined, onToggle: (e) => { S.promptEditor = e.currentTarget.open; } },
           h('summary', {}, 'Extraction prompt'),
           renderPromptEditor()),
-        renderHistory()));
+        renderHistory())));
   }
 
   function renderPromptEditor() {
@@ -338,9 +341,12 @@ export async function startApp({ root, repo, host, clock = () => new Date() }) {
 
   function render() {
     keepFocus(root, () => {
+      const work = renderReader();
       root.replaceChildren(
         h('header', { class: 'app-head' }, h('h1', {}, 'Clotheskin'), h('p', { class: 'muted' }, 'Visual continuity for your companions')),
-        renderCard(), renderReader(),
+        h('div', { class: `layout${work ? '' : ' solo'}` },
+          h('div', { class: 'col-status' }, renderCard()),
+          work ? h('div', { class: 'col-work' }, work) : null),
         h('footer', { class: 'foot muted' }, `Mode: ${host.label}`));
     });
   }

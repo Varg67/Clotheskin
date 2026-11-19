@@ -3,9 +3,8 @@ import assert from 'node:assert/strict';
 import { WorkshopChannel } from '../screen/src/host/channel.js';
 import { WorkshopStorage } from '../screen/src/host/workshop.js';
 import { keyToPath } from '../screen/src/host/paths.js';
-import { Repository } from '../screen/src/core/store.js';
+import { Settings } from '../screen/src/core/store.js';
 import { buildManifest } from '../scripts/build-manifest.mjs';
-import { validateDocument } from '../screen/src/core/validate.js';
 import { readFileSync } from 'node:fs';
 
 /** A fake page around the frame, speaking the protocol from the Workshop guide. */
@@ -58,18 +57,17 @@ test('actions: the screen can run an action and gets the summary line back', asy
   assert.deepEqual(w.actionLog[0].input, { kin: 'k1', name: 'Isa' });
 });
 
-test('the Repository works unchanged over the Workshop files; removal writes an empty tombstone that reads as absent', async () => {
+test('settings work unchanged over the Workshop files; they survive a new Settings instance (a reload)', async () => {
   const w = fakeWorkshop();
-  const repo = new Repository(new WorkshopStorage(w.channel));
-  await repo.saveProfile({ id: 'k1', name: 'Isa', places: [] });
-  assert.equal((await repo.getProfile('k1')).name, 'Isa');
-  const rec = await repo.getRecord('k1');
-  rec.fields.hair.value = 'bun';
-  await repo.putRecord(rec);
-  assert.equal((await repo.getRecord('k1')).fields.hair.value, 'bun');
+  const first = new Settings(new WorkshopStorage(w.channel));
+  await first.load();
+  await first.save({ theme: 'sage', selectedKinId: 'k1' });
+  const second = new Settings(new WorkshopStorage(w.channel));
+  await second.load();
+  assert.equal(second.value.theme, 'sage');
+  assert.equal(second.value.selectedKinId, 'k1');
   assert.ok([...w.files.keys()].every((p) => /^cs\/[A-Za-z0-9._~-]+\.json$/.test(p)), 'safe paths');
-  await new WorkshopStorage(w.channel).remove('clotheskin:v1:profile:k1');
-  assert.equal(await repo.getProfile('k1'), null);
+  assert.equal(w.files.size, 1, 'only the settings file exists: no outfit is stored');
 });
 
 test('key to path never collides for ids with odd characters', () => {
@@ -79,20 +77,13 @@ test('key to path never collides for ids with odd characters', () => {
   assert.match(a, /^cs\/clotheskin~3av1~3arecord~3aa~3ab~3a~3a-\.json$/);
 });
 
-test('kin.json is generated from the contract, within the guide limits, and the action schema accepts the brief example', () => {
+test('kin.json is generated, within the guide limits, with one user action and the grants the Kin question needs', () => {
   const m = buildManifest();
   assert.equal(readFileSync(new URL('../kin.json', import.meta.url), 'utf8'), `${JSON.stringify(m, null, 2)}\n`);
   assert.ok(m.name.length <= 40);
   assert.ok(m.purpose.length <= 200);
   assert.equal(m.run.entry, 'node main.js');
   assert.deepEqual(m.screens, [{ slot: 'panel', entry: 'screen/index.html', title: 'Clotheskin' }]);
-  assert.equal(new Set(m.actions.map((a) => a.name)).size, m.actions.length);
-  for (const a of m.actions) { assert.ok(a.description.split(/[.!?]\s/).length <= 3); assert.ok(a.by.every((b) => ['kin', 'user'].includes(b))); }
+  assert.deepEqual(m.actions.map((a) => [a.name, a.by]), [['read_outfit', ['user']]]);
   assert.deepEqual(m.grants, ['kin:read', 'chat:read:1']);
-  const schema = m.actions.find((a) => a.name === 'update_scene').input;
-  assert.equal(schema.type, 'object');
-  const example = { state_updates: { hair: 'bun', position: 'standing' }, item_changes: [{ op: 'wear', item_name: 'green cardigan', slot: 'topwear', over_item_name: 'T-shirt' }], unresolved: [] };
-  assert.ok(validateDocument(example).ok);
-  assert.ok(JSON.stringify(example).length < 16000);
-  assert.deepEqual(Object.keys(schema.properties.item_changes.items.properties).includes('over_item_name'), true);
 });

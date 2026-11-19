@@ -184,3 +184,9 @@ dialog.sheet.wide { width: min(760px, 100vw - 64px); }
 .mode-workshop .sheet-foot { padding: 12px 18px 16px; } .mode-workshop .sheet .form-error { padding: 0 18px; }
 .mode-workshop .detail-grid { grid-template-columns: 1fr; }
 .mode-workshop .foot { display: none; }
+
+/* The outfit sentence */
+.outfit { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: var(--radius-md); background: var(--glass); border: 1px solid var(--glass-border); box-shadow: var(--shadow-glass); margin-bottom: 14px; }
+.outfit-text { margin: 0; font-size: 1.1rem; line-height: 1.45; overflow-wrap: anywhere; align-self: center; }
+.outfit.empty .outfit-text { color: var(--muted); font-style: italic; font-size: 1rem; }
+.toggle.static { cursor: default; }

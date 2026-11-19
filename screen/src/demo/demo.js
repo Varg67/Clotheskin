@@ -1,129 +1,42 @@
-import { createRecord } from '../core/model.js';
-import { applyDocument } from '../core/apply.js';
+// Demo scenes for local mode. `chat` is what a person would paste; `response` is what a Kin should answer.
+// The Portuguese chat shows that the chat language does not matter: the answer, and the sentence, are English.
+const r = (o) => JSON.stringify(o);
 
-export const DEMO_PROFILE_ID = 'demo-isa';
-export const DEMO_LOCATION = 'living room at the shared house';
-
-export function demoProfile() {
-  return {
-    id: DEMO_PROFILE_ID,
-    name: 'Isa',
-    pronouns: 'she/her',
-    avatarUrl: 'assets/demo/isa-avatar.svg',
-    demo: true,
-    createdAt: '2000-01-01T00:00:00.000Z',
-    places: [{ id: 'place-demo-living-room', name: DEMO_LOCATION, imageUrl: 'assets/demo/living-room.svg' }],
-  };
-}
-
-const meta = (scene) => ({ demo: true, scene, target_id: DEMO_PROFILE_ID });
-
-const SEED = {
-  meta: meta('seed'),
-  state_updates: { location: DEMO_LOCATION, position: 'sitting on the sofa', hair: 'loose' },
-  item_changes: [
-    { op: 'wear', item_name: 'T-shirt', slot: 'topwear' },
-    { op: 'wear', item_name: 'lab coat', slot: 'topwear', over_item_name: 'T-shirt', condition: 'wet' },
-    { op: 'wear', item_name: 'jeans', slot: 'bottomwear', pockets: [{ label: 'left pocket', side: 'left' }, { label: 'right pocket', side: 'right' }] },
-    { op: 'wear', item_name: 'sneakers', slot: 'footwear' },
-    { op: 'wear', item_name: 'glasses', slot: 'eyes-accessory' },
-  ],
-  unresolved: [],
-};
-
-/** Builds the demo record through the same pipeline as a real reading. */
-export function buildDemoRecord(now = new Date().toISOString()) {
-  const base = createRecord(DEMO_PROFILE_ID, null);
-  const { record } = applyDocument(base, { ...SEED, meta: SEED.meta }, { baseRev: 0, now, source: 'demo' });
-  record.lastRead = { at: now, ticketId: 'demo-seed', applied: 0, skipped: 0 };
-  record.history = [{ at: now, source: 'demo', summary: ['Demo profile loaded'], skipped: [] }];
-  record.processedMessageIds = [];
-  return record;
-}
-
-export async function seedDemo(repo, { reset = false, now } = {}) {
-  const existing = await repo.getProfile(DEMO_PROFILE_ID);
-  if (!existing || reset) {
-    const prior = existing || null;
-    const profile = demoProfile();
-    if (prior && !reset) return;
-    await repo.saveProfile(profile);
-    await repo.putRecord(buildDemoRecord(now));
-  }
-}
-
-const resp = (scene, state_updates, item_changes, unresolved = []) =>
-  JSON.stringify({ meta: meta(scene), state_updates, item_changes, unresolved }, null, 2);
-
-/** Demo scenes. Conversation text is what a user would paste; responses are labelled demo responses. */
 export const DEMO_SCENES = [
   {
-    id: 'lab-coat',
-    title: 'Wet lab coat on the chair',
-    conversation: 'Isa: *peels off the wet lab coat and drapes it over the chair* Finally dry. My T-shirt survived, at least.',
-    response: resp('lab-coat', {}, [
-      { op: 'remove', item_name: 'lab coat', to: { type: 'scene', place: 'chair' } },
-    ]),
+    id: 'pt-jeans-jacket',
+    title: 'Blue jeans, leather jacket, perfumed shirt (Portuguese chat)',
+    chat: 'Isa: *sorri e ajeita a gola* Hoje estou vestindo uma calça jeans azul, uma jaqueta de couro e uma camisa branca perfumada.',
+    response: r({ topwear: ['a perfumed white shirt', 'a leather jacket'], bottomwear: ['blue jeans'] }),
   },
   {
-    id: 'cardigan-bun',
-    title: 'Cardigan, bun, standing up',
-    conversation: 'Isa: *sits on the sofa* I put on a green cardigan over my T-shirt, tie my hair into a bun and stand up. I\'ll head to college soon.',
-    response: resp('cardigan-bun', { hair: 'bun', position: 'standing' }, [
-      { op: 'wear', item_name: 'green cardigan', slot: 'topwear', over_item_name: 'T-shirt' },
-    ]),
+    id: 'accessories-bag',
+    title: 'Dress, glasses, necklace and a bag',
+    chat: 'Isa: Glasses on, silver necklace, and my brown backpack on one shoulder. Still in my black dress and ankle boots.',
+    response: r({ topwear: ['a black dress'], footwear: ['ankle boots'], 'eyes-accessory': ['round glasses'], 'neck-accessory': ['a silver necklace'], bags: ['a brown backpack'] }),
   },
   {
-    id: 'cardigan-bun-pt',
-    title: 'Same scene in Portuguese (no duplicates)',
-    conversation: 'Isa: Visto um cardigan verde por cima da camiseta, prendo o cabelo num coque e levanto. Daqui a pouco vou pra faculdade.',
-    response: resp('cardigan-bun-pt', { hair: 'bun', position: 'standing' }, [
-      { op: 'wear', item_name: 'green cardigan', slot: 'topwear', over_item_name: 'T-shirt' },
-    ]),
+    id: 'taken-off',
+    title: 'Takes the cardigan off',
+    chat: 'Isa: I put on the green cardigan over my T-shirt and my jeans.\nUser: Cozy!\nIsa: Too warm, actually. *takes the cardigan off and drapes it on the chair*',
+    response: r({ topwear: ['a T-shirt'], bottomwear: ['jeans'] }),
   },
   {
-    id: 'glasses-pocket',
-    title: 'Glasses in the cardigan pocket',
-    conversation: 'Isa: I tuck my glasses into the left pocket of the cardigan, then slip the cardigan off.',
-    response: resp('glasses-pocket', {}, [
-      { op: 'move', item_name: 'glasses', to: { type: 'pocket', container_item_name: 'green cardigan', pocket: 'left pocket', side: 'left' } },
-      { op: 'remove', item_name: 'green cardigan', to: { type: 'scene', place: 'sofa' } },
-    ]),
+    id: 'loose-keys',
+    title: 'Answer without slot names (still understood)',
+    chat: 'Isa: Sneakers, a striped sweater, a watch and a cap today.',
+    response: r({ clothing: ['a striped sweater', 'sneakers', 'a cap'], accessories: ['a watch'] }),
   },
   {
-    id: 'phone-bag',
-    title: 'Phone in the brown bag',
-    conversation: 'Isa: I drop my phone into the brown bag and leave the bag here in the living room.',
-    response: resp('phone-bag', {}, [
-      { op: 'move', item_name: 'phone', kind: 'object', to: { type: 'bag', container_item_name: 'brown bag' } },
-      { op: 'move', item_name: 'brown bag', kind: 'bag', to: { type: 'scene', place: 'living room' } },
-    ]),
+    id: 'nothing-said',
+    title: 'Nothing about clothes in the chat',
+    chat: 'Isa: How was your day?\nUser: Long. Yours?\nIsa: Quiet, mostly. I read a lot.',
+    response: '{}',
   },
   {
-    id: 'no-makeup',
-    title: 'Makeup removed',
-    conversation: 'Isa: I wiped off all my makeup. Bare face tonight.',
-    response: resp('no-makeup', { makeup: 'none' }, []),
-  },
-  {
-    id: 'leaving',
-    title: 'Getting up to leave (location stays)',
-    conversation: 'Isa: I\'m getting up, I have to leave for the hospital shift.\nUser: Take care!',
-    response: resp('leaving', { position: 'standing' }, []),
-  },
-  {
-    id: 'arrived',
-    title: 'Arrived at the hospital',
-    conversation: 'Isa: I\'ve arrived at the hospital. Badge on, locker open.',
-    response: resp('arrived', { location: 'hospital' }, []),
-  },
-  {
-    id: 'dress-clip',
-    title: 'Dress and hair clip',
-    conversation: 'Isa: I change into a black dress and pin a clip into my hair.',
-    response: resp('dress-clip', {}, [
-      { op: 'wear', item_name: 'black dress', slot: 'topwear', covers: ['bottomwear'] },
-      { op: 'wear', item_name: 'hair clip', slot: 'head-accessory' },
-    ]),
+    id: 'in-character',
+    title: 'The Kin answers in character (error case)',
+    chat: 'Isa: I am wearing a red scarf.',
+    response: '*giggles* Oh, a form? How cute. I am wearing a red scarf, silly!',
   },
 ];

@@ -1,33 +1,19 @@
-// Generates kin.json so the action schema can never drift from the contract.
-// `node scripts/build-manifest.mjs` writes it; `--check` only compares (used by the tests).
+// Generates kin.json. `node scripts/build-manifest.mjs` writes it; the tests check it is up to date.
 import { readFileSync, writeFileSync } from 'node:fs';
-import { contractJsonSchema } from '../screen/src/core/contract.js';
 
 export function buildManifest() {
   return {
     kin: 1,
     name: 'Clotheskin',
-    purpose: 'Keeps track of what each Kin is wearing and where they are, and lets the person correct it.',
+    purpose: 'Shows what a Kin says it is wearing, as one natural sentence read from its recent chat.',
     run: { entry: 'node main.js', timeout: '2m' },
     screens: [{ slot: 'panel', entry: 'screen/index.html', title: 'Clotheskin' }],
     actions: [
       {
-        name: 'read_scene',
-        description: 'Reads the Kin’s recent chat and updates the scene tracker (clothes, accessories, hair, makeup, posture, location).',
-        input: { type: 'object', properties: { kin: { type: 'string' }, name: { type: 'string' }, pronouns: { type: 'string' } }, required: ['kin'] },
+        name: 'read_outfit',
+        description: 'Reads the Kin’s recent chat and describes what it is wearing in one sentence.',
+        input: { type: 'object', properties: { kin: { type: 'string' }, name: { type: 'string' } }, required: ['kin'] },
         by: ['user'],
-      },
-      {
-        name: 'update_scene',
-        description: 'Use when something about your own look or place just changed in the chat: clothes put on or taken off, belongings moved, hair, makeup, posture or location. Report only things already done, never plans.',
-        input: contractJsonSchema(),
-        by: ['kin'],
-      },
-      {
-        name: 'scene_status',
-        description: 'Use to check what you are wearing and where you are before describing it.',
-        input: { type: 'object', properties: {} },
-        by: ['kin'],
       },
     ],
     grants: ['kin:read', 'chat:read:1'],

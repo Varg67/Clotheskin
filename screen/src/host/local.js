@@ -2,7 +2,7 @@
  * Host adapter contract (everything the app needs from its environment):
  *   id, label
  *   capabilities: { autoUpdate, conversationIdentity, companionIdentity, structuredResponse }
- *   storage: async get/set/remove/keys
+ *   storage: async get/set/remove
  *
  * Only the local adapter exists. No Kindroid Workshop mechanism has been
  * verified yet (see README, "Pending verification"), so none is guessed here.

@@ -1,7 +1,7 @@
 import { WorkshopChannel } from './channel.js';
 import { keyToPath } from './paths.js';
 
-/** Storage over the program's own folder. Per-key files; there is no directory listing from a screen. */
+/** Storage over the program's own folder, used only for small preferences (theme, selected Kin). */
 export class WorkshopStorage {
   constructor(channel) { this.channel = channel; }
   async get(key) {
@@ -10,7 +10,6 @@ export class WorkshopStorage {
   }
   async set(key, value) { await this.channel.writeFile(keyToPath(key), value); }
   async remove(key) { await this.channel.writeFile(keyToPath(key), ''); } // a screen cannot delete; empty = absent
-  async keys() { return []; } // not needed: profiles come from the attached Kins
 }
 
 /**

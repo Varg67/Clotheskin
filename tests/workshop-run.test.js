@@ -4,7 +4,7 @@ import { repo as makeRepo, byName, names, NOW } from './helpers.js';
 import { handleRun } from '../run/actions.js';
 import { KinFilesStorage, KinAskProvider } from '../run/kin-cli.js';
 import { mergeManualEdit } from '../screen/src/core/apply.js';
-import { KIN_ASK_LIMIT } from '../screen/src/core/prompt.js';
+import { KIN_ASK_LIMIT, KIN_ASK_BUDGET, buildHostChatPrompt } from '../screen/src/core/prompt.js';
 import { checkInvariants } from '../screen/src/core/model.js';
 
 const clock = () => new Date(NOW);
@@ -18,7 +18,7 @@ test('read_scene: the Kin is asked about its own chat; no pasted messages in the
   const out = await handleRun({ event: askEvent('kin-1'), repo, provider, clock });
   assert.equal(out.ok, true);
   assert.match(out.message, /hair: unknown → bun/);
-  assert.ok(seen.prompt.length <= KIN_ASK_LIMIT, `${seen.prompt.length}`);
+  assert.ok(seen.prompt.length <= KIN_ASK_BUDGET, `${seen.prompt.length}`);
   assert.ok(!seen.prompt.includes('RECENT EXCHANGE'));
   assert.match(seen.prompt, /recent chat/);
   assert.match(seen.prompt, /yourself, Isa/);
@@ -108,7 +108,7 @@ test('a large wardrobe still fits in 8,000 characters; an impossible one fails w
   let size = 0;
   const out = await handleRun({ event: askEvent('k'), repo, provider: { extract: async ({ prompt }) => { size = prompt.length; return '{}'; } }, clock });
   assert.equal(out.ok, true);
-  assert.ok(size <= KIN_ASK_LIMIT, `${size}`);
+  assert.ok(size <= KIN_ASK_BUDGET, `${size}`);
 });
 
 test('KinFilesStorage: missing file is null, a failed read of an existing file is an error (never silently empty)', async () => {
@@ -137,4 +137,24 @@ test('KinAskProvider passes the Kin id and prompt to kin ask and reports failure
   assert.deepEqual(args, ['ask', '--kin', 'kin-7', 'P']);
   const bad = new KinAskProvider(async () => ({ code: 4, stdout: '', stderr: 'grant missing' }));
   await assert.rejects(() => bad.extract({ prompt: 'P', profile: { id: 'x' } }), /grant missing/);
+});
+
+test('the question stays inside the budget (7,000), which is inside the hard limit (8,000), with a long name too', async () => {
+  assert.ok(KIN_ASK_BUDGET < KIN_ASK_LIMIT);
+  const { createRecord } = await import('../screen/src/core/model.js');
+  const p = buildHostChatPrompt({ profile: { id: 'k', name: 'N'.repeat(500) }, record: createRecord('k') });
+  assert.ok(p.length <= KIN_ASK_BUDGET, `${p.length}`);
+  assert.ok(!p.includes('N'.repeat(61)), 'long names are cut');
+});
+
+test('a wardrobe too large for the budget fails with advice instead of sending a long question', async () => {
+  const repo = makeRepo();
+  const worn = Array.from({ length: 90 }, (_, i) => ({ op: 'wear', item_name: `layered piece number ${i} in dark green`, slot: ['topwear', 'bottomwear', 'footwear', 'neck-accessory', 'arms-accessory', 'head-accessory'][i % 6] }));
+  await handleRun({ event: { trigger: 'action', action: 'update_scene', kin: 'big', input: { item_changes: worn } }, repo, provider: { extract: async () => '{}' }, clock });
+  let asked = false;
+  const out = await handleRun({ event: askEvent('big'), repo, provider: { extract: async () => { asked = true; return '{}'; } }, clock });
+  assert.equal(out.ok, false);
+  assert.equal(asked, false, 'nothing was sent');
+  assert.match(out.message, /too large to send in one question/);
+  assert.ok(out.message.length <= 500);
 });

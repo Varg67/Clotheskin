@@ -55,8 +55,13 @@ export function buildPrompt({ template = DEFAULT_EXTRACTION_PROMPT, profile, rec
   return template.replace(/\{\{(\w+)\}\}/g, (m, k) => (k in values ? values[k] : m));
 }
 
-/** kin ask accepts at most 8,000 characters. */
+/** kin ask accepts at most 8,000 characters (Workshop guide). */
 export const KIN_ASK_LIMIT = 8000;
+/**
+ * What we actually allow ourselves. The guide counts "characters" but does not say how, or whether the
+ * platform adds text around the question, so keep a 1,000 character margin (and accents cost 2 bytes).
+ */
+export const KIN_ASK_BUDGET = 7000;
 
 /**
  * Variant for the Kindroid Workshop. The app cannot read the chat: the Kin sees its own recent chat
@@ -82,7 +87,8 @@ PREVIOUS STATE: {{previous_state_json}}
 `;
 
 /** Builds the Workshop prompt and shrinks the state until it fits the limit. */
-export function buildHostChatPrompt({ template = HOST_CHAT_PROMPT, profile, record, limit = KIN_ASK_LIMIT }) {
+export function buildHostChatPrompt({ template = HOST_CHAT_PROMPT, profile, record, limit = KIN_ASK_BUDGET }) {
+  profile = { ...profile, name: String(profile.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 60) };
   const fill = (opts) => template.replace(/\{\{(\w+)\}\}/g, (m, k) => ({
     operation_contract: renderCompactContract(),
     target_character: profile.name,
@@ -92,5 +98,5 @@ export function buildHostChatPrompt({ template = HOST_CHAT_PROMPT, profile, reco
     const text = fill({ maxNotWorn });
     if (text.length <= limit) return text;
   }
-  throw new Error(`The scene state is too large to send in one question (limit ${limit} characters). Remove unused items in the editor and try again.`);
+  throw new Error(`The scene state is too large to send in one question (budget ${limit} characters, Kindroid allows ${KIN_ASK_LIMIT}). Remove unused items in the editor and try again.`);
 }

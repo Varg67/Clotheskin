@@ -5,8 +5,8 @@ import { parseReading, describeReading, poseIcon } from '../core/outfit.js';
 import { formatClock, formatRelative } from '../core/format.js';
 import { DEMO_SCENES } from '../demo/demo.js';
 import { ReadingStore } from '../core/readings.js';
-import { normalizeInterval, effectiveMinutes, retryWaitMinutes, SCHEDULE_TICK_MINUTES, AUTO_MIN_MINUTES, AUTO_MAX_MINUTES } from '../core/auto.js';
-import { PERMANENT_KINDS } from '../core/errors.js';
+import { normalizeInterval, effectiveMinutes, autoFailureLines, SCHEDULE_TICK_MINUTES, AUTO_MIN_MINUTES, AUTO_MAX_MINUTES } from '../core/auto.js';
+import { HOST_NO_ANSWER } from '../core/errors.js';
 
 export const THEMES = [
   { id: 'warm', label: 'Kindroid warm (default)' },
@@ -138,9 +138,7 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
   const announceResult = (id) => S.errors.get(id) || (S.results.get(id) ? `${S.results.get(id).location} ${S.results.get(id).doing} ${S.results.get(id).outfit}` : '');
 
   /** What the person should read when the Workshop itself does not answer (the connection, not the Kin). */
-  const friendlyHostError = (e) => (/did not answer/i.test(e.message)
-    ? 'Kindroid did not answer in time. Check your connection and try again. Your last reading is still shown.'
-    : e.message);
+  const friendlyHostError = (e) => (/did not answer/i.test(e.message) ? HOST_NO_ANSWER : e.message);
 
   /** Workshop: the run asks the Kin about its recent chat. The reading belongs to the Kin it started for. */
   async function readInWorkshop(kin) {
@@ -204,18 +202,6 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
       h('p', { class: 'help' }, 'Kindroid themes are customisable. Matching yours automatically depends on the Workshop exposing theme colours, which has not been confirmed yet.'));
   }
 
-  /** Why the last automatic check failed and what happens next, without comparing clocks. */
-  function autoFailureText(stored) {
-    const interval = normalizeInterval(settings.value.autoIntervalMinutes);
-    const wait = retryWaitMinutes(stored, interval);
-    const rows = [`The last automatic check failed: ${stored.error}`];
-    if (stored.failures > 1) rows.push(`${stored.failures} checks in a row have failed.`);
-    rows.push(PERMANENT_KINDS.has(stored.errorKind)
-      ? 'Retrying sooner will not help: fix the cause, then press Try again.'
-      : `Trying again about ${wait} minutes after the last attempt.`);
-    return rows; // one line each: the reason, how many in a row, what happens next
-  }
-
   function renderCard() {
     const kin = selectedKin();
     if (!kin) {
@@ -232,7 +218,7 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     const stored = S.cached.get(kin.id);
     // A stored error stands until a later success clears it (the run does that). No clocks are compared: the screen
     // and the run may disagree about the time.
-    const autoFailed = !S.errors.has(kin.id) && stored?.error ? autoFailureText(stored) : null;
+    const autoFailed = !S.errors.has(kin.id) && stored?.error ? autoFailureLines(stored, normalizeInterval(settings.value.autoIntervalMinutes)) : null;
     const error = S.errors.get(kin.id) || autoFailed;
     const now = clock();
     return h('section', { class: 'card', 'aria-label': `${kin.name} status` },

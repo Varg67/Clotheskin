@@ -67,3 +67,6 @@ export class KinFailure extends Error {
     this.retrySoon = classified.retrySoon;
   }
 }
+
+/** Shown when the Workshop itself (not the Kin) does not answer the screen. */
+export const HOST_NO_ANSWER = 'Kindroid did not answer in time. Check your connection and try again. Your last reading is still shown.';

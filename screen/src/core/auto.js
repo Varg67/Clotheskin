@@ -61,3 +61,17 @@ export function pickDue({ now, kins, readings, intervalMinutes, max = AUTO_MAX_K
   }
   return due.sort((a, b) => a.waited - b.waited).slice(0, max).map((d) => d.kin);
 }
+
+/**
+ * What the card says under an automatic failure: the reason, how many in a row, and what happens next. One line each.
+ * No clocks are compared: the screen and the run may disagree about the time.
+ */
+export function autoFailureLines(stored, intervalMinutes) {
+  const wait = retryWaitMinutes(stored, intervalMinutes);
+  const lines = [`The last automatic check failed: ${stored.error}`];
+  if (stored.failures > 1) lines.push(`${stored.failures} checks in a row have failed.`);
+  lines.push(PERMANENT_KINDS.has(stored.errorKind)
+    ? 'Retrying sooner will not help: fix the cause, then press Try again.'
+    : `Trying again about ${wait} minutes after the last attempt.`);
+  return lines;
+}

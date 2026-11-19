@@ -294,6 +294,154 @@ Este arquivo é gerado por `node scripts/build-test-script.mjs`. As frases "O ca
 
 **Se falhar:** O Kin inventou um lugar ou roupa → "never guess" não funcionou (prompt).
 
+## Falhas provocadas (a parte que mais ensina)
+
+Os passos acima verificam se o cartão entende o chat. Estes verificam o que acontece **quando algo dá errado**, e servem a um segundo objetivo: **coletar o texto real dos erros** do `kin ask`. O app reconhece o tipo de erro por esse texto (`screen/src/core/errors.js`), mas eu só consegui *supor* como ele aparece. Em cada erro o cartão mostra o texto real entre parênteses: **copie-o exatamente** na tabela. Com ele eu ajusto o reconhecimento.
+
+Vale em todas as falhas: as **últimas frases boas continuam no cartão**, e o botão **Try again** não pode ficar travado.
+
+Regra de ouro para a automação: ela roda **na nuvem do Kindroid**, não no seu PC. Desligar a internet do PC não pára as verificações; só impede você de ver o resultado até voltar.
+
+### F1. App enviado, mas ainda sem o Allow
+
+**Como provocar:** Envie o app (`node kin.mjs send .`) e **não** clique em **Allow** em Apps → Waiting for you. Abra o app, selecione o Kin se for pedido e aperte **Update status**.
+
+**Se o texto real for reconhecido como problema de permissão (por exemplo contém "403", "forbidden" ou "grant"):**
+
+**Update status** mostraria (o texto real do erro viria entre parênteses no fim):
+
+> Kindroid refused the question. The app may need a permission: check Apps, Waiting for you. (403 Forbidden: grant chat:read is missing)
+
+**Se o texto real não for reconhecido (o app o trata como erro passageiro):**
+
+**Update status** mostraria (o texto real do erro viria entre parênteses no fim):
+
+> The Kin could not be asked. (something unexpected happened)
+
+**O que esperar:** Não sei se o Kindroid chega a executar um app sem o Allow. Pode ser que ele mesmo bloqueie e mostre o seu próprio aviso, e então o cartão nem é afetado.
+
+**Confira:**
+- Não fica esperando para sempre: aparece uma resposta (erro ou aviso) em tempo razoável.
+- A mensagem é clara. Se o Kindroid nem chegar a executar o app, anote o que **ele** mostra.
+- Depois do **Allow**, funciona sem precisar reenviar o app.
+
+**Anote:** O texto exato entre parênteses, ou o que o Kindroid mostrar no lugar.
+
+### F2. Fechar o painel no meio de uma leitura
+
+**Como provocar:** Aperte **Update status** e, logo em seguida, feche o painel ou troque de aba. Espere uns 30 segundos e reabra.
+
+**O que esperar:** Ao reabrir, o cartão mostra a leitura nova (ela foi gravada pela execução) com "Last checked" atual, sem você apertar nada.
+
+**Confira:**
+- A leitura terminou mesmo sem o painel aberto.
+- O cartão mostra o resultado novo, não o antigo.
+- Não houve duas perguntas (veja o chat do Kin e o consumo, se aparecer).
+
+**Anote:** Se o resultado novo apareceu e depois de quanto tempo.
+
+### F3. Internet do PC desligada durante a leitura
+
+**Como provocar:** Aperte **Update status** e desligue o Wi-Fi do PC logo depois. Espere. Religue a rede e aperte **Try again**.
+
+**O que esperar:** Kindroid did not answer in time. Check your connection and try again. Your last reading is still shown. A mensagem pode demorar até uns 2,5 minutos para aparecer (a tela espera esse tempo pela resposta do Kindroid).
+
+**Confira:**
+- A mensagem aparece, em inglês, e o botão volta ao normal (não fica em "Reading…" para sempre).
+- As três frases anteriores **continuam** no cartão.
+- Depois de religar, **Try again** funciona.
+
+**Anote:** Quanto tempo levou até a mensagem aparecer. Se passou de 3 minutos, me avise: o tempo de espera da tela precisa diminuir.
+
+### F4. Kin desvinculado do app (o erro real do `kin ask`)
+
+**Como provocar:** Em **Settings → Automatic updates**, ligue a automação com intervalo **5**, marque o Kin e **feche o painel**. Em Apps → configurações do app → **Kins**, **desmarque** esse Kin. Espere **10 a 15 minutos** (2 ou 3 verificações) e abra o app.
+
+**Se o texto real for reconhecido como problema de permissão (por exemplo contém "403", "forbidden" ou "grant"):**
+
+E a verificação automática explicaria, sob o cartão (intervalo de 15 min como exemplo):
+
+Depois de 1 falha:
+> The last automatic check failed: Kindroid refused the question. The app may need a permission: check Apps, Waiting for you. (403 Forbidden: grant chat:read is missing)
+> Retrying sooner will not help: fix the cause, then press Try again.
+
+Depois de 3 falhas:
+> The last automatic check failed: Kindroid refused the question. The app may need a permission: check Apps, Waiting for you. (403 Forbidden: grant chat:read is missing)
+> 3 checks in a row have failed.
+> Retrying sooner will not help: fix the cause, then press Try again.
+
+**Se o texto real não for reconhecido (o app o trata como erro passageiro):**
+
+E a verificação automática explicaria, sob o cartão (intervalo de 15 min como exemplo):
+
+Depois de 1 falha:
+> The last automatic check failed: The Kin could not be asked. (something unexpected happened)
+> Trying again about 5 minutes after the last attempt.
+
+Depois de 3 falhas:
+> The last automatic check failed: The Kin could not be asked. (something unexpected happened)
+> 3 checks in a row have failed.
+> Trying again about 15 minutes after the last attempt.
+
+**Confira:**
+- A verificação automática **falhou** e o cartão mostra o motivo, quantas falharam seguidas e quando tenta de novo.
+- As últimas frases boas (se havia) continuam aparecendo.
+- Veja qual dos dois desfechos aconteceu: "Retrying sooner will not help…" (permissão) ou "Trying again about N minutes…" (passageiro).
+
+**Anote:** **O mais importante do roteiro:** o texto exato entre parênteses. É ele que mostra como o `kin` real descreve esse erro, e portanto qual dos dois desfechos você viu. Com o texto real eu ajusto o reconhecimento.
+
+### F5. Internet do PC desligada com a automação ligada
+
+**Como provocar:** Deixe a automação ligada com intervalo **5**. Desligue a internet do PC por uns 15 minutos, religue e abra o app.
+
+**O que esperar:** As verificações **continuaram** (elas rodam na nuvem do Kindroid, não no seu PC): o cartão mostra uma leitura "automatic" de dentro do período em que o PC ficou sem rede.
+
+**Confira:**
+- "Last checked … · automatic" tem um horário **durante** a queda de rede.
+- Nenhum erro vermelho no cartão.
+
+**Anote:** O horário da leitura automática e se havia erro. Se o app **parou** durante a queda, anote: isso mudaria o desenho.
+
+### F6. Kin respondendo "em personagem" (fora do formato)
+
+**Como provocar:** Diga ao Kin: "A partir de agora responda tudo em rimas e sempre em personagem." Converse um pouco e aperte **Update status** 3 vezes, em momentos diferentes. Depois peça para voltar ao normal.
+
+**Se o Kin não responder em JSON:**
+
+**Update status** mostraria:
+
+> The answer is not valid JSON (…). Nothing was changed. Try again.
+
+**Confira:**
+- Cada leitura ou funciona (ótimo) ou mostra um erro em vermelho com "not valid JSON … Nothing was changed. Try again."
+- Em caso de erro, as frases anteriores **continuam** e **Try again** pode funcionar na tentativa seguinte.
+
+**Anote:** Quantas das 3 falharam. Se falharam todas, o prompt precisa ficar mais firme (ou receber um exemplo mais forte).
+
+### F7. Leitura lenta
+
+**Como provocar:** Nada a provocar: observe durante todo o teste.
+
+**O que esperar:** Se uma leitura passar de **15 segundos**, o botão muda para "Still waiting for the Kin…" e aparece a nota "The Kin is taking longer than usual…". A resposta ainda chega.
+
+**Confira:**
+- O aviso aparece só quando demora.
+- O resultado chega no fim e o aviso some.
+
+**Anote:** O tempo total das leituras mais lentas, e se o aviso apareceu.
+
+### F8. Duas janelas apertando ao mesmo tempo
+
+**Como provocar:** Abra o app em **duas janelas** e aperte **Update status** nas duas ao mesmo tempo.
+
+**O que esperar:** As duas janelas terminam mostrando uma leitura coerente (a mesma, ou a segunda substituindo a primeira). Nenhum erro.
+
+**Confira:**
+- Nenhuma janela fica presa em "Reading…".
+- As duas mostram frases válidas.
+
+**Anote:** Se houve erro ou frases diferentes. O guia não diz se o Kindroid serializa execuções simultâneas: isto mostra.
+
 ## Medidas a anotar (uma vez)
 
 - **Tempo** entre apertar **Update status** e a frase aparecer. Anote 3 leituras.
@@ -313,7 +461,7 @@ Este arquivo é gerado por `node scripts/build-test-script.mjs`. As frases "O ca
 
 ## Tabela de resultados
 
-| Passo | Resultado (OK / parcial / falhou) | Tipo | Resposta do Kin (cole) | Cartão (cole as 3 frases) |
+| Passo | Resultado (OK / parcial / falhou) | Tipo | Resposta do Kin ou **texto real do erro** (cole) | Cartão (cole as 3 frases ou o aviso) |
 |---|---|---|---|---|
 | S1 |  |  |  |  |
 | S2 |  |  |  |  |
@@ -329,4 +477,12 @@ Este arquivo é gerado por `node scripts/build-test-script.mjs`. As frases "O ca
 | S11 |  |  |  |  |
 | S12 |  |  |  |  |
 | S13 |  |  |  |  |
+| F1 |  |  |  |  |
+| F2 |  |  |  |  |
+| F3 |  |  |  |  |
+| F4 |  |  |  |  |
+| F5 |  |  |  |  |
+| F6 |  |  |  |  |
+| F7 |  |  |  |  |
+| F8 |  |  |  |  |
 

@@ -1,6 +1,6 @@
 // Generates docs/real-kin-test-script.md. `node scripts/build-test-script.mjs` writes it; `--check` compares.
 import { readFileSync, writeFileSync } from 'node:fs';
-import { SCENARIOS, expected } from './real-kin-scenarios.mjs';
+import { SCENARIOS, expected, FAILURES, expectedFailure } from './real-kin-scenarios.mjs';
 
 export function renderScript() {
   const out = [];
@@ -44,6 +44,40 @@ ${s.checks.map((c) => `- ${c}`).join('\n')}
 **Se falhar:** ${s.ifWrong}`);
   }
   out.push(`
+## Falhas provocadas (a parte que mais ensina)
+
+Os passos acima verificam se o cartão entende o chat. Estes verificam o que acontece **quando algo dá errado**, e servem a um segundo objetivo: **coletar o texto real dos erros** do \`kin ask\`. O app reconhece o tipo de erro por esse texto (\`screen/src/core/errors.js\`), mas eu só consegui *supor* como ele aparece. Em cada erro o cartão mostra o texto real entre parênteses: **copie-o exatamente** na tabela. Com ele eu ajusto o reconhecimento.
+
+Vale em todas as falhas: as **últimas frases boas continuam no cartão**, e o botão **Try again** não pode ficar travado.
+
+Regra de ouro para a automação: ela roda **na nuvem do Kindroid**, não no seu PC. Desligar a internet do PC não pára as verificações; só impede você de ver o resultado até voltar.`);
+  for (const f of FAILURES) {
+    const lines = [`
+### ${f.id}. ${f.title}
+
+**Como provocar:** ${f.provoke}`];
+    for (const e of expectedFailure(f)) {
+      lines.push(`
+**${e.label}:**`);
+      if (!f.autoOnly) lines.push(`
+**Update status** mostraria${f.badAnswer ? '' : ' (o texto real do erro viria entre parênteses no fim)'}:
+
+> ${e.manual}`);
+      if (e.auto.length) {
+        lines.push('\nE a verificação automática explicaria, sob o cartão (intervalo de 15 min como exemplo):');
+        for (const a of e.auto) lines.push(`\nDepois de ${a.failures} falha${a.failures > 1 ? 's' : ''}:\n${a.lines.map((l) => `> ${l}`).join('\n')}`);
+      }
+    }
+    if (f.expectText) lines.push(`
+**O que esperar:** ${f.expectText}${f.expectNote ? ` ${f.expectNote}` : ''}`);
+    lines.push(`
+**Confira:**
+${f.checks.map((c) => `- ${c}`).join('\n')}
+
+**Anote:** ${f.record}`);
+    out.push(lines.join('\n'));
+  }
+  out.push(`
 ## Medidas a anotar (uma vez)
 
 - **Tempo** entre apertar **Update status** e a frase aparecer. Anote 3 leituras.
@@ -63,9 +97,9 @@ ${s.checks.map((c) => `- ${c}`).join('\n')}
 
 ## Tabela de resultados
 
-| Passo | Resultado (OK / parcial / falhou) | Tipo | Resposta do Kin (cole) | Cartão (cole as 3 frases) |
+| Passo | Resultado (OK / parcial / falhou) | Tipo | Resposta do Kin ou **texto real do erro** (cole) | Cartão (cole as 3 frases ou o aviso) |
 |---|---|---|---|---|
-${SCENARIOS.map((s) => `| ${s.id} |  |  |  |  |`).join('\n')}
+${[...SCENARIOS, ...FAILURES].map((s) => `| ${s.id} |  |  |  |  |`).join('\n')}
 `);
   return `${out.join('\n')}\n`;
 }

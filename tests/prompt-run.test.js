@@ -20,7 +20,7 @@ test('the prompt demands English-only, concise, one-line JSON and pins down the 
   assert.match(p, /Ignore plans, wishes and hypothetical outfits/);
   assert.match(p, /never guess/);
   assert.match(p, /If the chat says nothing about either, answer \{\}/);
-  assert.match(p, /where you are and what you are wearing/);
+  assert.match(p, /where you are, how you are positioned, what you are doing and what you are wearing/);
   assert.match(p, /"location": where you are right now, as a short phrase starting with in, at or on/);
   assert.match(p, /The place only, not your posture/);
   assert.match(p, /planning to go somewhere is not being there/);
@@ -35,6 +35,8 @@ test('the example inside the prompt is itself a valid answer', () => {
   const p = parseReading(example);
   assert.equal(p.ok, true);
   assert.equal(p.location, 'at a bookstore');
+  assert.equal(p.pose, 'standing by a shelf');
+  assert.equal(p.action, 'flipping through a book');
   assert.deepEqual(Object.keys(p.outfit), ['topwear', 'bottomwear', 'footwear']);
   assert.deepEqual(p.warnings, []);
 });
@@ -48,7 +50,7 @@ test('Workshop prompt has no chat block (the Kin sees its own chat); local promp
 
 test('the question is small: far below the 8,000 character limit, even with a long name', () => {
   const p = buildOutfitPrompt({ name: 'N'.repeat(500) });
-  assert.ok(p.length < 2500, `${p.length}`);
+  assert.ok(p.length < 3500, `${p.length}`);
   assert.ok(p.length < KIN_ASK_LIMIT);
   assert.ok(!p.includes('N'.repeat(61)), 'long names are cut');
 });
@@ -58,7 +60,7 @@ test('read_outfit: the Kin is asked by id; the outfit comes back as one sentence
   const provider = { extract: async (a) => { asked = a; return '{"location":"in the living room","topwear":["a perfumed white shirt","a leather jacket"],"bottomwear":["blue jeans"]}'; } };
   const out = await handleRun({ event: ev(), provider });
   assert.equal(out.ok, true);
-  assert.deepEqual(JSON.parse(out.message), { location: 'In the living room.', outfit: 'Wearing a leather jacket, a perfumed white shirt and blue jeans.' });
+  assert.deepEqual(JSON.parse(out.message), { location: 'In the living room.', doing: 'No pose or action described in the recent chat.', outfit: 'Wearing a leather jacket, a perfumed white shirt and blue jeans.' });
   assert.equal(asked.kinId, 'k1');
   assert.match(asked.prompt, /^You are Isa\./);
 });
@@ -66,7 +68,7 @@ test('read_outfit: the Kin is asked by id; the outfit comes back as one sentence
 test('a Kin that has not said anything gives two calm sentences, not an error', async () => {
   const out = await handleRun({ event: ev(), provider: answering('{}') });
   assert.equal(out.ok, true);
-  assert.deepEqual(JSON.parse(out.message), { location: 'No location described in the recent chat.', outfit: 'No outfit described in the recent chat.' });
+  assert.deepEqual(JSON.parse(out.message), { location: 'No location described in the recent chat.', doing: 'No pose or action described in the recent chat.', outfit: 'No outfit described in the recent chat.' });
 });
 
 test('a bad location type fails the whole reading clearly; nothing is invented', async () => {
@@ -110,10 +112,10 @@ test('the line given back is JSON with both sentences and never exceeds the 500 
 });
 
 test('packReading leaves a short reading untouched and always returns valid JSON within the limit', () => {
-  const short = { location: 'In the kitchen.', outfit: 'Wearing jeans.' };
+  const short = { location: 'In the kitchen.', doing: 'Standing, chopping onions.', outfit: 'Wearing jeans.' };
   assert.deepEqual(JSON.parse(packReading(short)), short);
   for (const n of [1, 5, 20, 80]) {
-    const p = packReading({ location: 'At the hospital.', outfit: `Wearing ${Array.from({ length: n }, (_, i) => `piece ${i}`).join(', ')}.` });
+    const p = packReading({ location: 'At the hospital.', doing: 'Sitting, waiting.', outfit: `Wearing ${Array.from({ length: n }, (_, i) => `piece ${i}`).join(', ')}.` });
     assert.ok(p.length <= 500);
     assert.doesNotThrow(() => JSON.parse(p));
   }

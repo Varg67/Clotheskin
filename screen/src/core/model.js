@@ -152,11 +152,13 @@ function briefItem(record, item) {
 }
 
 /** Compact projection of the confirmed state, sent to the extraction model. */
-export function projectForPrompt(record, profile) {
-  const col = (slots) => Object.fromEntries(slots.map((s) => {
-    const list = getList(record, s);
-    return [s, list === null ? null : list.map((id) => briefItem(record, record.items[id]))];
-  }));
+export function projectForPrompt(record, profile, { compact = false, maxNotWorn = Infinity } = {}) {
+  const col = (slots) => Object.fromEntries(slots
+    .filter((s) => !(compact && getList(record, s) === null)) // compact: unknown slots are simply omitted
+    .map((s) => {
+      const list = getList(record, s);
+      return [s, list === null ? null : list.map((id) => briefItem(record, record.items[id]))];
+    }));
   const v = (f) => record.fields[f].value;
   return {
     target: { id: profile.id, name: profile.name, ...(profile.pronouns ? { pronouns: profile.pronouns } : {}) },
@@ -166,8 +168,8 @@ export function projectForPrompt(record, profile) {
     makeup: v('makeup'),
     clothing: col(CLOTHING_SLOTS),
     accessories: col(ACCESSORY_SLOTS),
-    bags: record.bags === null ? null : record.bags.map((id) => briefItem(record, record.items[id])),
-    known_items_not_worn: offBodyItems(record).map((i) => ({
+    ...(compact && record.bags === null ? {} : { bags: record.bags === null ? null : record.bags.map((id) => briefItem(record, record.items[id])) }),
+    known_items_not_worn: offBodyItems(record).slice(-maxNotWorn).map((i) => ({
       ...briefItem(record, i), kind: i.kind, place: placeForModel(record, i),
     })),
   };

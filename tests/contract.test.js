@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseResponseText, validateDocument } from '../src/core/validate.js';
-import { buildPrompt, DEFAULT_EXTRACTION_PROMPT } from '../src/core/prompt.js';
-import { renderContract, OP_SPECS } from '../src/core/contract.js';
-import { WEAR_SLOTS, CLOTHING_SLOTS, ACCESSORY_SLOTS } from '../src/core/constants.js';
-import { DEMO_SCENES } from '../src/demo/demo.js';
+import { parseResponseText, validateDocument } from '../screen/src/core/validate.js';
+import { buildPrompt, DEFAULT_EXTRACTION_PROMPT } from '../screen/src/core/prompt.js';
+import { renderContract, OP_SPECS } from '../screen/src/core/contract.js';
+import { WEAR_SLOTS, CLOTHING_SLOTS, ACCESSORY_SLOTS } from '../screen/src/core/constants.js';
+import { DEMO_SCENES } from '../screen/src/demo/demo.js';
 import { fresh, profile, run } from './helpers.js';
-import { parseConversation } from '../src/core/messages.js';
+import { parseConversation } from '../screen/src/core/messages.js';
 
 const SPEC_EXAMPLE = {
   state_updates: { hair: 'bun', position: 'standing' },

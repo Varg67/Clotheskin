@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { formatClock, formatRelative } from '../src/core/format.js';
-import { lookSummary, accessorySummary, hairIcon, postureIcon } from '../src/core/summary.js';
-import { buildDemoRecord } from '../src/demo/demo.js';
-import { displayValue } from '../src/core/model.js';
+import { formatClock, formatRelative } from '../screen/src/core/format.js';
+import { lookSummary, accessorySummary, hairIcon, postureIcon } from '../screen/src/core/summary.js';
+import { buildDemoRecord } from '../screen/src/demo/demo.js';
+import { displayValue } from '../screen/src/core/model.js';
 
 test('times are English and respect the supplied time zone', () => {
   const now = new Date('2026-11-19T15:00:00Z');

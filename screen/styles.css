@@ -171,3 +171,16 @@ dialog.sheet::backdrop { background: var(--scrim); -webkit-backdrop-filter: blur
 .pp-text { display: flex; flex-direction: column; flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .profile-form { display: grid; gap: 6px; } .row-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 dialog.sheet.wide { width: min(760px, 100vw - 64px); }
+
+/* Kindroid Workshop: the screen is a locked frame about 390 points wide, so only the card (plus settings) is shown. */
+.layout.frame { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.layout.frame .col-status { position: static; max-height: none; overflow: visible; }
+.mode-workshop .panel { padding: 10px 10px 28px; max-width: 480px; }
+.mode-workshop .reader-body { grid-template-columns: minmax(0, 1fr); padding: 0 16px 18px; }
+.mode-workshop .reader { margin-top: 0; }
+.mode-workshop .reader > summary { padding: 14px 16px; font-size: 1rem; min-height: 48px; }
+.mode-workshop dialog.sheet, .mode-workshop dialog.sheet.wide { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+.mode-workshop .sheet-head { padding: 18px 18px 6px; } .mode-workshop .sheet-body { padding: 6px 18px 12px; }
+.mode-workshop .sheet-foot { padding: 12px 18px 16px; } .mode-workshop .sheet .form-error { padding: 0 18px; }
+.mode-workshop .detail-grid { grid-template-columns: 1fr; }
+.mode-workshop .foot { display: none; }

@@ -132,3 +132,62 @@ export function renderContract() {
     'the affected items must stay unchanged.');
   return lines.join('\n');
 }
+
+const REF_NAMES = (name) => `${name}_id|${name}_name`;
+
+/** Short form of the contract, for channels with a hard size limit (kin ask: 8,000 characters). */
+export function renderCompactContract() {
+  const lines = [];
+  lines.push('Reply with {"state_updates":{},"item_changes":[],"unresolved":[]}.');
+  lines.push(`state_updates: only changed ${STATE_FIELDS.join(', ')}; short English strings, never null; makeup "none" = confirmed no makeup.`);
+  lines.push('item_changes: operations {"op":...}. Fields marked * are required; refs are item_id or item_name (use known ids).');
+  for (const [op, spec] of Object.entries(OP_SPECS)) {
+    const f = Object.entries(spec.fields).map(([name, d]) => {
+      const label = d.kind === 'ref' ? REF_NAMES(name) : name;
+      const hint = d.kind === 'enum' && d.values.length <= 4 ? `(${d.values.join('|')})` : d.kind === 'enumList' ? '[slots]' : d.kind === 'pockets' ? '[{label,side}]' : d.kind === 'dest' ? '(destination below)' : d.nullable ? '(text|null)' : '';
+      return `${label}${d.required ? '*' : ''}${hint}`;
+    });
+    lines.push(`  ${op}: ${f.join(', ')}`);
+  }
+  lines.push('  to = {"type":"held","hand"} | {"type":"pocket","container_item_id|container_item_name","pocket","side"} | {"type":"bag","container_item_id|container_item_name"} | {"type":"scene","place"}');
+  lines.push(`clothing slots (inner layer first): ${CLOTHING_SLOTS.join(', ')}. One-piece garments use their main slot plus "covers".`);
+  lines.push(`accessory slots: ${ACCESSORY_SLOTS.join(', ')} (bottom-accessory = hips). Bags: "${BAG_SLOT}".`);
+  lines.push('wear slots, for "slot": any clothing slot, accessory slot or "bags". In PREVIOUS STATE null = unknown, [] = confirmed empty; omitted slots are unknown.');
+  return lines.join('\n');
+}
+
+/**
+ * JSON Schema for the action the Kin calls to report scene changes. Deliberately permissive in nesting:
+ * the real validation is validate.js, which runs again on whatever arrives.
+ */
+export function contractJsonSchema() {
+  const type = { string: { type: 'string' } };
+  const props = {};
+  const destProps = {};
+  for (const [name, d] of Object.entries(DESTINATIONS)) {
+    for (const [fname, f] of Object.entries(d.fields)) {
+      if (f.kind === 'ref') { destProps[`${fname}_id`] = type.string; destProps[`${fname}_name`] = type.string; }
+      else if (f.kind === 'enum') destProps[fname] = { type: 'string', enum: f.values };
+      else destProps[fname] = type.string;
+    }
+  }
+  for (const spec of Object.values(OP_SPECS)) {
+    for (const [name, f] of Object.entries(spec.fields)) {
+      if (f.kind === 'ref') { props[`${name}_id`] = type.string; props[`${name}_name`] = type.string; }
+      else if (f.kind === 'enum') props[name] = { type: 'string', enum: f.values };
+      else if (f.kind === 'enumList') props[name] = { type: 'array', items: { type: 'string', enum: f.values } };
+      else if (f.kind === 'pockets') props[name] = { type: 'array', items: { type: 'object', properties: { label: type.string, side: { type: 'string' } }, required: ['label'] } };
+      else if (f.kind === 'dest') props[name] = { type: 'object', properties: { type: { type: 'string', enum: DESTINATION_TYPES }, ...destProps }, required: ['type'] };
+      else props[name] = f.nullable ? { type: ['string', 'null'] } : type.string;
+    }
+  }
+  props.op = { type: 'string', enum: Object.keys(OP_SPECS) };
+  return {
+    type: 'object',
+    properties: {
+      state_updates: { type: 'object', properties: Object.fromEntries(STATE_FIELDS.map((f) => [f, type.string])) },
+      item_changes: { type: 'array', items: { type: 'object', properties: props, required: ['op'] } },
+      unresolved: { type: 'array', items: type.string },
+    },
+  };
+}

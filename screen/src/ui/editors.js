@@ -267,7 +267,8 @@ export function openItemsEditor({ mode, record, repo, onSaved, opener }) {
 
 const ID_RE = /^[A-Za-z0-9._:-]{1,64}$/;
 
-export function openProfileSheet({ repo, profiles, selectedId, onSelect, onChanged, opener }) {
+export function openProfileSheet({ repo, profiles, selectedId, onSelect, onChanged, opener, managed = false }) {
+  // managed: the host (Workshop) owns identity. Names and ids come from it; only pronouns are editable here.
   let editing = null; // null | 'new' | profile id
   let avatarData; // undefined = unchanged
   let body;
@@ -276,7 +277,7 @@ export function openProfileSheet({ repo, profiles, selectedId, onSelect, onChang
   const redraw = () => keepFocus(body, () => body.replaceChildren(...view()));
 
   function form(existing) {
-    const name = h('input', { type: 'text', id: 'pf-name', class: 'text-input', value: existing?.name ?? '', 'data-key': 'pf-name', autocomplete: 'off' });
+    const name = h('input', { type: 'text', id: 'pf-name', class: 'text-input', value: existing?.name ?? '', disabled: managed, 'data-key': 'pf-name', autocomplete: 'off' });
     const id = h('input', { type: 'text', id: 'pf-id', class: 'text-input', value: existing?.id ?? '', disabled: !!existing, 'data-key': 'pf-id', autocomplete: 'off', placeholder: 'Leave empty to create one' });
     const pron = h('input', { type: 'text', id: 'pf-pron', class: 'text-input', value: existing?.pronouns ?? '', 'data-key': 'pf-pron', placeholder: 'e.g. she/her (optional)', autocomplete: 'off' });
     const url = h('input', { type: 'url', id: 'pf-avatar', class: 'text-input', value: existing?.avatarUrl && !existing.avatarUrl.startsWith('data:') ? existing.avatarUrl : '', 'data-key': 'pf-avatar', placeholder: 'https://… (optional)' });
@@ -288,20 +289,20 @@ export function openProfileSheet({ repo, profiles, selectedId, onSelect, onChang
       h('h3', { class: 'sub' }, existing ? `Edit ${existing.name}` : 'New companion'),
       h('label', { class: 'label', for: 'pf-name' }, 'Name'), name,
       h('label', { class: 'label', for: 'pf-id' }, 'Companion ID'), id,
-      h('p', { class: 'help' }, existing ? 'The ID never changes, so renaming keeps this companion’s data.' : 'Use the ID your host gives this companion. It keeps two companions with the same name apart.'),
+      h('p', { class: 'help' }, managed ? 'The name and ID come from Kindroid.' : existing ? 'The ID never changes, so renaming keeps this companion’s data.' : 'Use the ID your host gives this companion. It keeps two companions with the same name apart.'),
       h('label', { class: 'label', for: 'pf-pron' }, 'Pronouns'), pron,
-      h('label', { class: 'label', for: 'pf-avatar' }, 'Avatar image address'), url,
-      h('label', { class: 'label', for: 'pf-avatar-file' }, 'Or choose a file'), file,
+      ...(managed ? [] : [h('label', { class: 'label', for: 'pf-avatar' }, 'Avatar image address'), url,
+        h('label', { class: 'label', for: 'pf-avatar-file' }, 'Or choose a file'), file]),
       err,
       h('div', { class: 'row-actions' },
         h('button', { type: 'button', class: 'btn ghost', onClick: () => { editing = null; avatarData = undefined; redraw(); } }, 'Cancel'),
         h('button', { type: 'submit', class: 'btn primary', 'data-key': 'pf-save', onClick: async () => {
-          const nm = cleanString(name.value, 60);
+          const nm = managed ? existing.name : cleanString(name.value, 60);
           if (!nm) return fail('Enter a name for the companion.');
           const idv = existing ? existing.id : (cleanString(id.value, 64) || `kin-${Math.random().toString(36).slice(2, 10)}`);
           if (!ID_RE.test(idv)) return fail('The ID may only use letters, numbers, dots, dashes, colons and underscores.');
           if (!existing && profiles.some((p) => p.id === idv)) return fail('Another companion already uses this ID.');
-          const avatar = avatarData !== undefined ? avatarData : (url.value.trim() || null);
+          const avatar = managed ? (existing.avatarUrl ?? null) : avatarData !== undefined ? avatarData : (url.value.trim() || null);
           if (existing) {
             await repo.updateProfile(existing.id, (p) => ({ ...p, name: nm, pronouns: cleanString(pron.value, 40) || null, avatarUrl: avatar }));
           } else {
@@ -322,10 +323,10 @@ export function openProfileSheet({ repo, profiles, selectedId, onSelect, onChang
       h('ul', { class: 'profile-list', role: 'list' }, ...profiles.map((p) => h('li', {},
         h('button', { type: 'button', class: `profile-pick${p.id === selectedId ? ' selected' : ''}`, 'aria-pressed': String(p.id === selectedId), 'data-key': `pick-${p.id}`,
           onClick: () => { onSelect(p.id); api.close(); } },
-        avatarNode(p, 36), h('span', { class: 'pp-text' }, h('strong', {}, p.name), h('span', { class: 'muted' }, p.demo ? 'Demo example' : `ID: ${p.id}`)),
+        avatarNode(p, 36), h('span', { class: 'pp-text' }, h('strong', {}, p.name), h('span', { class: 'muted' }, p.demo ? 'Demo example' : managed ? 'From Kindroid' : `ID: ${p.id}`)),
         p.id === selectedId ? h('span', { class: 'tag' }, 'Selected') : null),
         h('button', { type: 'button', class: 'btn ghost small', 'aria-label': `Edit ${p.name}`, 'data-key': `edit-${p.id}`, onClick: () => { editing = p.id; redraw(); } }, 'Edit'),
-        !p.demo ? h('button', { type: 'button', class: 'btn ghost small danger', 'aria-label': `Delete ${p.name}`, 'data-key': `del-${p.id}`, onClick: async (e) => {
+        !p.demo && !managed ? h('button', { type: 'button', class: 'btn ghost small danger', 'aria-label': `Delete ${p.name}`, 'data-key': `del-${p.id}`, onClick: async (e) => {
           if (confirm.id !== p.id) { confirm.id = p.id; e.target.textContent = 'Confirm delete'; return; }
           await repo.deleteProfile(p.id);
           if (p.id === selectedId) onSelect(null);
@@ -333,7 +334,8 @@ export function openProfileSheet({ repo, profiles, selectedId, onSelect, onChang
           api.close();
         } }, 'Delete') : null))),
       profiles.length === 0 ? h('p', { class: 'muted' }, 'No companions yet.') : null,
-      h('button', { type: 'button', class: 'btn', 'data-key': 'new-profile', onClick: () => { editing = 'new'; redraw(); } }, icon('plus', { size: 16 }), 'New companion'),
+      managed ? h('p', { class: 'help' }, 'Companions are the Kins attached to this app. To add or remove one, open this app’s settings in Kindroid Apps and use Kins.')
+        : h('button', { type: 'button', class: 'btn', 'data-key': 'new-profile', onClick: () => { editing = 'new'; redraw(); } }, icon('plus', { size: 16 }), 'New companion'),
     ];
   }
 

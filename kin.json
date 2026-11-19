@@ -1,0 +1,267 @@
+{
+  "kin": 1,
+  "name": "Clotheskin",
+  "purpose": "Keeps track of what each Kin is wearing and where they are, and lets the person correct it.",
+  "run": {
+    "entry": "node main.js",
+    "timeout": "2m"
+  },
+  "screens": [
+    {
+      "slot": "panel",
+      "entry": "screen/index.html",
+      "title": "Clotheskin"
+    }
+  ],
+  "actions": [
+    {
+      "name": "read_scene",
+      "description": "Reads the Kin’s recent chat and updates the scene tracker (clothes, accessories, hair, makeup, posture, location).",
+      "input": {
+        "type": "object",
+        "properties": {
+          "kin": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "pronouns": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kin"
+        ]
+      },
+      "by": [
+        "user"
+      ]
+    },
+    {
+      "name": "update_scene",
+      "description": "Use when something about your own look or place just changed in the chat: clothes put on or taken off, belongings moved, hair, makeup, posture or location. Report only things already done, never plans.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "state_updates": {
+            "type": "object",
+            "properties": {
+              "hair": {
+                "type": "string"
+              },
+              "makeup": {
+                "type": "string"
+              },
+              "position": {
+                "type": "string"
+              },
+              "location": {
+                "type": "string"
+              }
+            }
+          },
+          "item_changes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "item_id": {
+                  "type": "string"
+                },
+                "item_name": {
+                  "type": "string"
+                },
+                "slot": {
+                  "type": "string",
+                  "enum": [
+                    "headwear",
+                    "topwear",
+                    "topunderwear",
+                    "bottomwear",
+                    "bottomunderwear",
+                    "footwear",
+                    "footunderwear",
+                    "head-accessory",
+                    "ears-accessory",
+                    "eyes-accessory",
+                    "mouth-accessory",
+                    "neck-accessory",
+                    "body-accessory",
+                    "arms-accessory",
+                    "hands-accessory",
+                    "waist-accessory",
+                    "bottom-accessory",
+                    "legs-accessory",
+                    "foot-accessory",
+                    "bags"
+                  ]
+                },
+                "over_item_id": {
+                  "type": "string"
+                },
+                "over_item_name": {
+                  "type": "string"
+                },
+                "under_item_id": {
+                  "type": "string"
+                },
+                "under_item_name": {
+                  "type": "string"
+                },
+                "wear_mode": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "condition": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "side": {
+                  "type": "string",
+                  "enum": [
+                    "left",
+                    "right",
+                    "both",
+                    "center"
+                  ]
+                },
+                "placement": {
+                  "type": "string"
+                },
+                "covers": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "headwear",
+                      "topwear",
+                      "topunderwear",
+                      "bottomwear",
+                      "bottomunderwear",
+                      "footwear",
+                      "footunderwear"
+                    ]
+                  }
+                },
+                "pockets": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "label": {
+                        "type": "string"
+                      },
+                      "side": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "label"
+                    ]
+                  }
+                },
+                "to": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "held",
+                        "pocket",
+                        "bag",
+                        "scene"
+                      ]
+                    },
+                    "hand": {
+                      "type": "string",
+                      "enum": [
+                        "left",
+                        "right",
+                        "both"
+                      ]
+                    },
+                    "container_item_id": {
+                      "type": "string"
+                    },
+                    "container_item_name": {
+                      "type": "string"
+                    },
+                    "pocket": {
+                      "type": "string"
+                    },
+                    "side": {
+                      "type": "string",
+                      "enum": [
+                        "left",
+                        "right",
+                        "both",
+                        "center"
+                      ]
+                    },
+                    "place": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "clothing",
+                    "accessory",
+                    "bag",
+                    "object"
+                  ]
+                },
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "wear",
+                    "remove",
+                    "change_wear_mode",
+                    "change_condition",
+                    "move"
+                  ]
+                }
+              },
+              "required": [
+                "op"
+              ]
+            }
+          },
+          "unresolved": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "by": [
+        "kin"
+      ]
+    },
+    {
+      "name": "scene_status",
+      "description": "Use to check what you are wearing and where you are before describing it.",
+      "input": {
+        "type": "object",
+        "properties": {}
+      },
+      "by": [
+        "kin"
+      ]
+    }
+  ],
+  "grants": [
+    "kin:read",
+    "chat:read:1"
+  ]
+}

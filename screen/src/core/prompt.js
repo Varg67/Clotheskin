@@ -1,4 +1,4 @@
-import { renderContract } from './contract.js';
+import { renderContract, renderCompactContract } from './contract.js';
 import { projectForPrompt } from './model.js';
 
 /**
@@ -53,4 +53,44 @@ export function buildPrompt({ template = DEFAULT_EXTRACTION_PROMPT, profile, rec
     speaker_labeled_messages: `\n${formatMessages(messages)}`,
   };
   return template.replace(/\{\{(\w+)\}\}/g, (m, k) => (k in values ? values[k] : m));
+}
+
+/** kin ask accepts at most 8,000 characters. */
+export const KIN_ASK_LIMIT = 8000;
+
+/**
+ * Variant for the Kindroid Workshop. The app cannot read the chat: the Kin sees its own recent chat
+ * (grant chat:read:<days>) and answers the question. So there is no RECENT EXCHANGE block, and
+ * the Kin must answer with data only, not in character.
+ */
+export const HOST_CHAT_PROMPT = `You are filling in a scene tracker about yourself, {{target_character}}.
+Look at your recent chat with the person and update the tracker as of the last message.
+Read both Portuguese and English. Dialogue and narrated actions are scene evidence.
+Track only yourself, not the person or anyone else in the scene.
+
+Start from PREVIOUS STATE. Report completed actions and facts established by the chat.
+Plans, questions, suggestions, memories and hypothetical outfits do not change the state.
+Keep the last established location until the chat establishes a move. Leave unmentioned details unknown.
+Write every description in English, keeping proper names. Describe items by known id, or by an
+ordinary name on first appearance. If a reference is ambiguous, say so in "unresolved" and leave it unchanged.
+With no changes, return empty collections.
+Answer with the JSON object only: no narration, no roleplay, no commentary.
+
+{{operation_contract}}
+
+PREVIOUS STATE: {{previous_state_json}}
+`;
+
+/** Builds the Workshop prompt and shrinks the state until it fits the limit. */
+export function buildHostChatPrompt({ template = HOST_CHAT_PROMPT, profile, record, limit = KIN_ASK_LIMIT }) {
+  const fill = (opts) => template.replace(/\{\{(\w+)\}\}/g, (m, k) => ({
+    operation_contract: renderCompactContract(),
+    target_character: profile.name,
+    previous_state_json: JSON.stringify(projectForPrompt(record, profile, { compact: true, ...opts })),
+  }[k] ?? m));
+  for (const maxNotWorn of [Infinity, 20, 10, 5, 0]) {
+    const text = fill({ maxNotWorn });
+    if (text.length <= limit) return text;
+  }
+  throw new Error(`The scene state is too large to send in one question (limit ${limit} characters). Remove unused items in the editor and try again.`);
 }

@@ -1,7 +1,7 @@
-import { MemoryStorage, Repository } from '../src/core/store.js';
-import { createRecord } from '../src/core/model.js';
-import { applyDocument } from '../src/core/apply.js';
-import { validateDocument } from '../src/core/validate.js';
+import { MemoryStorage, Repository } from '../screen/src/core/store.js';
+import { createRecord } from '../screen/src/core/model.js';
+import { applyDocument } from '../screen/src/core/apply.js';
+import { validateDocument } from '../screen/src/core/validate.js';
 
 export const NOW = '2026-11-19T12:00:00.000Z';
 

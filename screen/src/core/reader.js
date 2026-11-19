@@ -1,4 +1,4 @@
-import { buildPrompt, DEFAULT_EXTRACTION_PROMPT } from './prompt.js';
+import { buildPrompt, buildHostChatPrompt, DEFAULT_EXTRACTION_PROMPT } from './prompt.js';
 import { parseResponseText, validateDocument } from './validate.js';
 import { applyDocument } from './apply.js';
 
@@ -16,11 +16,12 @@ import { applyDocument } from './apply.js';
  *  - Each message is processed once unless `force` is set.
  */
 export class ReadCoordinator {
-  constructor({ repo, provider, clock = () => new Date(), getPromptTemplate = () => DEFAULT_EXTRACTION_PROMPT, onChange = () => {} }) {
+  constructor({ repo, provider, clock = () => new Date(), getPromptTemplate = () => DEFAULT_EXTRACTION_PROMPT, getHostPromptTemplate = () => undefined, onChange = () => {} }) {
     this.repo = repo;
     this.provider = provider;
     this.clock = clock;
     this.getPromptTemplate = getPromptTemplate;
+    this.getHostPromptTemplate = getHostPromptTemplate;
     this.onChange = onChange;
     this.inflight = new Map(); // scope -> { ticket, promise }
     this.latestSeq = new Map();
@@ -55,9 +56,12 @@ export class ReadCoordinator {
       const profile = await this.repo.getProfile(profileId);
       if (!profile) return (result = { status: 'error', message: 'Select a companion before reading a scene.' });
       const record = await this.repo.getRecord(profileId, conversationId);
+      // messages === null: the host's Kin sees its own recent chat (Workshop). Nothing to dedupe by id:
+      // re-reading the same chat is safe because every operation is idempotent.
+      const hostChat = messages === null || messages === undefined;
       const processed = new Set(record.processedMessageIds);
-      const fresh = force ? messages : messages.filter((m) => !processed.has(m.id));
-      if (!fresh.length) return (result = { status: 'nothing-new', message: 'There are no new messages to read.' });
+      const fresh = hostChat ? [] : (force ? messages : messages.filter((m) => !processed.has(m.id)));
+      if (!hostChat && !fresh.length) return (result = { status: 'nothing-new', message: 'There are no new messages to read.' });
 
       const ticket = {
         id: `t${entry.seq}`, seq: entry.seq, profileId, conversationId,
@@ -66,7 +70,14 @@ export class ReadCoordinator {
       };
       entry.ticket = ticket;
       this.onChange({ type: 'started', ticket });
-      const prompt = buildPrompt({ template: this.getPromptTemplate(), profile, record, messages: fresh });
+      let prompt;
+      try {
+        prompt = hostChat
+          ? buildHostChatPrompt({ template: this.getHostPromptTemplate(), profile, record })
+          : buildPrompt({ template: this.getPromptTemplate(), profile, record, messages: fresh });
+      } catch (e) {
+        return (result = await this.#fail(ticket, e.message));
+      }
 
       let text;
       try {
@@ -118,6 +129,20 @@ export class ReadCoordinator {
       status: 'ok', ticket, applied: outcome.applied, skipped: outcome.skipped, unresolved: outcome.unresolved,
       message: outcome.applied.length ? 'Status updated.' : 'Read complete. No changes found.',
     };
+  }
+
+  /**
+   * Applies a document the Kin reported itself (the Workshop action the Kin calls). No provider, no
+   * waiting: the base revision is the one on disk right now.
+   */
+  async submit({ profileId, conversationId = null, text }) {
+    if (!profileId) return { status: 'error', message: 'Select a companion before reading a scene.' };
+    const record = await this.repo.getRecord(profileId, conversationId);
+    const ticket = {
+      id: `k${++this.seq}`, seq: this.seq, profileId, conversationId, baseRev: record.rev,
+      startedAt: this.clock().toISOString(), messageIds: [], demoOnly: false,
+    };
+    return this.commit(ticket, text);
   }
 
   async #fail(ticket, message, cancelled = false, details = null) {

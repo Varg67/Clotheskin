@@ -72,3 +72,18 @@ export function postureIcon(value) {
   if (/\b(stand|standing|walk|walking|upright|leaning)\b/i.test(v)) return 'standing';
   return 'person';
 }
+
+/** Plain English status for the Kin and for logs, at most `max` characters. */
+export function sceneStatusText(record, max = 500) {
+  const v = (f) => record.fields[f].value;
+  const parts = [
+    `Location: ${v('location') ?? 'unknown'}`,
+    `Posture: ${v('position') ?? 'unknown'}`,
+    `Wearing: ${lookSummary(record) ?? 'unknown'}`,
+    `Accessories: ${accessorySummary(record, 6) ?? 'unknown'}`,
+    `Hair: ${v('hair') ?? 'unknown'}`,
+    `Makeup: ${v('makeup') === 'none' ? 'none' : v('makeup') ?? 'unknown'}`,
+  ];
+  const text = `${parts.join('. ')}.`;
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+}

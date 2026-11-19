@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { repo, profile, NOW, byName, names } from './helpers.js';
-import { ReadCoordinator, ManualProvider } from '../src/core/reader.js';
-import { mergeManualEdit, manualOp } from '../src/core/apply.js';
-import { parseConversation } from '../src/core/messages.js';
-import { checkInvariants } from '../src/core/model.js';
+import { ReadCoordinator, ManualProvider } from '../screen/src/core/reader.js';
+import { mergeManualEdit, manualOp } from '../screen/src/core/apply.js';
+import { parseConversation } from '../screen/src/core/messages.js';
+import { checkInvariants } from '../screen/src/core/model.js';
 
 const wearDoc = (name, slot = 'topwear', extra = {}) => JSON.stringify({
   state_updates: extra.state_updates || {}, item_changes: [{ op: 'wear', item_name: name, slot }], unresolved: [],
@@ -259,7 +259,7 @@ test('persistence survives reopening: a new Repository over the same storage see
   const { r, provider, c } = await setup();
   provider.preload(wearDoc('scarf', 'neck-accessory', { state_updates: { hair: 'braid' } }));
   await c.read({ profileId: 'alex-1', messages: parseConversation('Alex: scarf') });
-  const { Repository } = await import('../src/core/store.js');
+  const { Repository } = await import('../screen/src/core/store.js');
   const reopened = new Repository(r.storage);
   const rec = await reopened.getRecord('alex-1');
   assert.deepEqual(names(rec, 'neck-accessory'), ['scarf']);

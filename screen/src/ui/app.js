@@ -30,6 +30,8 @@ const REQUIRED_PLACEHOLDERS = ['{{target_character}}', '{{previous_state_json}}'
 
 export async function startApp({ root, repo, host, clock = () => new Date() }) {
   document.documentElement.lang = 'en';
+  const isWorkshop = host.id === 'workshop';
+  document.body.classList.toggle('mode-workshop', isWorkshop);
   const provider = new ManualProvider();
   const S = {
     settings: await repo.getSettings(),
@@ -41,12 +43,14 @@ export async function startApp({ root, repo, host, clock = () => new Date() }) {
     lastResult: null,
     pending: null,
     responseDraft: '',
-    readerOpen: true, // desktop: the workspace is visible by default
+    readerOpen: !isWorkshop, // local desktop: workspace visible; Workshop frame: collapsed
     promptEditor: false,
+    attachedIds: [], // Workshop: ids of the Kins attached to this app
+    readingIds: new Set(), // Workshop: Kins with a reading in progress
   };
 
   applyTheme(S.settings.theme);
-  await seedDemo(repo);
+  if (!isWorkshop) await seedDemo(repo);
   const live = h('div', { class: 'sr-only', role: 'status', 'aria-live': 'polite' });
   document.body.append(live);
   const announce = (t) => { live.textContent = ''; setTimeout(() => { live.textContent = t; }, 30); };
@@ -66,13 +70,15 @@ export async function startApp({ root, repo, host, clock = () => new Date() }) {
 
   // ------------------------------------------------------------- data loading
   async function refresh() {
-    S.profiles = await repo.listProfiles();
+    S.profiles = isWorkshop
+      ? (await Promise.all(S.attachedIds.map((id) => repo.getProfile(id)))).filter(Boolean)
+      : await repo.listProfiles();
     if (S.settings.selectedProfileId && !S.profiles.some((p) => p.id === S.settings.selectedProfileId)) {
       S.settings = await repo.saveSettings({ selectedProfileId: null });
     }
     S.profile = S.profiles.find((p) => p.id === S.settings.selectedProfileId) || null;
     S.record = S.profile ? await repo.getRecord(S.profile.id, S.settings.conversationId || null) : null;
-    S.reading = S.profile ? coordinator.isReading(S.profile.id, S.settings.conversationId || null) : false;
+    S.reading = S.profile ? (isWorkshop ? S.readingIds.has(S.profile.id) : coordinator.isReading(S.profile.id, S.settings.conversationId || null)) : false;
     render();
   }
 
@@ -83,7 +89,22 @@ export async function startApp({ root, repo, host, clock = () => new Date() }) {
     announce(id ? `Selected ${S.profile?.name}` : 'No companion selected');
   }
 
-  if (!S.settings.firstRunDone) {
+  if (isWorkshop) {
+    // Companions are the Kins attached to this app (their ids and names come from the host).
+    const syncKins = async (kins) => {
+      S.attachedIds = kins.map((k) => k.id);
+      for (const k of kins) {
+        const existing = await repo.getProfile(k.id);
+        if (!existing) await repo.saveProfile({ id: k.id, name: k.name, pronouns: null, avatarUrl: null, demo: false, createdAt: clock().toISOString(), places: [] });
+        else if (existing.name !== k.name) await repo.updateProfile(k.id, (p) => ({ ...p, name: k.name }));
+      }
+      if (!S.attachedIds.includes(S.settings.selectedProfileId)) {
+        S.settings = await repo.saveSettings({ selectedProfileId: S.attachedIds.length === 1 ? S.attachedIds[0] : null });
+      }
+    };
+    await syncKins(host.kins || []);
+    host.channel.onKinsChange(async (kins) => { await syncKins(kins); await refresh(); });
+  } else if (!S.settings.firstRunDone) {
     S.settings = await repo.saveSettings({ selectedProfileId: DEMO_PROFILE_ID, firstRunDone: true });
   }
 
@@ -99,12 +120,32 @@ export async function startApp({ root, repo, host, clock = () => new Date() }) {
 
   function openPicker(opener) {
     openProfileSheet({
-      repo, profiles: S.profiles, selectedId: S.profile?.id || null, opener,
+      repo, profiles: S.profiles, selectedId: S.profile?.id || null, opener, managed: isWorkshop,
       onSelect: (id) => { selectProfile(id); }, onChanged: refresh,
     });
   }
 
+  /** Workshop: the run asks the Kin about its recent chat. The reading belongs to the Kin it started for. */
+  async function startWorkshopReading() {
+    const profile = S.profile;
+    if (!profile) { openPicker(); return; }
+    if (S.readingIds.has(profile.id)) return; // repeated clicks join the reading in progress
+    S.readingIds.add(profile.id); S.banner = null; S.reading = true; render();
+    let banner;
+    try {
+      const r = await host.channel.runAction('read_scene', { kin: profile.id, name: profile.name, ...(profile.pronouns ? { pronouns: profile.pronouns } : {}) });
+      banner = r.ok ? { kind: 'ok', text: r.summary || 'Status updated.' } : { kind: 'error', text: r.summary || 'The reading could not be completed.' };
+    } catch (e) {
+      banner = { kind: 'error', text: e.message };
+    }
+    S.readingIds.delete(profile.id);
+    if (S.profile?.id === profile.id) S.banner = banner; // never show Alex's result on Isa's card
+    announce(banner.text);
+    await refresh();
+  }
+
   async function startReading({ force = false, demoOnly = false } = {}) {
+    if (isWorkshop) { await startWorkshopReading(); return; }
     if (!S.profile) { openPicker(); return; }
     const messages = parseConversation(draftText());
     if (!messages.length) {
@@ -193,8 +234,11 @@ export async function startApp({ root, repo, host, clock = () => new Date() }) {
       return h('section', { class: 'card empty' },
         h('div', { class: 'empty-art' }, icon('users', { size: 40 })),
         h('h2', {}, 'Select a companion'),
-        h('p', { class: 'muted' }, 'Choose or create a companion before reading a scene. Each companion keeps its own wardrobe and scene.'),
-        h('button', { type: 'button', class: 'btn primary', 'data-key': 'select-companion', onClick: (e) => openPicker(e.currentTarget) }, 'Select a companion'));
+        h('p', { class: 'muted' }, isWorkshop && S.attachedIds.length === 0
+          ? 'No Kin is attached to this app yet. In Apps, open Clotheskin’s settings, go to Kins and tick the Kins you want to track.'
+          : 'Choose a companion before reading a scene. Each companion keeps its own wardrobe and scene.'),
+        S.attachedIds.length === 0 && isWorkshop ? null
+          : h('button', { type: 'button', class: 'btn primary', 'data-key': 'select-companion', onClick: (e) => openPicker(e.currentTarget) }, 'Select a companion'));
     }
     const expanded = S.settings.expanded !== false;
     const loc = displayValue('location', r.fields.location.value);
@@ -276,6 +320,32 @@ export async function startApp({ root, repo, host, clock = () => new Date() }) {
         } }, 'Dismiss')))));
   }
 
+  function renderThemePicker() {
+    return h('div', { class: 'theme-block' },
+        h('h3', { class: 'sub' }, 'Appearance'),
+        h('div', { class: 'demo-pick' },
+          h('label', { class: 'label', for: 'theme-pick' }, 'Theme'),
+          h('select', { id: 'theme-pick', class: 'text-input', 'data-key': 'theme-pick',
+            onChange: async (e) => { applyTheme(e.target.value); S.settings = await repo.saveSettings({ theme: e.target.value }); announce(`Theme: ${THEMES.find((t) => t.id === e.target.value)?.label}`); } },
+          ...THEMES.map((t) => h('option', { value: t.id, selected: S.settings.theme === t.id ? '' : undefined }, t.label)),
+          h('option', { value: 'host', disabled: '' }, 'Match my Kindroid theme (needs host support)'))),
+        h('p', { class: 'help' }, 'Kindroid themes are customisable. Matching yours automatically depends on the Workshop exposing theme colours, which has not been confirmed yet.'));
+  }
+
+  function renderWorkshopSettings() {
+    const name = S.profile?.name;
+    return h('details', { class: 'reader workshop-settings', open: S.readerOpen ? '' : undefined, onToggle: (e) => { S.readerOpen = e.currentTarget.open; } },
+      h('summary', { 'data-key': 'reader-summary' }, 'Settings and history'),
+      h('div', { class: 'reader-body' },
+        h('div', { class: 'full' },
+          h('h3', { class: 'sub' }, 'How updates work'),
+          h('p', { class: 'help' }, name
+            ? `Update status asks ${name} to look at the recent chat. ${name} can also report changes on its own. Nothing is updated automatically after every message.`
+            : 'Update status asks the selected Kin to look at its recent chat. A Kin can also report changes on its own.'),
+          renderThemePicker(),
+          S.profile ? renderHistory() : null)));
+  }
+
   function renderReader() {
     if (!S.profile) return null;
     const demo = S.profile.demo;
@@ -315,14 +385,7 @@ export async function startApp({ root, repo, host, clock = () => new Date() }) {
           h('button', { type: 'button', class: 'btn', 'data-key': 'demo-load', onClick: () => runDemoScene(sceneSel.value, { run: false }) }, 'Load scene'),
           h('button', { type: 'button', class: 'btn', 'data-key': 'demo-run', onClick: () => runDemoScene(sceneSel.value, { run: true }) }, 'Run demo scene'),
           demo ? h('button', { type: 'button', class: 'btn ghost', 'data-key': 'demo-reset', onClick: async () => { await seedDemo(repo, { reset: true, now: clock().toISOString() }); S.banner = { kind: 'info', text: 'Demo profile reset.' }; await refresh(); } }, 'Reset demo') : null)),
-        h('h3', { class: 'sub' }, 'Appearance'),
-        h('div', { class: 'demo-pick' },
-          h('label', { class: 'label', for: 'theme-pick' }, 'Theme'),
-          h('select', { id: 'theme-pick', class: 'text-input', 'data-key': 'theme-pick',
-            onChange: async (e) => { S.settings = await repo.saveSettings({ theme: e.target.value }); applyTheme(e.target.value); announce(`Theme: ${THEMES.find((t) => t.id === e.target.value)?.label}`); } },
-          ...THEMES.map((t) => h('option', { value: t.id, selected: S.settings.theme === t.id ? '' : undefined }, t.label)),
-          h('option', { value: 'host', disabled: '' }, 'Match my Kindroid theme (needs host support)'))),
-        h('p', { class: 'help' }, 'Kindroid themes are customisable. Matching yours automatically depends on the Workshop exposing theme colours, which has not been confirmed yet.'),
+        renderThemePicker(),
         h('h3', { class: 'sub' }, 'Automatic updates'),
         h('label', { class: 'check' },
           h('input', { type: 'checkbox', 'data-key': 'auto', disabled: !autoOk, checked: autoOk && S.settings.autoUpdate, onChange: async (e) => { S.settings = await repo.saveSettings({ autoUpdate: e.target.checked }); } }),
@@ -363,14 +426,27 @@ export async function startApp({ root, repo, host, clock = () => new Date() }) {
 
   function render() {
     keepFocus(root, () => {
-      const work = renderReader();
+      const work = isWorkshop ? renderWorkshopSettings() : renderReader();
       root.replaceChildren(
         h('header', { class: 'app-head' }, h('h1', {}, 'Clotheskin'), h('p', { class: 'muted' }, 'Visual continuity for your companions')),
-        h('div', { class: `layout${work ? '' : ' solo'}` },
+        h('div', { class: `layout${isWorkshop ? ' frame' : work ? '' : ' solo'}` },
           h('div', { class: 'col-status' }, renderCard()),
           work ? h('div', { class: 'col-work' }, work) : null),
         h('footer', { class: 'foot muted' }, `Mode: ${host.label}`));
     });
+  }
+
+  /** Workshop: the Kin may update the scene on its own (action update_scene); notice it without events. */
+  async function pollRecord() {
+    if (!isWorkshop || !S.profile || S.readingIds.has(S.profile.id)) return;
+    const profileId = S.profile.id;
+    const latest = await repo.getRecord(profileId, null);
+    if (S.profile?.id === profileId && latest.rev !== S.record?.rev) await refresh();
+  }
+  if (isWorkshop) {
+    setInterval(() => { pollRecord().catch(() => {}); }, 10000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) pollRecord().catch(() => {}); });
+    window.addEventListener('focus', () => { pollRecord().catch(() => {}); });
   }
 
   setInterval(() => {
@@ -378,5 +454,5 @@ export async function startApp({ root, repo, host, clock = () => new Date() }) {
   }, 30000);
 
   await refresh();
-  return { refresh, S, coordinator, provider, selectProfile };
+  return { refresh, S, coordinator, provider, selectProfile, pollNow: pollRecord };
 }

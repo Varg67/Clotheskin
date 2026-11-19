@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { run, fresh, names, byName } from './helpers.js';
-import { checkInvariants, displayValue } from '../src/core/model.js';
+import { checkInvariants, displayValue } from '../screen/src/core/model.js';
 
 function dressed() {
   let r = fresh();

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const css = readFileSync(new URL('../theme.css', import.meta.url), 'utf8');
+const css = readFileSync(new URL('../screen/theme.css', import.meta.url), 'utf8');
 const parse = (block) => Object.fromEntries([...block.matchAll(/--([\w-]+):\s*(#[0-9a-fA-F]{6})\b/g)].map((m) => [m[1], m[2]]));
 const [warmBlock, sageBlock] = css.split(/:root\[data-theme="sage"\]/);
 const warm = parse(warmBlock);
@@ -48,14 +48,14 @@ for (const [name, set] of Object.entries(THEME_SETS)) {
 }
 
 test('brand colour is used once, for the large bold app title', () => {
-  const styles = readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
+  const styles = readFileSync(new URL('../screen/styles.css', import.meta.url), 'utf8');
   const uses = styles.split('\n').filter((l) => l.includes('var(--brand)'));
   assert.equal(uses.length, 1);
   assert.match(uses[0], /\.app-head h1/);
 });
 
 test('components use theme tokens, not raw colours', () => {
-  const styles = readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
+  const styles = readFileSync(new URL('../screen/styles.css', import.meta.url), 'utf8');
   const raw = styles.match(/#[0-9a-fA-F]{3,8}\b/g) || [];
   assert.deepEqual([...new Set(raw)].filter((c) => !['#fff', '#ffd9cf'].includes(c.toLowerCase())), []);
 });

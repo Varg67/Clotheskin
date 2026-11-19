@@ -43,6 +43,7 @@ The browser test needs Playwright and Chromium. If they are not already installe
 | Read coordinator (races, dedupe, per-profile binding) | `src/core/reader.js` |
 | Storage (localStorage adapter, per profile and conversation) | `src/core/store.js` |
 | UI | `src/ui/` |
+| Theme tokens (the only place colours, radii and shadows live) | `theme.css` |
 | Demo profile and scenes | `src/demo/demo.js` |
 
 Design decisions worth knowing:
@@ -54,6 +55,10 @@ Design decisions worth knowing:
 - Missing keys in the answer count as empty (lenient); wrong types are errors.
 - Demo answers carry `meta.demo: true` and are refused for non-demo profiles. `meta.target_id`, if present, must match the selected companion.
 - All Clotheskin text, dates and relative times are English regardless of browser language. Pasted conversation text is never altered.
+
+## Look and feel
+
+The theme follows the Kindroid UI v2 login screen: warm off-white (`#f5f0eb`), translucent glass surfaces with white borders and coral-tinted shadows, pill-shaped controls, coral accent (`#c7503c`). Values were sampled from a screenshot, not from an official palette. `tests/theme.test.js` checks WCAG AA contrast for the token pairs. To retheme (for example a dark variant), override the variables in `theme.css`; `styles.css` uses no raw colours.
 
 ## Pending verification in the Kindroid Workshop
 
@@ -72,5 +77,6 @@ First real test in the Workshop: load the app, select a real Kin, confirm its id
 ## Limits of this first version
 
 - The reference image **Painel de estado da Isa.png** was not attached, so the layout follows the written description. Demo pictures are my own simple SVGs.
+- Only a light theme exists, because only a light Kindroid v2 reference was available.
 - No inventory screen: pockets and contents are read-only details inside an item.
 - Not exercised in a real Kindroid session.

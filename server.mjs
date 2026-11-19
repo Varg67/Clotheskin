@@ -10,7 +10,7 @@ const types = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.md': 'text/plain; charset=utf-8',
 };
-const PUBLIC = ['index.html', 'styles.css', 'src', 'assets'];
+const PUBLIC = ['index.html', 'theme.css', 'styles.css', 'src', 'assets'];
 
 export function createAppServer() {
   return createServer(async (req, res) => {

@@ -216,7 +216,7 @@ export function openItemsEditor({ mode, record, repo, onSaved, opener }) {
   function section(slot) {
     const list = getList(draft, slot);
     const nameInput = h('input', {
-      type: 'text', class: 'text-input', placeholder: 'Add a piece by name, e.g. green cardigan', 'data-key': `add-${slot}`,
+      type: 'text', class: 'text-input', placeholder: 'Add a piece…', 'data-key': `add-${slot}`,
       'aria-label': `Add an item to ${SLOT_LABELS[slot]}`,
       onKeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); addItem(slot, e.target.value); } },
     });

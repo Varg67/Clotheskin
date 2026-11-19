@@ -21,7 +21,6 @@
   /* text */
   --text: #2b2b2b;
   --muted: #6b655b;        /* secondary text: 4.5:1+ on --bg */
-  --muted-soft: #8b857a;   /* placeholders and decoration only */
   --on-accent: #ffffff;
 
   /* lines */
@@ -58,10 +57,6 @@
   --shadow-sheet: 0 24px 70px rgba(43, 30, 26, .28);
   --blur: 18px;
   --scrim: rgba(43, 30, 26, .38);
-
-  /* illustration fallbacks (hero without a picture) */
-  --hero-from: #8a4132;
-  --hero-to: #c7503c;
 }
 
 /* Green theme sampled from a customised Kindroid desktop window.
@@ -79,7 +74,6 @@
 
   --text: #283e36;
   --muted: #5a665f;
-  --muted-soft: #86908a;
 
   --line: #cfdcd5;
   --line-soft: rgba(207, 220, 213, .65);
@@ -96,7 +90,4 @@
   --shadow-accent: 0 8px 20px rgba(44, 122, 96, .26);
   --shadow-sheet: 0 24px 70px rgba(24, 40, 34, .28);
   --scrim: rgba(24, 40, 34, .38);
-
-  --hero-from: #1d5c46;
-  --hero-to: #3a9072;
 }

@@ -60,7 +60,7 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
 
   function chooseKin(opener) {
     openSheet({
-      title: 'Select a Kin', cancelLabel: 'Close', saveLabel: 'Done', onSave: () => undefined,
+      title: 'Select a Kin', cancelLabel: 'Close',
       onClose: () => opener?.focus?.(),
       build(body, api) {
         body.append(
@@ -92,9 +92,10 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     return { ok: true, ...none, outfit: summary || describeOutfit({}) };
   }
 
+  /** Results go to the status region; an error is already read out by its role="alert" banner. */
   const announceResult = (id) => {
     const r = S.results.get(id);
-    return S.errors.get(id) || (r ? `${r.location} ${r.doing} ${r.outfit}` : '');
+    if (!S.errors.has(id) && r) announce(`${r.location} ${r.doing} ${r.outfit}`);
   };
 
   /** Workshop: the run asks the Kin about its recent chat. The reading belongs to the Kin it started for. */
@@ -108,7 +109,7 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
       show(kin.id, { ok: false, error: e.message });
     }
     S.reading.delete(kin.id);
-    announce(announceResult(kin.id));
+    announceResult(kin.id);
     render();
   }
 
@@ -126,9 +127,9 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     const id = S.pending?.id ?? kin.id; // the answer belongs to the Kin the question was prepared for
     const parsed = parseReading(text);
     show(id, parsed.ok ? { ok: true, ...describeReading(parsed) } : { ok: false, error: `${parsed.error} Nothing was changed.` });
-    S.pending = null; S.reading.delete(id);
+    S.pending = null; S.reading.delete(id); S.info = null;
     if (parsed.ok) S.responseDraft = '';
-    announce(announceResult(id));
+    announceResult(id);
     render();
   }
 
@@ -176,7 +177,7 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
         isWorkshop && S.kins.length > 1 ? h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Switch Kin', 'data-key': 'switch', onClick: (e) => chooseKin(e.currentTarget) }, icon('users', { size: 20 })) : null),
       h('div', { class: 'card-body' },
         h('h2', { class: 'section-title' }, 'Current status'),
-        h('div', { class: 'facts', 'aria-live': 'polite' },
+        h('div', { class: 'facts' },
           h('div', { class: `fact${result ? '' : ' empty'}` },
             h('span', { class: 'row-icon' }, icon('pin', { size: 24 })),
             h('span', { class: 'fact-text' }, h('span', { class: 'row-label' }, 'Location'),

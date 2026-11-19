@@ -188,8 +188,8 @@ window.addEventListener('message', async (e) => {
     await page.screenshot({ path: path.join(SHOTS, '10-workshop-no-kins.png') });
     kins = [{ id: 'k-isa', name: 'Isa' }, { id: 'k-alex-1', name: 'Alex' }];
     await page.evaluate(() => window.pushKins());
-    await fr.getByRole('heading', { name: 'Select a companion' }).waitFor(); // several Kins: the person chooses
-    assert.ok((await key('select-companion').count()) === 1);
+    await key('select-companion').waitFor(); // several Kins: the person chooses (the button only exists when there is something to pick)
+    assert.equal(await fr.locator('.card-top').count(), 0, 'no Kin is selected automatically');
   });
 
   await step('settings: theme works inside the frame and is stored in the Workshop files', async () => {

@@ -1,13 +1,27 @@
 import { buildOutfitPrompt, KIN_ASK_LIMIT } from '../screen/src/core/prompt.js';
-import { parseOutfit, describeOutfit } from '../screen/src/core/outfit.js';
+import { parseReading, describeReading } from '../screen/src/core/outfit.js';
 
 const clip = (s, n = 480) => (s.length <= n ? s : `${s.slice(0, n - 1)}…`);
+const KIN_END_LIMIT = 500;
+
+/**
+ * The line given back to the screen: both sentences as compact JSON, shortened so the whole line stays within
+ * the 500 characters `kin end` allows. The location is short by nature, so only the outfit is ever cut.
+ */
+export function packReading({ location, outfit }) {
+  const fits = (o) => JSON.stringify({ location, outfit: o }).length <= KIN_END_LIMIT;
+  let text = outfit;
+  while (!fits(text) && text.length > 1) text = text.slice(0, Math.max(1, text.length - Math.max(1, JSON.stringify({ location, outfit: text }).length - KIN_END_LIMIT + 1)));
+  if (text !== outfit) text = `${text.replace(/[\s,]+\S*$/, '').replace(/[.…]+$/, '')}…`;
+  while (!fits(text) && text.length > 1) text = `${text.slice(0, -2)}…`;
+  return JSON.stringify({ location, outfit: text });
+}
 
 /**
  * Handles one run. `event` is the JSON the Workshop sends on stdin:
  *   {"trigger":"action","action":"read_outfit","input":{"kin":"<id>","name":"<name>"}}
- * Returns { ok, message }. On success `message` is the outfit as one natural sentence; the caller ends the run
- * with it, so the screen shows it as is. Nothing is stored.
+ * Returns { ok, message }. On success `message` is {"location":"...","outfit":"..."} (two natural sentences) and the
+ * caller ends the run with it, so the screen shows them as they are. Nothing is stored.
  */
 export async function handleRun({ event, provider }) {
   if (event?.trigger !== 'action') return { ok: false, message: `Unsupported trigger: ${event?.trigger}` };
@@ -24,7 +38,7 @@ export async function handleRun({ event, provider }) {
   } catch (e) {
     return { ok: false, message: clip(e.message) };
   }
-  const parsed = parseOutfit(answer);
+  const parsed = parseReading(answer);
   if (!parsed.ok) return { ok: false, message: clip(`${parsed.error} Nothing was changed. Try again.`) };
-  return { ok: true, message: clip(describeOutfit(parsed.outfit)) };
+  return { ok: true, message: packReading(describeReading(parsed)) };
 }

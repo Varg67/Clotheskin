@@ -41,6 +41,8 @@ window.addEventListener('message', async (e) => {
   const asked = [];
   const provider = { extract: async ({ prompt, kinId }) => { asked.push({ prompt, kinId }); return kinAnswer({ prompt, kinId }); } };
   let delay = 350;
+  let plainSummary = false; // simulates an older run that ended with plain text
+  const NONE = 'No outfit read yet. Press Update status.';
 
   const server = createAppServer();
   await new Promise((r) => server.listen(0, r));
@@ -56,7 +58,7 @@ window.addEventListener('message', async (e) => {
   await page.exposeFunction('hostKins', () => kins);
   await page.exposeFunction('hostRead', (p) => (files.has(p) && files.get(p) !== '' ? files.get(p) : null));
   await page.exposeFunction('hostWrite', (p, body) => { files.set(p, body); });
-  await page.exposeFunction('hostAction', async (name, input) => { await new Promise((r) => setTimeout(r, delay)); return handleRun({ event: { trigger: 'action', action: name, input }, provider }); });
+  await page.exposeFunction('hostAction', async (name, input) => { await new Promise((r) => setTimeout(r, delay)); const r = await handleRun({ event: { trigger: 'action', action: name, input }, provider }); return plainSummary && r.ok ? { ...r, message: JSON.parse(r.message).outfit } : r; });
 
   await page.goto(`${base}/__parent.html`);
   const fr = page.frameLocator('#f');
@@ -64,6 +66,7 @@ window.addEventListener('message', async (e) => {
   const key = (k) => fr.locator(`[data-key="${k}"]`);
   const text = () => fr.locator('body').innerText();
   const outfit = () => fr.locator('[data-testid="outfit"]').innerText();
+  const where = () => fr.locator('[data-testid="location"]').innerText();
   closeDialogs = async () => { while (await fr.locator('dialog[open]').count()) { await page.keyboard.press('Escape'); await page.waitForTimeout(30); } };
   const frameEval = (fn, arg) => page.frame({ url: /index\.html/ }).evaluate(fn, arg);
   const until = async (fn, what) => { const end = Date.now() + 4000; let last; while (Date.now() < end) { try { last = await fn(); if (last) return last; } catch (e) { last = e.message; } await page.waitForTimeout(50); } throw new Error(`timed out waiting for: ${what} (${last})`); };
@@ -83,16 +86,17 @@ window.addEventListener('message', async (e) => {
 
   await step('390 px frame: the card fits, no horizontal scroll, the button is in view, nothing read yet', async () => {
     await closeDialogs(); await pick('k-isa');
-    await until(async () => /Current outfit/i.test(await text()), 'card shown');
+    await until(async () => /Current status/i.test(await text()), 'card shown');
     const m = await frameEval(() => ({ over: document.documentElement.scrollWidth - document.documentElement.clientWidth, w: document.documentElement.clientWidth }));
     assert.ok(m.over <= 0); assert.equal(m.w, 390);
-    assert.equal(await outfit(), 'No outfit read yet. Press Update status.');
+    assert.equal(await outfit(), NONE);
+    assert.equal(await where(), 'No location read yet.');
     const b = await key('update').boundingBox();
     assert.ok(b.y + b.height <= 740, `${b.y + b.height}`);
   });
 
   await step('Update status: activity on the button, one question to the Kin despite two clicks, the sentence appears', async () => {
-    kinAnswer = async () => '{"topwear":["a perfumed white shirt","a leather jacket"],"bottomwear":["blue jeans"]}';
+    kinAnswer = async () => '{"location":"in the living room","topwear":["a perfumed white shirt","a leather jacket"],"bottomwear":["blue jeans"]}';
     await key('update').click();
     assert.equal(await key('update').getAttribute('aria-busy'), 'true');
     assert.match(await key('update').innerText(), /Reading…/);
@@ -102,6 +106,7 @@ window.addEventListener('message', async (e) => {
     assert.equal(asked[0].kinId, 'k-isa');
     assert.ok(!asked[0].prompt.includes('RECENT CHAT'), 'the Kin sees its own chat');
     assert.match(asked[0].prompt, /^You are Isa\./);
+    assert.equal(await where(), 'In the living room.');
     assert.equal(await outfit(), 'Wearing a leather jacket, a perfumed white shirt and blue jeans.');
     assert.match(await fr.locator('[data-testid="last-checked"]').innerText(), /Last checked: \d{1,2}:\d{2} (AM|PM)/);
     await page.screenshot({ path: path.join(SHOTS, '08-workshop-sentence.png') });
@@ -115,24 +120,38 @@ window.addEventListener('message', async (e) => {
     assert.match(await b.innerText(), /not valid JSON/);
     assert.ok((await b.innerText()).includes('Try again'));
     assert.equal(await outfit(), 'Wearing a leather jacket, a perfumed white shirt and blue jeans.');
-    kinAnswer = async () => '{"topwear":["a green cardigan"]}';
+    assert.equal(await where(), 'In the living room.', 'the previous place stays too');
+    kinAnswer = async () => '{"location":"at the hospital","topwear":["a green cardigan"]}';
     await key('retry').click(); await idle();
+    assert.equal(await where(), 'At the hospital.');
     assert.equal(await outfit(), 'Wearing a green cardigan.');
     assert.equal(await fr.locator('[data-testid="banner"]').count(), 0, 'success clears the error');
   });
 
   await step('same-name Kins: a reading started for the first Alex is shown on it, not on the second', async () => {
     await pick('k-alex-1');
-    kinAnswer = async () => '{"footwear":["red boots"]}';
+    kinAnswer = async () => '{"location":"on the bus to college","footwear":["red boots"]}';
     await key('update').click();
     await pick('k-alex-2'); // switch while the first reading runs
-    await until(async () => (await outfit()) === 'No outfit read yet. Press Update status.' && (await key('update').getAttribute('aria-busy')) === 'false', 'second Alex is idle and empty');
+    await until(async () => (await outfit()) === NONE && (await key('update').getAttribute('aria-busy')) === 'false', 'second Alex is idle and empty');
     await page.waitForTimeout(700);
-    assert.equal(await outfit(), 'No outfit read yet. Press Update status.', 'the first Alex result is not shown on the second');
+    assert.equal(await outfit(), NONE, 'the first Alex result is not shown on the second');
+    assert.equal(await where(), 'No location read yet.');
     await pick('k-alex-1');
     await until(async () => (await outfit()) === 'Wearing red boots.', 'first Alex has the boots');
+    assert.equal(await where(), 'On the bus to college.');
     await pick('k-isa');
     assert.equal(await outfit(), 'Wearing a green cardigan.', 'each Kin keeps its own result during the session');
+    assert.equal(await where(), 'At the hospital.');
+  });
+
+  await step('an older run that ended with plain text is still shown (as the outfit, without a place)', async () => {
+    plainSummary = true;
+    kinAnswer = async () => '{"location":"at home","topwear":["a hoodie"]}';
+    await key('update').click(); await idle();
+    assert.equal(await outfit(), 'Wearing a hoodie.');
+    assert.equal(await where(), 'No location described in the recent chat.');
+    plainSummary = false;
   });
 
   await step('the host attaches or detaches Kins while the screen is open', async () => {
@@ -155,7 +174,7 @@ window.addEventListener('message', async (e) => {
     await until(async () => (await frameEval(() => document.documentElement.dataset.theme)) === 'sage', 'sage applied');
     await until(async () => /"theme":"sage"/.test(files.get('cs/clotheskin~3av2~3asettings.json') || ''), 'theme saved');
     assert.deepEqual([...files.keys()], ['cs/clotheskin~3av2~3asettings.json']);
-    assert.ok(!/jeans|cardigan|boots|jacket/.test([...files.values()].join('')), 'no garment was stored');
+    assert.ok(!/jeans|cardigan|boots|jacket|hoodie|hospital|living room|college/.test([...files.values()].join('')), 'no garment and no place was stored');
     await page.screenshot({ path: path.join(SHOTS, '10-workshop-settings-sage.png') });
   });
 

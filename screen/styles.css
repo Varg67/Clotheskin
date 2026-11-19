@@ -185,8 +185,10 @@ dialog.sheet.wide { width: min(760px, 100vw - 64px); }
 .mode-workshop .detail-grid { grid-template-columns: 1fr; }
 .mode-workshop .foot { display: none; }
 
-/* The outfit sentence */
-.outfit { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: var(--radius-md); background: var(--glass); border: 1px solid var(--glass-border); box-shadow: var(--shadow-glass); margin-bottom: 14px; }
-.outfit-text { margin: 0; font-size: 1.1rem; line-height: 1.45; overflow-wrap: anywhere; align-self: center; }
-.outfit.empty .outfit-text { color: var(--muted); font-style: italic; font-size: 1rem; }
+/* The two sentences: where the Kin is, what it wears */
+.facts { display: grid; gap: 8px; margin-bottom: 14px; }
+.fact { display: flex; gap: 12px; align-items: center; padding: 10px 14px 10px 10px; border-radius: var(--radius-md); background: var(--glass); border: 1px solid var(--glass-border); box-shadow: var(--shadow-glass); }
+.fact-text { display: flex; flex-direction: column; min-width: 0; }
+.fact-value { font-size: 1.05rem; line-height: 1.4; overflow-wrap: anywhere; }
+.fact.empty .fact-value { color: var(--muted); font-style: italic; font-size: .98rem; }
 .toggle.static { cursor: default; }

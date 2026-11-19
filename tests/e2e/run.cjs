@@ -31,6 +31,7 @@ const step = async (name, fn) => {
   closeDialogs = async () => { while (await page.locator('dialog[open]').count()) { await page.keyboard.press('Escape'); await page.waitForTimeout(30); } };
   const key = (k) => page.locator(`[data-key="${k}"]`);
   const outfit = () => page.locator('[data-testid="outfit"]').innerText();
+  const where = () => page.locator('[data-testid="location"]').innerText();
   const idle = () => page.locator('[data-key="update"][aria-busy="false"]').waitFor();
   const runScene = async (id) => { await key('scene-pick').selectOption(id); await key('demo-run').click(); await idle(); };
 
@@ -40,7 +41,7 @@ const step = async (name, fn) => {
   await step('English everywhere under a pt-BR browser; nothing is read until asked', async () => {
     assert.equal(await page.evaluate(() => document.documentElement.lang), 'en');
     const dom = await page.evaluate(() => document.body.textContent);
-    for (const w of ['Current outfit', 'Update status', 'Last checked: never', 'No outfit read yet. Press Update status.']) assert.ok(dom.includes(w), w);
+    for (const w of ['Current status', 'Location', 'Outfit', 'Update status', 'Last checked: never', 'No location read yet.', 'No outfit read yet. Press Update status.']) assert.ok(dom.includes(w), w);
     assert.ok(!/Atualizar|Roupa|Última/.test(dom));
   });
 
@@ -55,11 +56,12 @@ const step = async (name, fn) => {
     await page.screenshot({ path: path.join(SHOTS, '01-local-empty.png') });
   });
 
-  await step('the brief example: a Portuguese chat becomes one English sentence', async () => {
+  await step('the brief example: a Portuguese chat becomes two English sentences, place and clothes', async () => {
     await runScene('pt-jeans-jacket');
+    assert.equal(await where(), 'In the living room.');
     assert.equal(await outfit(), 'Wearing a leather jacket, a perfumed white shirt and blue jeans.');
     assert.match(await page.locator('[data-testid="last-checked"]').innerText(), /Last checked: \d{1,2}:\d{2} (AM|PM) · just now/);
-    assert.equal(await page.locator('#chat').inputValue(), 'Isa: *sorri e ajeita a gola* Hoje estou vestindo uma calça jeans azul, uma jaqueta de couro e uma camisa branca perfumada.', 'pasted chat is kept verbatim');
+    assert.equal(await page.locator('#chat').inputValue(), 'Isa: *sorri e ajeita a gola, parada na sala* Hoje estou vestindo uma calça jeans azul, uma jaqueta de couro e uma camisa branca perfumada.', 'pasted chat is kept verbatim');
     await page.screenshot({ path: path.join(SHOTS, '02-local-sentence.png') });
   });
 
@@ -72,9 +74,10 @@ const step = async (name, fn) => {
     assert.match(prompt, /^You are Isa\./);
     assert.equal(await key('update').getAttribute('aria-busy'), 'true');
     assert.match(await key('update').innerText(), /Waiting for the answer/);
-    await page.locator('#response').fill('{"topwear":["a white shirt"],"bottomwear":["blue jeans"],"footwear":["sneakers"]}');
+    await page.locator('#response').fill('{"location":"in the kitchen","topwear":["a white shirt"],"bottomwear":["blue jeans"],"footwear":["sneakers"]}');
     await key('apply').click();
     await idle();
+    assert.equal(await where(), 'In the kitchen.');
     assert.equal(await outfit(), 'Wearing a white shirt, blue jeans and sneakers.');
   });
 
@@ -86,20 +89,26 @@ const step = async (name, fn) => {
     assert.match(await b.innerText(), /not valid JSON/);
     assert.ok((await b.innerText()).includes('Try again'));
     assert.equal(await outfit(), 'Wearing a white shirt, blue jeans and sneakers.');
+    assert.equal(await where(), 'In the kitchen.', 'the previous place stays too');
+    await page.locator('#response').fill('{"location":{"room":"kitchen"}}');
+    await key('apply').click();
+    assert.match(await page.locator('[data-testid="banner"]').innerText(), /"location" must be a text/);
     await runScene('in-character');
     assert.match(await page.locator('[data-testid="banner"]').innerText(), /not valid JSON/);
   });
 
-  await step('accessories and bags, a taken-off cardigan, answers without slot names, and a chat that says nothing', async () => {
-    await runScene('accessories-bag');
-    assert.equal(await outfit(), 'Wearing a black dress and ankle boots, with round glasses, a silver necklace and a brown backpack.');
-    await runScene('taken-off');
-    assert.equal(await outfit(), 'Wearing a T-shirt and jeans.');
-    await runScene('loose-keys');
-    assert.equal(await outfit(), 'Wearing a striped sweater, sneakers and a cap, with a watch.');
-    await runScene('nothing-said');
-    assert.equal(await outfit(), 'No outfit described in the recent chat.');
+  await step('each demo scene shows its place and clothes: café, taken-off cardigan, travelling, plan, loose keys, nothing said', async () => {
+    const cases = {
+      'accessories-bag': ['At a café in Alfenas.', 'Wearing a black dress and ankle boots, with round glasses, a silver necklace and a brown backpack.'],
+      'taken-off': ['In the living room.', 'Wearing a T-shirt and jeans.'],
+      travelling: ['On the bus to the hospital.', 'Accessories: headphones.'],
+      'plan-not-move': ['At home.', 'Wearing pyjamas.'],
+      'loose-keys': ['At the park.', 'Wearing a striped sweater, sneakers and a cap, with a watch.'],
+      'nothing-said': ['No location described in the recent chat.', 'No outfit described in the recent chat.'],
+    };
+    for (const [id, [loc, out]] of Object.entries(cases)) { await runScene(id); assert.equal(await where(), loc, id); assert.equal(await outfit(), out, id); }
     assert.equal(await page.locator('[data-testid="banner"]').count(), 0, 'a successful reading clears the old error');
+    await page.screenshot({ path: path.join(SHOTS, '02b-local-nothing.png') });
   });
 
   await step('keyboard: Update status is reachable and activates with Enter', async () => {
@@ -111,14 +120,15 @@ const step = async (name, fn) => {
     assert.match(await page.locator('[data-testid="banner"]').innerText(), /cancelled/);
   });
 
-  await step('nothing about the outfit is saved: only preferences survive a reload', async () => {
+  await step('nothing about the outfit is saved: only preferences survive a reload (no outfit, no place, no chat)', async () => {
     await page.locator('#theme-pick').selectOption('sage');
     await page.reload(); await page.waitForSelector('[data-key="update"]');
     assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'sage', 'theme persists');
     assert.equal(await outfit(), 'No outfit read yet. Press Update status.', 'the outfit is gone after reload');
+    assert.equal(await where(), 'No location read yet.', 'the place is gone after reload');
     const stored = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage)));
     assert.deepEqual(Object.keys(stored), ['clotheskin:v2:settings']);
-    assert.ok(!/jeans|jacket|sweater|dress/i.test(JSON.stringify(stored)), 'no garment in storage');
+    assert.ok(!/jeans|jacket|sweater|dress|kitchen|park|living room|hospital|café/i.test(JSON.stringify(stored)), 'no garment and no place in storage');
     await page.screenshot({ path: path.join(SHOTS, '03-local-sage.png') });
     await page.locator('#theme-pick').selectOption('warm');
   });

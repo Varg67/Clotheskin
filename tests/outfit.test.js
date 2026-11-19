@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseOutfit, describeOutfit, joinNatural, normalizeSlot } from '../screen/src/core/outfit.js';
+import { parseOutfit, describeOutfit, joinNatural, normalizeSlot, parseReading, describeReading, describeLocation, cleanLocation } from '../screen/src/core/outfit.js';
 import { DEMO_SCENES } from '../screen/src/demo/demo.js';
 
 const say = (json) => { const p = parseOutfit(typeof json === 'string' ? json : JSON.stringify(json)); assert.ok(p.ok, p.error); return describeOutfit(p.outfit); };
@@ -44,14 +44,58 @@ test('an empty answer means nothing was said, not an error', () => {
   assert.equal(say({ topwear: [], bottomwear: null }), 'No outfit described in the recent chat.');
 });
 
-test('every demo scene produces a sentence (or the documented error)', () => {
-  const out = Object.fromEntries(DEMO_SCENES.map((s) => { const p = parseOutfit(s.response); return [s.id, p.ok ? describeOutfit(p.outfit) : `ERROR ${p.error}`]; }));
-  assert.equal(out['pt-jeans-jacket'], 'Wearing a leather jacket, a perfumed white shirt and blue jeans.');
-  assert.equal(out['accessories-bag'], 'Wearing a black dress and ankle boots, with round glasses, a silver necklace and a brown backpack.');
-  assert.equal(out['taken-off'], 'Wearing a T-shirt and jeans.');
-  assert.equal(out['loose-keys'], 'Wearing a cap, sneakers and a striped sweater, with a watch.'.replace('a cap, sneakers and a striped sweater', 'a striped sweater and sneakers, a cap'.replace(/.*/, 'a striped sweater, sneakers and a cap')));
-  assert.equal(out['nothing-said'], 'No outfit described in the recent chat.');
+test('every demo scene produces its two sentences (or the documented error)', () => {
+  const out = Object.fromEntries(DEMO_SCENES.map((sc) => { const p = parseReading(sc.response); return [sc.id, p.ok ? describeReading(p) : `ERROR ${p.error}`]; }));
+  assert.deepEqual(out['pt-jeans-jacket'], { location: 'In the living room.', outfit: 'Wearing a leather jacket, a perfumed white shirt and blue jeans.' });
+  assert.deepEqual(out['accessories-bag'], { location: 'At a café in Alfenas.', outfit: 'Wearing a black dress and ankle boots, with round glasses, a silver necklace and a brown backpack.' });
+  assert.deepEqual(out['taken-off'], { location: 'In the living room.', outfit: 'Wearing a T-shirt and jeans.' });
+  assert.deepEqual(out.travelling, { location: 'On the bus to the hospital.', outfit: 'Accessories: headphones.' });
+  assert.deepEqual(out['plan-not-move'], { location: 'At home.', outfit: 'Wearing pyjamas.' });
+  assert.deepEqual(out['loose-keys'], { location: 'At the park.', outfit: 'Wearing a striped sweater, sneakers and a cap, with a watch.' });
+  assert.deepEqual(out['nothing-said'], { location: 'No location described in the recent chat.', outfit: 'No outfit described in the recent chat.' });
   assert.match(out['in-character'], /^ERROR The answer is not valid JSON/);
+});
+
+// ---- location
+test('location: a phrase that already starts with in / at / on is shown as written, capitalised, with a full stop', () => {
+  assert.equal(describeLocation('in the kitchen'), 'In the kitchen.');
+  assert.equal(describeLocation('at the hospital.'.replace(/\.$/, '')), 'At the hospital.');
+  assert.equal(describeLocation('on the way to the hospital'), 'On the way to the hospital.');
+  assert.equal(describeLocation('heading to work'), 'Heading to work.');
+  assert.equal(describeLocation('back at home'), 'Back at home.');
+  assert.equal(describeLocation('at a café in Alfenas'), 'At a café in Alfenas.', 'proper names and accents are kept');
+});
+
+test('location: a bare place gets "In" in front; nothing stated is a calm sentence, not an error', () => {
+  assert.equal(describeLocation('Alfenas'), 'In Alfenas.');
+  assert.equal(describeLocation(null), 'No location described in the recent chat.');
+  assert.equal(describeLocation(''), 'No location described in the recent chat.');
+});
+
+test('location: placeholders are ignored, a wrong type is an error, trailing punctuation is tidied', () => {
+  for (const v of ['unknown', 'n/a', 'none', 'not mentioned', 'Unspecified', '?', '  ']) assert.equal(cleanLocation(v), null, v);
+  assert.equal(cleanLocation('in the kitchen.'), 'in the kitchen');
+  assert.equal(cleanLocation(null), null);
+  assert.equal(cleanLocation(5), undefined);
+  assert.equal(parseReading('{"location":"unknown","topwear":["a shirt"]}').location, null);
+  const bad = parseReading('{"location":{"room":"kitchen"}}');
+  assert.equal(bad.ok, false);
+  assert.match(bad.error, /"location" must be a text/);
+  assert.equal(parseReading('{"location":["in the kitchen"]}').ok, false);
+});
+
+test('location: the key may be written in any case, and it never leaks into the outfit or a warning', () => {
+  const p = parseReading('{"Location":"in the garden","topwear":["a hat"]}');
+  assert.equal(p.location, 'in the garden');
+  assert.deepEqual(p.warnings, []);
+  assert.deepEqual(Object.keys(p.outfit), ['topwear']);
+  assert.deepEqual(parseOutfit('{"location":"in the garden"}').warnings, []);
+});
+
+test('location only, outfit only, and both missing each give their own sentence', () => {
+  assert.deepEqual(describeReading(parseReading('{"location":"at the gym"}')), { location: 'At the gym.', outfit: 'No outfit described in the recent chat.' });
+  assert.deepEqual(describeReading(parseReading('{"topwear":["a hoodie"]}')), { location: 'No location described in the recent chat.', outfit: 'Wearing a hoodie.' });
+  assert.deepEqual(describeReading(parseReading('{}')), { location: 'No location described in the recent chat.', outfit: 'No outfit described in the recent chat.' });
 });
 
 // ---- ambiguity: plausible wrong answers from the Kin

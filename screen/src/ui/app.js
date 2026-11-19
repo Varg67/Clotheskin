@@ -1,7 +1,7 @@
 import { h, keepFocus, openSheet } from './dom.js';
 import { icon, spinner } from './icons.js';
 import { buildOutfitPrompt } from '../core/prompt.js';
-import { parseOutfit, describeOutfit } from '../core/outfit.js';
+import { parseReading, describeReading } from '../core/outfit.js';
 import { formatClock, formatRelative } from '../core/format.js';
 import { DEMO_SCENES } from '../demo/demo.js';
 
@@ -32,7 +32,7 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
 
   const S = {
     kins: isWorkshop ? (host.kins || []) : [{ id: LOCAL_ID, name: settings.value.localName }],
-    results: new Map(), // kin id -> { text, at }
+    results: new Map(), // kin id -> { location, outfit, at }  (two sentences)
     errors: new Map(), // kin id -> message
     reading: new Set(), // kin ids with a reading in progress
     info: null, // { kind, text } for the selected Kin
@@ -76,9 +76,20 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
 
   // ------------------------------------------------------------------ reading
   function show(kinId, outcome) {
-    if (outcome.ok) { S.results.set(kinId, { text: outcome.text, at: clock().toISOString() }); S.errors.delete(kinId); }
+    if (outcome.ok) { S.results.set(kinId, { location: outcome.location, outfit: outcome.outfit, at: clock().toISOString() }); S.errors.delete(kinId); }
     else S.errors.set(kinId, outcome.error);
   }
+
+  /** The run ends with {"location":"…","outfit":"…"}. Plain text (an older run) is shown as the outfit. */
+  function readSummary(summary) {
+    try {
+      const o = JSON.parse(summary);
+      if (o && typeof o.outfit === 'string') return { ok: true, location: typeof o.location === 'string' ? o.location : 'No location described in the recent chat.', outfit: o.outfit };
+    } catch { /* not JSON */ }
+    return { ok: true, location: 'No location described in the recent chat.', outfit: summary || 'No outfit described in the recent chat.' };
+  }
+
+  const announceResult = (id) => S.errors.get(id) || (S.results.get(id) ? `${S.results.get(id).location} ${S.results.get(id).outfit}` : '');
 
   /** Workshop: the run asks the Kin about its recent chat. The reading belongs to the Kin it started for. */
   async function readInWorkshop(kin) {
@@ -86,12 +97,12 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     S.reading.add(kin.id); S.info = null; render();
     try {
       const r = await host.channel.runAction('read_outfit', { kin: kin.id, name: kin.name });
-      show(kin.id, r.ok ? { ok: true, text: r.summary || 'No outfit described in the recent chat.' } : { ok: false, error: r.summary || 'The reading could not be completed.' });
+      show(kin.id, r.ok ? readSummary(r.summary) : { ok: false, error: r.summary || 'The reading could not be completed.' });
     } catch (e) {
       show(kin.id, { ok: false, error: e.message });
     }
     S.reading.delete(kin.id);
-    announce(S.errors.get(kin.id) || S.results.get(kin.id)?.text || '');
+    announce(announceResult(kin.id));
     render();
   }
 
@@ -107,11 +118,11 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
   function applyLocal(text) {
     const kin = selectedKin();
     const id = S.pending?.id ?? kin.id; // the answer belongs to the Kin the question was prepared for
-    const parsed = parseOutfit(text);
-    show(id, parsed.ok ? { ok: true, text: describeOutfit(parsed.outfit) } : { ok: false, error: `${parsed.error} Nothing was changed.` });
+    const parsed = parseReading(text);
+    show(id, parsed.ok ? { ok: true, ...describeReading(parsed) } : { ok: false, error: `${parsed.error} Nothing was changed.` });
     S.pending = null; S.reading.delete(id);
     if (parsed.ok) S.responseDraft = '';
-    announce(S.errors.get(id) || S.results.get(id)?.text || '');
+    announce(announceResult(id));
     render();
   }
 
@@ -153,15 +164,21 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     const result = S.results.get(kin.id);
     const error = S.errors.get(kin.id);
     const now = clock();
-    return h('section', { class: 'card', 'aria-label': `${kin.name} outfit` },
+    return h('section', { class: 'card', 'aria-label': `${kin.name} status` },
       h('div', { class: 'card-top' },
         h('div', { class: 'toggle static' }, avatar(48), h('span', { class: 'who' }, h('span', { class: 'name' }, kin.name))),
         isWorkshop && S.kins.length > 1 ? h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Switch Kin', 'data-key': 'switch', onClick: (e) => chooseKin(e.currentTarget) }, icon('users', { size: 20 })) : null),
       h('div', { class: 'card-body' },
-        h('h2', { class: 'section-title' }, 'Current outfit'),
-        h('div', { class: `outfit${result ? '' : ' empty'}` },
-          h('span', { class: 'row-icon' }, icon('hanger', { size: 24 })),
-          h('p', { class: 'outfit-text', 'data-testid': 'outfit', 'aria-live': 'polite' }, result ? result.text : 'No outfit read yet. Press Update status.')),
+        h('h2', { class: 'section-title' }, 'Current status'),
+        h('div', { class: 'facts', 'aria-live': 'polite' },
+          h('div', { class: `fact${result ? '' : ' empty'}` },
+            h('span', { class: 'row-icon' }, icon('pin', { size: 24 })),
+            h('span', { class: 'fact-text' }, h('span', { class: 'row-label' }, 'Location'),
+              h('span', { class: 'fact-value', 'data-testid': 'location' }, result ? result.location : 'No location read yet.'))),
+          h('div', { class: `fact${result ? '' : ' empty'}` },
+            h('span', { class: 'row-icon' }, icon('hanger', { size: 24 })),
+            h('span', { class: 'fact-text' }, h('span', { class: 'row-label' }, 'Outfit'),
+              h('span', { class: 'fact-value', 'data-testid': 'outfit' }, result ? result.outfit : 'No outfit read yet. Press Update status.')))),
         h('button', { type: 'button', class: 'btn primary block', 'data-key': 'update', 'aria-busy': String(reading), onClick: update },
           reading ? [spinner(), isWorkshop ? 'Reading…' : 'Waiting for the answer…'] : [icon('refresh', { size: 18 }), 'Update status']),
         h('p', { class: 'meta', 'data-testid': 'last-checked' }, 'Last checked: ',
@@ -183,7 +200,7 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
           h('input', { id: 'local-name', class: 'text-input', type: 'text', 'data-key': 'local-name', value: settings.value.localName, autocomplete: 'off',
             onChange: async (e) => { await settings.save({ localName: e.target.value.trim() || 'Isa' }); S.kins = [{ id: LOCAL_ID, name: settings.value.localName }]; render(); } }),
           h('label', { class: 'label', for: 'chat' }, 'Conversation'),
-          h('textarea', { id: 'chat', class: 'text-input', rows: 9, 'data-key': 'chat', placeholder: 'Isa: Hoje estou vestindo uma calça jeans azul e uma jaqueta de couro…', onInput: (e) => { S.chatDraft = e.target.value; } }, S.chatDraft),
+          h('textarea', { id: 'chat', class: 'text-input', rows: 9, 'data-key': 'chat', placeholder: 'Isa: Estou na sala, vestindo uma calça jeans azul e uma jaqueta de couro…', onInput: (e) => { S.chatDraft = e.target.value; } }, S.chatDraft),
           h('div', { class: 'btn-row' }, h('button', { type: 'button', class: 'btn', 'data-key': 'prepare', onClick: prepareLocal }, 'Prepare prompt')),
           S.pending ? h('div', { class: 'prompt-box' },
             h('label', { class: 'label', for: 'prompt-view' }, 'Prompt to send'),
@@ -195,15 +212,15 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
               h('button', { type: 'button', class: 'btn ghost', 'data-key': 'cancel-read', onClick: () => { S.reading.delete(S.pending.id); S.pending = null; S.info = { kind: 'info', text: 'The reading was cancelled.' }; render(); } }, 'Cancel'))) : null),
         h('div', { class: 'col-b' },
           h('label', { class: 'label', for: 'response' }, 'JSON answer'),
-          h('textarea', { id: 'response', class: 'text-input mono', rows: 9, 'data-key': 'response', placeholder: '{"topwear":["a white shirt"],"bottomwear":["blue jeans"]}', onInput: (e) => { S.responseDraft = e.target.value; } }, S.responseDraft),
-          h('button', { type: 'button', class: 'btn primary', 'data-key': 'apply', onClick: () => applyLocal(S.responseDraft) }, 'Show outfit')),
+          h('textarea', { id: 'response', class: 'text-input mono', rows: 9, 'data-key': 'response', placeholder: '{"location":"in the kitchen","topwear":["a white shirt"],"bottomwear":["blue jeans"]}', onInput: (e) => { S.responseDraft = e.target.value; } }, S.responseDraft),
+          h('button', { type: 'button', class: 'btn primary', 'data-key': 'apply', onClick: () => applyLocal(S.responseDraft) }, 'Show status')),
         h('div', { class: 'full' },
           h('h3', { class: 'sub' }, 'Demo scenes'),
           h('div', { class: 'demo-row' },
             h('div', { class: 'demo-pick' }, h('label', { class: 'label', for: 'scene-pick' }, 'Scene'),
               (sceneSel = h('select', { id: 'scene-pick', class: 'text-input', 'data-key': 'scene-pick' }, ...DEMO_SCENES.map((s) => h('option', { value: s.id }, s.title))))),
             h('div', { class: 'btn-row' },
-              h('button', { type: 'button', class: 'btn', 'data-key': 'demo-load', onClick: async () => { const s = DEMO_SCENES.find((x) => x.id === sceneSel.value); S.chatDraft = s.chat; S.responseDraft = s.response; S.info = { kind: 'info', text: `Loaded “${s.title}”. Prepare the prompt, then press Show outfit.` }; render(); } }, 'Load scene'),
+              h('button', { type: 'button', class: 'btn', 'data-key': 'demo-load', onClick: async () => { const s = DEMO_SCENES.find((x) => x.id === sceneSel.value); S.chatDraft = s.chat; S.responseDraft = s.response; S.info = { kind: 'info', text: `Loaded “${s.title}”. Prepare the prompt, then press Show status.` }; render(); } }, 'Load scene'),
               h('button', { type: 'button', class: 'btn', 'data-key': 'demo-run', onClick: async () => { const s = DEMO_SCENES.find((x) => x.id === sceneSel.value); S.chatDraft = s.chat; S.responseDraft = s.response; S.pending = { id: kin.id, prompt: buildOutfitPrompt({ name: kin.name, chat: s.chat }) }; applyLocal(s.response); } }, 'Run demo scene'))),
           renderThemePicker())));
   }
@@ -214,7 +231,7 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
       h('div', { class: 'reader-body' },
         h('div', { class: 'full' },
           h('h3', { class: 'sub' }, 'How it works'),
-          h('p', { class: 'help' }, 'Update status asks the selected Kin to look at its recent chat and say what it is wearing. The answer is shown as one sentence. Nothing is saved.'),
+          h('p', { class: 'help' }, 'Update status asks the selected Kin to look at its recent chat and say where it is and what it is wearing. Each answer is shown as one sentence. Nothing is saved.'),
           renderThemePicker())));
   }
 
@@ -222,7 +239,7 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     keepFocus(root, () => {
       const work = isWorkshop ? renderWorkshopSettings() : renderReader();
       root.replaceChildren(
-        h('header', { class: 'app-head' }, h('h1', {}, 'Clotheskin'), h('p', { class: 'muted' }, 'What your Kin says it is wearing')),
+        h('header', { class: 'app-head' }, h('h1', {}, 'Clotheskin'), h('p', { class: 'muted' }, 'Where your Kin is and what it is wearing')),
         h('div', { class: `layout${isWorkshop ? ' frame' : ''}` },
           h('div', { class: 'col-status' }, renderCard()),
           h('div', { class: 'col-work' }, work)),

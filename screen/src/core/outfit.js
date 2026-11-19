@@ -47,19 +47,13 @@ function cleanPieces(v) {
   return out.slice(0, MAX_PER_SLOT);
 }
 
-/**
- * Turns the Kin's answer into { slot: [pieces] }. Unknown keys are ignored with a warning; a wrong value type
- * is an error (nothing is guessed). `{}` is valid and means "no outfit described".
- */
-export function parseOutfit(text) {
-  const parsed = parseJsonObject(text);
-  if (!parsed.ok) return parsed;
-  const doc = parsed.value;
-  if (doc === null || typeof doc !== 'object' || Array.isArray(doc)) return { ok: false, error: 'The answer must be a JSON object.' };
+/** Slots from a parsed JSON object. `location` belongs to the reading, so it is skipped here without a warning. */
+function outfitFromObject(doc) {
   const outfit = {};
   const warnings = [];
   const errors = [];
   for (const [key, value] of Object.entries(doc)) {
+    if (key.toLowerCase() === 'location') continue;
     let slot = normalizeSlot(key);
     if (!slot && LOOSE_CLOTHING.has(key.toLowerCase())) slot = 'clothing';
     if (!slot && LOOSE_ACCESSORIES.has(key.toLowerCase())) slot = 'accessories';
@@ -69,8 +63,62 @@ export function parseOutfit(text) {
     if (pieces === null) { errors.push(`"${key}" must be a text or a list of texts.`); continue; }
     if (pieces.length) outfit[slot] = [...(outfit[slot] || []), ...pieces];
   }
+  return { outfit, warnings, errors };
+}
+
+function parseObject(text) {
+  const parsed = parseJsonObject(text);
+  if (!parsed.ok) return parsed;
+  const doc = parsed.value;
+  if (doc === null || typeof doc !== 'object' || Array.isArray(doc)) return { ok: false, error: 'The answer must be a JSON object.' };
+  return { ok: true, doc };
+}
+
+/**
+ * Turns the Kin's answer into { slot: [pieces] }. Unknown keys are ignored with a warning; a wrong value type
+ * is an error (nothing is guessed). `{}` is valid and means "no outfit described".
+ */
+export function parseOutfit(text) {
+  const p = parseObject(text);
+  if (!p.ok) return p;
+  const { outfit, warnings, errors } = outfitFromObject(p.doc);
   if (errors.length) return { ok: false, error: errors.join(' ') };
   return { ok: true, outfit, warnings };
+}
+
+// ---- location: a short phrase that already starts with in / at / on ("in the kitchen", "at the hospital")
+const PLACE_PREPOSITION = /^(in|inside|at|on|outside|near|nearby|by|under|over|above|below|around|across|along|between|beside|behind|next|close|through|from|to|towards?|back|heading|going|walking|driving|travell?ing|commuting|on the way)\b/i;
+const NO_PLACE = /^(unknown|unspecified|undefined|null|none|nothing|not (mentioned|specified|stated|known|visible|described)|n\/?a|-+|\?+)$/i;
+
+/** Cleans the Kin's location. Returns a string, null (nothing stated) or undefined (wrong type). */
+export function cleanLocation(v) {
+  if (v === null || v === undefined) return null;
+  if (typeof v !== 'string') return undefined;
+  const s = cleanString(v, 100).replace(/[.;,]+$/, '');
+  return !s || NO_PLACE.test(s) ? null : s;
+}
+
+/** "in the kitchen" -> "In the kitchen." A bare place ("Alfenas") gets "In" in front. */
+export function describeLocation(value) {
+  if (!value) return 'No location described in the recent chat.';
+  return capitalizeFirst(`${PLACE_PREPOSITION.test(value) ? value : `in ${value}`}.`);
+}
+
+/** One parse for the whole answer: where the Kin is and what it wears. */
+export function parseReading(text) {
+  const p = parseObject(text);
+  if (!p.ok) return p;
+  const { outfit, warnings, errors } = outfitFromObject(p.doc);
+  const locKey = Object.keys(p.doc).find((k) => k.toLowerCase() === 'location');
+  const location = locKey ? cleanLocation(p.doc[locKey]) : null;
+  if (location === undefined) errors.push('"location" must be a text.');
+  if (errors.length) return { ok: false, error: errors.join(' ') };
+  return { ok: true, outfit, location, warnings };
+}
+
+/** The two sentences shown on the card. */
+export function describeReading({ outfit, location }) {
+  return { location: describeLocation(location), outfit: describeOutfit(outfit) };
 }
 
 /** "a" / "a and b" / "a, b and c". */

@@ -73,6 +73,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .banner-text { flex: 1 1 180px; overflow-wrap: anywhere; }
 .banner.error { border-color: var(--danger-line); background: var(--danger-tint); } .banner.error .icon { color: var(--danger); }
 .banner.ok { border-color: var(--ok-line); background: var(--ok-tint); } .banner.ok .icon { color: var(--ok); }
+.card.picker { padding: 18px 14px 6px; } .card.picker h2 { margin: 0 4px; font-size: 1.15rem; } .card.picker > .muted { margin: 4px 4px 12px; }
+.small { font-size: .85rem; }
 .card.empty { padding: 30px 20px; text-align: center; display: grid; gap: 10px; justify-items: center; }
 .empty-art { width: 76px; height: 76px; border-radius: 50%; background: var(--accent-tint); display: flex; align-items: center; justify-content: center; }
 

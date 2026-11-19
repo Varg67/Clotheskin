@@ -63,19 +63,31 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     host.channel.onKinsChange((kins) => { S.kins = kins; render(); });
   }
 
+  /** Where a Kin stands in this session, for the list: its last place, a reading in progress, or nothing yet. */
+  function kinState(k) {
+    if (S.reading.has(k.id)) return 'Reading…';
+    const r = S.results.get(k.id);
+    return r ? `${r.location.replace(/\.$/, '')} · ${formatRelative(r.at, clock())}` : 'Not read yet';
+  }
+
+  /** The attached Kins as buttons. Picking one makes it the only Kin the app reads until another is picked. */
+  function kinList(afterPick) {
+    const current = selectedKin()?.id;
+    return [
+      h('ul', { class: 'profile-list', role: 'list' }, ...S.kins.map((k) => h('li', {},
+        h('button', { type: 'button', class: `profile-pick${k.id === current ? ' selected' : ''}`, 'aria-pressed': String(k.id === current), 'data-key': `pick-${k.id}`,
+          onClick: () => { S.info = null; settings.save({ selectedKinId: k.id }); afterPick(); renderAndFocus('update'); announce(`Selected ${k.name}`); } },
+        avatar(36), h('span', { class: 'pp-text' }, h('strong', {}, k.name), h('span', { class: 'muted' }, kinState(k))),
+        k.id === current ? h('span', { class: 'tag' }, 'Selected') : null)))),
+      h('p', { class: 'help' }, 'Only the selected Kin is read, and only when you press Update status. To attach or detach a Kin, open the app’s settings in Kindroid Apps and use Kins.'),
+    ];
+  }
+
   function chooseKin(opener) {
     openSheet({
       title: 'Select a Kin', cancelLabel: 'Close',
       onClose: () => opener?.focus?.(),
-      build(body, api) {
-        body.append(
-          h('ul', { class: 'profile-list', role: 'list' }, ...S.kins.map((k) => h('li', {},
-            h('button', { type: 'button', class: `profile-pick${k.id === selectedKin()?.id ? ' selected' : ''}`, 'aria-pressed': String(k.id === selectedKin()?.id), 'data-key': `pick-${k.id}`,
-              onClick: () => { S.info = null; settings.save({ selectedKinId: k.id }); api.close(); renderAndFocus('update'); announce(`Selected ${k.name}`); } },
-            avatar(36), h('span', { class: 'pp-text' }, h('strong', {}, k.name), h('span', { class: 'muted' }, 'From Kindroid')),
-            k.id === selectedKin()?.id ? h('span', { class: 'tag' }, 'Selected') : null)))),
-          h('p', { class: 'help' }, 'These are the Kins attached to this app. To add or remove one, open the app’s settings in Kindroid Apps and use Kins.'));
-      },
+      build(body, api) { body.append(...kinList(api.close)); },
     });
   }
 
@@ -175,13 +187,17 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
   function renderCard() {
     const kin = selectedKin();
     if (!kin) {
-      return h('section', { class: 'card empty' },
-        h('div', { class: 'empty-art' }, icon('users', { size: 40 })),
-        h('h2', {}, 'Select a Kin'),
-        h('p', { class: 'muted' }, S.kins.length === 0
-          ? 'No Kin is attached to this app yet. In Apps, open Clotheskin’s settings, go to Kins and tick the Kins you want to track.'
-          : 'Choose which Kin to read before pressing Update status.'),
-        S.kins.length === 0 ? null : h('button', { type: 'button', class: 'btn primary', 'data-key': 'select-companion', onClick: (e) => chooseKin(e.currentTarget) }, 'Select a Kin'));
+      if (S.kins.length === 0) {
+        return h('section', { class: 'card empty' },
+          h('div', { class: 'empty-art' }, icon('users', { size: 40 })),
+          h('h2', {}, 'Select a Kin'),
+          h('p', { class: 'muted' }, 'No Kin is attached to this app yet. In Apps, open Clotheskin’s settings, go to Kins and tick the Kins you want to track.'));
+      }
+      // Several Kins and none chosen: the list is the screen, so one tap picks the Kin of the current roleplay.
+      return h('section', { class: 'card picker', 'aria-labelledby': 'picker-title' },
+        h('h2', { id: 'picker-title' }, 'Select a Kin'),
+        h('p', { class: 'muted' }, 'Which Kin is in your roleplay now?'),
+        ...kinList(() => {}));
     }
     const reading = S.reading.has(kin.id);
     const result = S.results.get(kin.id);
@@ -189,7 +205,8 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     const now = clock();
     return h('section', { class: 'card', 'aria-label': `${kin.name} status` },
       h('div', { class: 'card-top' },
-        h('div', { class: 'toggle static' }, avatar(48), h('span', { class: 'who' }, h('span', { class: 'name' }, kin.name))),
+        h('div', { class: 'toggle static' }, avatar(48), h('span', { class: 'who' }, h('span', { class: 'name' }, kin.name),
+          isWorkshop && S.kins.length > 1 ? h('span', { class: 'muted small', 'data-testid': 'only-this' }, `Only this Kin is read · ${S.kins.length - 1} other${S.kins.length > 2 ? 's' : ''} attached`) : null)),
         isWorkshop && S.kins.length > 1 ? h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Switch Kin', 'data-key': 'switch', onClick: (e) => chooseKin(e.currentTarget) }, icon('users', { size: 20 })) : null),
       h('div', { class: 'card-body' },
         h('h2', { class: 'section-title' }, 'Current status'),

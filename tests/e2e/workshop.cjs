@@ -73,16 +73,18 @@ window.addEventListener('message', async (e) => {
   const frameEval = (fn, arg) => page.frame({ url: /index\.html/ }).evaluate(fn, arg);
   const until = async (fn, what) => { const end = Date.now() + 4000; let last; while (Date.now() < end) { try { last = await fn(); if (last) return last; } catch (e) { last = e.message; } await page.waitForTimeout(50); } throw new Error(`timed out waiting for: ${what} (${last})`); };
   const idle = () => fr.locator('[data-key="update"][aria-busy="false"]').waitFor();
-  const pick = async (id) => { if (await key('switch').count()) await key('switch').click(); else await key('select-companion').click(); await key(`pick-${id}`).click(); await fr.locator('dialog').waitFor({ state: 'detached' }); };
+  const pick = async (id) => { if (await key('switch').count()) await key('switch').click(); await key(`pick-${id}`).click(); await fr.locator('dialog').waitFor({ state: 'detached' }); };
 
   await step('Workshop is detected; with several Kins the person chooses; no browser storage is used', async () => {
     await fr.getByRole('heading', { name: 'Select a Kin' }).waitFor();
     assert.equal(await frameEval(() => document.body.classList.contains('mode-workshop')), true);
     assert.equal(await frameEval(() => localStorage.length), 0);
-    await key('select-companion').click();
-    const sheet = await fr.locator('dialog').innerText();
-    assert.equal((sheet.match(/Alex/g) || []).length, 2, 'both same-name Kins are listed');
-    assert.ok(!/New|Delete|demo/i.test(sheet));
+    // The list is on the screen itself: one tap picks the Kin of the current roleplay, no dialog.
+    assert.equal(await fr.locator('dialog').count(), 0);
+    const list = await fr.locator('.card.picker').innerText();
+    assert.equal((list.match(/Alex/g) || []).length, 2, 'both same-name Kins are listed');
+    assert.equal((list.match(/Not read yet/g) || []).length, 3, 'nobody is read before Update status');
+    assert.ok(!/New|Delete|demo/i.test(list));
     await page.screenshot({ path: path.join(SHOTS, '07-workshop-select.png') });
   });
 
@@ -186,6 +188,23 @@ window.addEventListener('message', async (e) => {
     assert.deepEqual([...files.keys()], ['cs/clotheskin~3av2~3asettings.json']);
     assert.ok(!/jeans|cardigan|boots|jacket|hoodie|hospital|living room|college|sofa|coffee|washing|window/.test([...files.values()].join('')), 'no garment, place, pose or action was stored');
     await page.screenshot({ path: path.join(SHOTS, '10-workshop-settings-sage.png') });
+  });
+
+  await step('several Kins: only the selected one is read; the switch list shows who was read and where', async () => {
+    kins = [{ id: 'k-isa', name: 'Isa' }, { id: 'k-alex-1', name: 'Alex' }, { id: 'k-bea', name: 'Bea' }];
+    await frameEval(() => window.parent.pushKins());
+    await pick('k-isa');
+    assert.match(await fr.locator('[data-testid="only-this"]').innerText(), /Only this Kin is read · 2 others attached/);
+    kinAnswer = async () => '{"location":"at the beach","topwear":["a red scarf"]}';
+    const before = asked.length;
+    await key('update').click(); await idle();
+    assert.deepEqual(asked.slice(before).map((a) => a.kinId), ['k-isa'], 'one question, to the selected Kin only');
+    await key('switch').click();
+    const sheet = await fr.locator('dialog').innerText();
+    assert.match(sheet, /Isa\s+At the beach · just now/);
+    assert.match(sheet, /Bea\s+Not read yet/);
+    assert.match(sheet, /Only the selected Kin is read/);
+    await page.screenshot({ path: path.join(SHOTS, '10-workshop-switch-list.png') });
   });
 
   await step('no page errors or console errors', async () => { assert.deepEqual(problems, []); });

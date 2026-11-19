@@ -39,12 +39,17 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     pending: null, // local mode: { id, prompt } waiting for the pasted answer
     responseDraft: '',
     chatDraft: '', // memory only: a pasted conversation is never written to storage
+    sceneId: DEMO_SCENES[0].id, // the demo scene chosen in the list (kept across re-renders)
     readerOpen: !isWorkshop,
   };
 
   const live = h('div', { class: 'sr-only', role: 'status', 'aria-live': 'polite' });
   document.body.append(live);
   const announce = (t) => { live.textContent = ''; setTimeout(() => { live.textContent = t; }, 30); };
+  /** A notice under the card. It replaces an older error of that Kin (the newer message wins) and is announced. */
+  const setInfo = (kind, text, kinId = selectedKin()?.id) => { S.info = { kind, text }; S.errors.delete(kinId); announce(text); };
+  /** Re-renders and puts focus on the element with this data-key (when the focused button was removed). */
+  const renderAndFocus = (key) => { render(); root.querySelector(`[data-key="${key}"]`)?.focus(); };
 
   // ---------------------------------------------------------------- selection
   function selectedKin() {
@@ -66,7 +71,7 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
         body.append(
           h('ul', { class: 'profile-list', role: 'list' }, ...S.kins.map((k) => h('li', {},
             h('button', { type: 'button', class: `profile-pick${k.id === selectedKin()?.id ? ' selected' : ''}`, 'aria-pressed': String(k.id === selectedKin()?.id), 'data-key': `pick-${k.id}`,
-              onClick: async () => { S.info = null; await settings.save({ selectedKinId: k.id }); api.close(); render(); announce(`Selected ${k.name}`); } },
+              onClick: () => { S.info = null; settings.save({ selectedKinId: k.id }); api.close(); renderAndFocus('update'); announce(`Selected ${k.name}`); } },
             avatar(36), h('span', { class: 'pp-text' }, h('strong', {}, k.name), h('span', { class: 'muted' }, 'From Kindroid')),
             k.id === selectedKin()?.id ? h('span', { class: 'tag' }, 'Selected') : null)))),
           h('p', { class: 'help' }, 'These are the Kins attached to this app. To add or remove one, open the app’s settings in Kindroid Apps and use Kins.'));
@@ -80,22 +85,31 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     else S.errors.set(kinId, outcome.error);
   }
 
-  /** The run ends with {"location":"…","doing":"…","outfit":"…"}. Plain text (an older run) is shown as the outfit. */
+  const SUMMARY_MAX = 500; // what `kin end` allows; anything longer did not come from this app's run
+  const parseJson = (s) => { try { return JSON.parse(s); } catch { return undefined; } };
+  /** The Kin a run's summary names ({"kin":"…",…}), or undefined (plain text, an error line, an older run). */
+  const summaryKin = (summary) => { const o = parseJson(summary); return o && typeof o === 'object' && typeof o.kin === 'string' ? o.kin : undefined; };
+
+  /**
+   * The run ends with {"kin":"…","location":"…","doing":"…","outfit":"…"}. Plain text (an older run) is shown as the
+   * outfit. Any other JSON is not a reading and becomes an error instead of being shown raw.
+   */
   function readSummary(summary) {
+    const text = String(summary ?? '');
     const none = { location: describeLocation(null), doing: describeDoing({}) };
-    try {
-      const o = JSON.parse(summary);
-      if (o && typeof o.outfit === 'string') {
-        return { ok: true, location: typeof o.location === 'string' ? o.location : none.location, doing: typeof o.doing === 'string' ? o.doing : none.doing, outfit: o.outfit };
-      }
-    } catch { /* not JSON */ }
-    return { ok: true, ...none, outfit: summary || describeOutfit({}) };
+    const o = parseJson(text);
+    const str = (v) => typeof v === 'string' && v.length <= SUMMARY_MAX;
+    if (o && typeof o === 'object' && str(o.outfit)) {
+      return { ok: true, location: str(o.location) ? o.location : none.location, doing: str(o.doing) ? o.doing : none.doing, outfit: o.outfit };
+    }
+    if (o !== undefined || text.length > SUMMARY_MAX) return { ok: false, error: 'The reading came back in an unexpected format. Try again.' };
+    return { ok: true, ...none, outfit: text || describeOutfit({}) };
   }
 
-  /** Results go to the status region; an error is already read out by its role="alert" banner. */
+  /** Results of the Kin on screen go to the status region; an error is already read out by its role="alert" banner. */
   const announceResult = (id) => {
     const r = S.results.get(id);
-    if (!S.errors.has(id) && r) announce(`${r.location} ${r.doing} ${r.outfit}`);
+    if (id === selectedKin()?.id && !S.errors.has(id) && r) announce(`${r.location} ${r.doing} ${r.outfit}`);
   };
 
   /** Workshop: the run asks the Kin about its recent chat. The reading belongs to the Kin it started for. */
@@ -103,7 +117,9 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     if (S.reading.has(kin.id)) return; // repeated clicks join the reading in progress
     S.reading.add(kin.id); S.info = null; render();
     try {
-      const r = await host.channel.runAction('read_outfit', { kin: kin.id, name: kin.name });
+      // A reply naming another Kin is a late answer to an earlier run that timed out: not this reading.
+      const accept = (reply) => { const k = summaryKin(reply.summary); return k === undefined || k === kin.id; };
+      const r = await host.channel.runAction('read_outfit', { kin: kin.id, name: kin.name }, { accept });
       show(kin.id, r.ok ? readSummary(r.summary) : { ok: false, error: r.summary || 'The reading could not be completed.' });
     } catch (e) {
       show(kin.id, { ok: false, error: e.message });
@@ -116,10 +132,10 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
   /** Local mode: build the prompt from the pasted chat, then wait for the pasted JSON answer. */
   function prepareLocal() {
     const chat = S.chatDraft.trim();
-    if (!chat) { S.info = { kind: 'info', text: 'Paste a conversation in the scene reader first.' }; S.readerOpen = true; render(); document.querySelector('[data-key="chat"]')?.focus(); return; }
+    if (!chat) { setInfo('info', 'Paste a conversation in the scene reader first.'); S.readerOpen = true; renderAndFocus('chat'); return; }
     const kin = selectedKin();
-    S.pending = { id: kin.id, prompt: buildOutfitPrompt({ name: kin.name, chat }) };
-    S.reading.add(kin.id); S.info = null; S.readerOpen = true; render();
+    S.pending = { id: kin.id, chat, prompt: buildOutfitPrompt({ name: kin.name, chat }) };
+    S.reading.add(kin.id); S.info = null; S.errors.delete(kin.id); S.readerOpen = true; render();
   }
 
   function applyLocal(text) {
@@ -127,8 +143,8 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     const id = S.pending?.id ?? kin.id; // the answer belongs to the Kin the question was prepared for
     const parsed = parseReading(text);
     show(id, parsed.ok ? { ok: true, ...describeReading(parsed) } : { ok: false, error: `${parsed.error} Nothing was changed.` });
-    S.pending = null; S.reading.delete(id); S.info = null;
-    if (parsed.ok) S.responseDraft = '';
+    S.info = null;
+    if (parsed.ok) { S.pending = null; S.reading.delete(id); S.responseDraft = ''; } // a typo keeps the prompt: fix the answer and retry
     announceResult(id);
     render();
   }
@@ -199,8 +215,9 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
           : S.info ? h('div', { class: `banner ${S.info.kind}`, role: 'status', 'data-testid': 'banner' }, icon('refresh', { size: 18 }), h('span', { class: 'banner-text' }, S.info.text)) : null));
   }
 
+  const scene = () => DEMO_SCENES.find((x) => x.id === S.sceneId) || DEMO_SCENES[0];
+
   function renderReader() {
-    let sceneSel;
     const kin = selectedKin();
     return h('details', { class: 'reader', open: S.readerOpen ? '' : undefined, onToggle: (e) => { S.readerOpen = e.currentTarget.open; } },
       h('summary', { 'data-key': 'reader-summary' }, 'Scene reader (local mode)'),
@@ -209,7 +226,12 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
         h('div', { class: 'col-a' },
           h('label', { class: 'label', for: 'local-name' }, 'Character name'),
           h('input', { id: 'local-name', class: 'text-input', type: 'text', 'data-key': 'local-name', value: settings.value.localName, autocomplete: 'off',
-            onChange: async (e) => { await settings.save({ localName: e.target.value.trim() || 'Isa' }); S.kins = [{ id: LOCAL_ID, name: settings.value.localName }]; render(); } }),
+            onChange: (e) => {
+              settings.save({ localName: e.target.value.trim() || 'Isa' });
+              S.kins = [{ id: LOCAL_ID, name: settings.value.localName }];
+              if (S.pending) S.pending.prompt = buildOutfitPrompt({ name: settings.value.localName, chat: S.pending.chat });
+              setTimeout(render); // after the focus has moved on (Tab), so keepFocus restores it there
+            } }),
           h('label', { class: 'label', for: 'chat' }, 'Conversation'),
           h('textarea', { id: 'chat', class: 'text-input', rows: 9, 'data-key': 'chat', placeholder: 'Isa: Estou na sala, vestindo uma calça jeans azul e uma jaqueta de couro…', onInput: (e) => { S.chatDraft = e.target.value; } }, S.chatDraft),
           h('div', { class: 'btn-row' }, h('button', { type: 'button', class: 'btn', 'data-key': 'prepare', onClick: prepareLocal }, 'Prepare prompt')),
@@ -218,9 +240,9 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
             h('textarea', { id: 'prompt-view', class: 'text-input mono', rows: 8, readOnly: true, 'data-key': 'prompt-view' }, S.pending.prompt),
             h('div', { class: 'btn-row' },
               h('button', { type: 'button', class: 'btn', 'data-key': 'copy-prompt', onClick: async () => {
-                try { await navigator.clipboard.writeText(S.pending.prompt); S.info = { kind: 'ok', text: 'Prompt copied.' }; } catch { document.querySelector('[data-key="prompt-view"]')?.select(); S.info = { kind: 'info', text: 'Copy is blocked here. The prompt is selected: press Ctrl+C.' }; }
-                announce(S.info.text); render(); } }, icon('copy', { size: 16 }), 'Copy prompt'),
-              h('button', { type: 'button', class: 'btn ghost', 'data-key': 'cancel-read', onClick: () => { S.reading.delete(S.pending.id); S.pending = null; S.info = { kind: 'info', text: 'The reading was cancelled.' }; render(); } }, 'Cancel'))) : null),
+                try { await navigator.clipboard.writeText(S.pending.prompt); setInfo('ok', 'Prompt copied.'); } catch { document.querySelector('[data-key="prompt-view"]')?.select(); setInfo('info', 'Copy is blocked here. The prompt is selected: press Ctrl+C.'); }
+                render(); } }, icon('copy', { size: 16 }), 'Copy prompt'),
+              h('button', { type: 'button', class: 'btn ghost', 'data-key': 'cancel-read', onClick: () => { S.reading.delete(S.pending.id); S.pending = null; setInfo('info', 'The reading was cancelled.'); renderAndFocus('prepare'); } }, 'Cancel'))) : null),
         h('div', { class: 'col-b' },
           h('label', { class: 'label', for: 'response' }, 'JSON answer'),
           h('textarea', { id: 'response', class: 'text-input mono', rows: 9, 'data-key': 'response', placeholder: '{"location":"in the kitchen","pose":"standing at the counter","action":"chopping onions","topwear":["a white shirt"]}', onInput: (e) => { S.responseDraft = e.target.value; } }, S.responseDraft),
@@ -229,10 +251,11 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
           h('h3', { class: 'sub' }, 'Demo scenes'),
           h('div', { class: 'demo-row' },
             h('div', { class: 'demo-pick' }, h('label', { class: 'label', for: 'scene-pick' }, 'Scene'),
-              (sceneSel = h('select', { id: 'scene-pick', class: 'text-input', 'data-key': 'scene-pick' }, ...DEMO_SCENES.map((s) => h('option', { value: s.id }, s.title))))),
+              h('select', { id: 'scene-pick', class: 'text-input', 'data-key': 'scene-pick', onChange: (e) => { S.sceneId = e.target.value; } },
+                ...DEMO_SCENES.map((s) => h('option', { value: s.id, selected: s.id === S.sceneId ? '' : undefined }, s.title)))),
             h('div', { class: 'btn-row' },
-              h('button', { type: 'button', class: 'btn', 'data-key': 'demo-load', onClick: () => { const s = DEMO_SCENES.find((x) => x.id === sceneSel.value); S.chatDraft = s.chat; S.responseDraft = s.response; S.info = { kind: 'info', text: `Loaded “${s.title}”. Prepare the prompt, then press Show status.` }; render(); } }, 'Load scene'),
-              h('button', { type: 'button', class: 'btn', 'data-key': 'demo-run', onClick: () => { const s = DEMO_SCENES.find((x) => x.id === sceneSel.value); S.chatDraft = s.chat; S.responseDraft = s.response; S.pending = { id: kin.id, prompt: buildOutfitPrompt({ name: kin.name, chat: s.chat }) }; applyLocal(s.response); } }, 'Run demo scene'))),
+              h('button', { type: 'button', class: 'btn', 'data-key': 'demo-load', onClick: () => { const s = scene(); S.chatDraft = s.chat; S.responseDraft = s.response; setInfo('info', `Loaded “${s.title}”. Prepare the prompt, then press Show status.`); render(); } }, 'Load scene'),
+              h('button', { type: 'button', class: 'btn', 'data-key': 'demo-run', onClick: () => { const s = scene(); S.chatDraft = s.chat; S.responseDraft = s.response; S.pending = { id: kin.id, chat: s.chat, prompt: buildOutfitPrompt({ name: kin.name, chat: s.chat }) }; applyLocal(s.response); } }, 'Run demo scene'))),
           renderThemePicker())));
   }
 

@@ -24,14 +24,17 @@ export class WorkshopChannel {
     }
     const id = data.kin === 'action' ? data.name : data.path;
     const queue = this.waiting.get(`${data.kin}:${id}`);
-    const entry = queue?.shift();
-    if (entry) { clearTimeout(entry.timer); entry.resolve(data); }
+    const entry = queue?.[0];
+    if (!entry || (entry.accept && !entry.accept(data))) return; // nobody waiting, or a late reply meant for an earlier request
+    queue.shift();
+    clearTimeout(entry.timer);
+    entry.resolve(data);
   }
 
-  #request(kind, id, message, ms) {
+  #request(kind, id, message, ms, accept) {
     return new Promise((resolve, reject) => {
       const key = `${kind}:${id}`;
-      const entry = { resolve };
+      const entry = { resolve, accept };
       entry.timer = setTimeout(() => {
         const q = this.waiting.get(key) || [];
         this.waiting.set(key, q.filter((e) => e !== entry));
@@ -72,10 +75,11 @@ export class WorkshopChannel {
   /**
    * Runs one of the program's actions. Resolves { ok, summary } (summary is the line the run ended with).
    * The reply names the action but not its input, so two runs in flight could get each other's answer
-   * (a reading for one Kin shown on another). Runs are therefore posted one after the other.
+   * (a reading for one Kin shown on another). Runs are therefore posted one after the other, and `accept(reply)`
+   * can reject a late reply to an earlier run that timed out: it is dropped and this run keeps waiting.
    */
-  runAction(name, input) {
-    const run = this.actions.then(() => this.#request('action', name, { kin: 'action', name, input }, this.timeouts.action));
+  runAction(name, input, { accept } = {}) {
+    const run = this.actions.then(() => this.#request('action', name, { kin: 'action', name, input }, this.timeouts.action, accept));
     this.actions = run.catch(() => {});
     return run.then((r) => ({ ok: r.ok !== false, summary: r.summary ?? '' }));
   }

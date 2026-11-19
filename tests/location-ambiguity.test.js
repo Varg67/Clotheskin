@@ -116,7 +116,7 @@ test('a messy realistic answer through the whole run gives clean sentences', asy
   const messy = '```json\n{“location”: “*sitting on the sofa in the living room, drinking coffee*”, “topwear”: [“a grey hoodie”,], “bottomwear”: “black leggings”,}\n```';
   const out = await handleRun({ event: { trigger: 'action', action: 'read_outfit', input: { kin: 'k', name: 'Isa' } }, provider: { extract: async () => messy } });
   assert.equal(out.ok, true);
-  assert.deepEqual(JSON.parse(out.message), { location: 'On the sofa in the living room.', doing: 'No pose or action described in the recent chat.', outfit: 'Wearing a grey hoodie and black leggings.' });
+  assert.deepEqual(JSON.parse(out.message), { kin: 'k', location: 'On the sofa in the living room.', doing: 'No pose or action described in the recent chat.', outfit: 'Wearing a grey hoodie and black leggings.' });
 });
 
 // ---- 11. The wording: each ambiguous idea is pinned down in what the Kin reads

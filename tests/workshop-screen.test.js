@@ -93,6 +93,18 @@ test('actions: a failed run does not block the next one', async () => {
   assert.deepEqual(await channel.runAction('read_outfit', { kin: 'k1' }), { ok: true, summary: 'done' });
 });
 
+test('actions: a late reply to a run that timed out is not taken as the answer to the next run', async () => {
+  let listener = () => {};
+  const channel = new WorkshopChannel({ post: () => {}, subscribe: (fn) => { listener = fn; }, timeouts: { action: 20 } });
+  const forKin = (kin) => ({ accept: (r) => { const k = JSON.parse(r.summary).kin; return k === undefined || k === kin; } });
+  await assert.rejects(() => channel.runAction('read_outfit', { kin: 'ana' }, forKin('ana')), /did not answer/);
+  const bia = channel.runAction('read_outfit', { kin: 'bia' }, forKin('bia'));
+  await new Promise((r) => setTimeout(r, 5));
+  listener({ kin: 'action', name: 'read_outfit', ok: true, summary: '{"kin":"ana","outfit":"late"}' }); // Ana's run, finally
+  listener({ kin: 'action', name: 'read_outfit', ok: true, summary: '{"kin":"bia","outfit":"hers"}' });
+  assert.equal(JSON.parse((await bia).summary).outfit, 'hers');
+});
+
 test('settings work unchanged over the Workshop files; they survive a new Settings instance (a reload)', async () => {
   const w = fakeWorkshop();
   const first = new Settings(new WorkshopStorage(w.channel));

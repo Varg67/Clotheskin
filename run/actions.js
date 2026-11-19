@@ -7,9 +7,10 @@ const KIN_END_LIMIT = 500;
 /**
  * The line given back to the screen: the three sentences as compact JSON, shortened so the whole line stays within
  * the 500 characters `kin end` allows. Location and pose/action are short by nature, so only the outfit is ever cut.
+ * `kin` (optional) names the Kin the reading is for, so the screen can tell a late reply for another Kin apart.
  */
-export function packReading({ location, doing, outfit }) {
-  const pack = (o) => JSON.stringify({ location, doing, outfit: o });
+export function packReading({ kin, location, doing, outfit }) {
+  const pack = (o) => JSON.stringify({ kin, location, doing, outfit: o });
   if (pack(outfit).length <= KIN_END_LIMIT) return pack(outfit);
   // JSON escaping only makes text longer, so the room left for the raw text is an upper bound.
   let text = outfit.slice(0, Math.max(0, KIN_END_LIMIT - pack('…').length));
@@ -21,7 +22,7 @@ export function packReading({ location, doing, outfit }) {
 /**
  * Handles one run. `event` is the JSON the Workshop sends on stdin:
  *   {"trigger":"action","action":"read_outfit","input":{"kin":"<id>","name":"<name>"}}
- * Returns { ok, message }. On success `message` is {"location":"...","doing":"...","outfit":"..."} (three natural sentences) and the
+ * Returns { ok, message }. On success `message` is {"kin":"<id>","location":"...","doing":"...","outfit":"..."} (three sentences) and the
  * caller ends the run with it, so the screen shows them as they are. Nothing is stored.
  */
 export async function handleRun({ event, provider }) {
@@ -41,5 +42,5 @@ export async function handleRun({ event, provider }) {
   }
   const parsed = parseReading(answer);
   if (!parsed.ok) return { ok: false, message: clip(`${parsed.error} Nothing was changed. Try again.`) };
-  return { ok: true, message: packReading(describeReading(parsed)) };
+  return { ok: true, message: packReading({ kin: kinId, ...describeReading(parsed) }) };
 }

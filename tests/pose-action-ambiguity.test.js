@@ -128,7 +128,7 @@ test('a messy answer with everything gives three clean sentences; the worst case
   const messy = '*smiles* ```json\n{“location”: “in the kitchen”, “pose”: “*standing at the counter*”, “action”: “I am chopping onions”, “topwear”: [“a white shirt”,],}\n```';
   const ev = { trigger: 'action', action: 'read_outfit', input: { kin: 'k', name: 'Isa' } };
   const out = await handleRun({ event: ev, provider: { extract: async () => messy } });
-  assert.deepEqual(JSON.parse(out.message), { location: 'In the kitchen.', doing: 'Standing at the counter, chopping onions.', outfit: 'Wearing a white shirt.' });
+  assert.deepEqual(JSON.parse(out.message), { kin: 'k', location: 'In the kitchen.', doing: 'Standing at the counter, chopping onions.', outfit: 'Wearing a white shirt.' });
 
   const w = (n) => Array.from({ length: n }, (_, i) => `word${i}`).join(' ');
   const worst = JSON.stringify({ location: `in ${w(60)}`, pose: `standing ${w(40)}`, action: `reading ${w(40)}`, topwear: Array.from({ length: 8 }, (_, i) => `a very long descriptive jacket number ${i} with details`), 'neck-accessory': Array.from({ length: 8 }, (_, i) => `a very long necklace number ${i}`) });

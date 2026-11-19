@@ -1,0 +1,13 @@
+{
+  "name": "clotheskin",
+  "version": "0.1.0",
+  "description": "Visual continuity panel for Kindroid companions: location, posture, clothing, accessories, hair and makeup.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test \"tests/*.test.js\"",
+    "test:e2e": "node tests/e2e/run.cjs"
+  },
+  "engines": { "node": ">=20" }
+}

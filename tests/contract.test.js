@@ -49,8 +49,6 @@ test('structural errors reject the whole document with readable English messages
     [{ state_updates: { hair: null } }, /non-empty string/],
     [{ item_changes: 'none' }, /must be an array/],
     [{ unresolved: [1] }, /non-empty string/],
-    [{ extra: 1 }, /Unsupported top-level key/],
-    [{ item_changes: [{ op: 'wear', item_name: 'x', slot: 'topwear', color: 'red' }] }, /unsupported field "color"/],
   ];
   for (const [doc, re] of bad) {
     const v = validateDocument(doc);
@@ -58,6 +56,16 @@ test('structural errors reject the whole document with readable English messages
     assert.match(v.errors.join(' '), re, JSON.stringify(doc));
   }
   assert.equal(validateDocument([]).ok, false);
+});
+
+test('unknown keys are ignored with a warning instead of rejecting the answer', () => {
+  const top = validateDocument({ extra: 1 });
+  assert.equal(top.ok, true);
+  assert.match(top.doc.warnings.join(' '), /top-level "extra" is not part of the contract/);
+  const op = validateDocument({ item_changes: [{ op: 'wear', item_name: 'x', slot: 'topwear', color: 'red' }] });
+  assert.equal(op.ok, true);
+  assert.match(op.doc.warnings.join(' '), /item_changes\[0\]\.color/);
+  assert.equal('color' in op.doc.item_changes[0], false, 'the unknown field is dropped');
 });
 
 test('empty collections are valid; missing keys count as empty', () => {

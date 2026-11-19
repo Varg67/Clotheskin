@@ -150,7 +150,8 @@ export function renderCompactContract() {
     lines.push(`  ${op}: ${f.join(', ')}`);
   }
   lines.push('  to = {"type":"held","hand"} | {"type":"pocket","container_item_id|container_item_name","pocket","side"} | {"type":"bag","container_item_id|container_item_name"} | {"type":"scene","place"}');
-  lines.push(`clothing slots (inner layer first): ${CLOTHING_SLOTS.join(', ')}. One-piece garments use their main slot plus "covers".`);
+  lines.push('Meanings: position = body posture only ("sitting on the sofa"); location = the place ("living room at the shared house"); hair = hairstyle or condition ("low bun", "wet"), never colour. Reuse the exact wording of a known place or item from PREVIOUS STATE.');
+  lines.push(`clothing slots (inner layer first): ${CLOTHING_SLOTS.join(', ')}. One-piece garments use their main slot plus "covers". topwear = shirts, T-shirts, sweaters, jackets, coats, dresses; bottomwear = trousers, skirts, shorts; footwear = shoes; footunderwear = socks, tights; topunderwear/bottomunderwear = bra, undershirt, underpants only.`);
   lines.push(`accessory slots: ${ACCESSORY_SLOTS.join(', ')} (bottom-accessory = hips). Bags: "${BAG_SLOT}".`);
   lines.push('wear slots, for "slot": any clothing slot, accessory slot or "bags". In PREVIOUS STATE null = unknown, [] = confirmed empty; omitted slots are unknown.');
   return lines.join('\n');

@@ -14,6 +14,18 @@ export class OpSkip extends Error {
   }
 }
 
+// ---- values that mean "nothing" and must never be stored as if they were facts
+const PLACEHOLDER = /^(unknown|unspecified|undefined|null|nothing|not (mentioned|specified|stated|known|visible|described)|n\/?a|-+|\?+)$/i;
+const POSTURE_START = /^(sitting|sits|seated|standing|stands|lying|lies|laying|kneeling|crouching|crouched|leaning|walking|squatting|reclining|slouching)\b/i;
+const PLACE_START = /^(in|at|inside|outside|near)\b/i;
+
+function stateValueProblem(field, value) {
+  if (PLACEHOLDER.test(value) || (field !== 'makeup' && /^none$/i.test(value))) return 'it was a placeholder, not a value';
+  if (field === 'location' && POSTURE_START.test(value)) return { note: `Location "${value}" looks like a posture. Left unchanged.`, reason: 'it looks like a posture' };
+  if (field === 'position' && PLACE_START.test(value)) return { note: `Posture "${value}" looks like a place. Left unchanged.`, reason: 'it looks like a place' };
+  return null;
+}
+
 const HISTORY_LIMIT = 40;
 const UNRESOLVED_LIMIT = 20;
 const PROCESSED_LIMIT = 500;
@@ -39,9 +51,11 @@ function findByName(record, name, filter = () => true) {
  */
 export function resolveRef(record, obj, base, { prefer, filter } = {}) {
   const id = obj[`${base}_id`];
-  const name = obj[`${base}_name`];
+  const given = obj[`${base}_name`];
   if (id && record.items[id]) return { item: record.items[id] };
-  if (!name) return { missing: id ? `ID "${id}"` : null };
+  // The Kin sometimes puts a name in the id field: an unknown id is tried as a name.
+  const name = given || id || null;
+  if (!name) return { missing: null, name: null };
   let cands = findByName(record, name, filter);
   if (cands.length > 1 && prefer) {
     const p = cands.filter(prefer);
@@ -49,7 +63,8 @@ export function resolveRef(record, obj, base, { prefer, filter } = {}) {
   }
   if (cands.length === 1) return { item: cands[0] };
   if (cands.length > 1) return { ambiguous: cands, name };
-  return { missing: name };
+  // Only a real name may create an item. An unknown id on its own never does.
+  return { missing: name, name: given || null };
 }
 
 function ambiguityNote(r) {
@@ -154,8 +169,8 @@ function resolveDestination(record, dest, item, ctx) {
       const r = mustResolve(record, dest, 'container_item');
       let container = r.item;
       if (!container) {
-        if (dest.type === 'pocket') throw new OpSkip(`container "${r.missing}" is not known`);
-        container = createItem(record, r.missing, 'bag', ctx);
+        if (dest.type === 'pocket' || !r.name) throw new OpSkip(`container "${r.missing ?? '?'}" is not known`);
+        container = createItem(record, r.name, 'bag', ctx);
       }
       if (container.id === item.id || wouldCycle(record, item.id, container.id)) {
         throw new OpSkip(`${item.name} cannot be placed inside ${container.name}`);
@@ -207,8 +222,8 @@ const HANDLERS = {
     let item = r.item;
     if (item) guardItem(ctx, item);
     else {
-      if (!r.missing) throw new OpSkip('the item has no usable name');
-      item = createItem(record, op.item_name || r.missing, kind, ctx);
+      if (!r.name) throw new OpSkip(`the item has no usable name${r.missing ? ` ("${r.missing}" is not a known id)` : ''}`);
+      item = createItem(record, r.name, kind, ctx);
     }
     const had = getList(record, slot) || [];
     if (!had.includes(item.id)) {
@@ -218,6 +233,7 @@ const HANDLERS = {
       const cur = getList(record, slot) || [];
       setList(record, slot, insertInList(cur, item.id, { over, under }));
     }
+    if (item.kind === 'object') item.kind = kind; // first seen as a loose object, now worn
     item.slot = slot;
     item.place = { type: 'worn' };
     if (op.wear_mode !== undefined) item.wearMode = op.wear_mode;
@@ -243,8 +259,8 @@ const HANDLERS = {
     let item = r.item;
     if (item) guardItem(ctx, item);
     else {
-      if (!r.missing) throw new OpSkip('the item has no usable name');
-      item = createItem(record, op.item_name || r.missing, op.slot ? kindForSlot(op.slot) : 'object', ctx);
+      if (!r.name) throw new OpSkip(`the item has no usable name${r.missing ? ` ("${r.missing}" is not a known id)` : ''}`);
+      item = createItem(record, r.name, op.slot ? kindForSlot(op.slot) : 'object', ctx);
       if (op.slot) item.slot = op.slot;
     }
     for (const s of slotsOf(record, item.id)) guardSlot(ctx, record, s);
@@ -275,8 +291,8 @@ const HANDLERS = {
     let item = r.item;
     if (item) guardItem(ctx, item);
     else {
-      if (!r.missing) throw new OpSkip('the item has no usable name');
-      item = createItem(record, op.item_name || r.missing, op.kind || 'object', ctx);
+      if (!r.name) throw new OpSkip(`the item has no usable name${r.missing ? ` ("${r.missing}" is not a known id)` : ''}`);
+      item = createItem(record, r.name, op.kind || 'object', ctx);
     }
     for (const s of slotsOf(record, item.id)) guardSlot(ctx, record, s);
     const place = resolveDestination(record, op.to, item, ctx);
@@ -315,6 +331,12 @@ export function applyDocument(record, doc, { baseRev, now, ticketId = null, mess
       continue;
     }
     const value = doc.state_updates[field];
+    const problem = stateValueProblem(field, value);
+    if (problem) {
+      skipped.push({ what: `${field} update`, reason: typeof problem === 'string' ? problem : problem.reason });
+      if (typeof problem !== 'string') unresolved.push(problem.note);
+      continue;
+    }
     if (cur.value === value) continue;
     draft.fields[field] = { value, source, updatedAt: now, editedRev: cur.editedRev };
     applied.push(`${field}: ${cur.value ?? 'unknown'} → ${value}`);
@@ -345,7 +367,7 @@ export function applyDocument(record, doc, { baseRev, now, ticketId = null, mess
   const seen = new Set(draft.processedMessageIds);
   for (const id of messageIds) if (!seen.has(id)) draft.processedMessageIds.push(id);
   draft.processedMessageIds = draft.processedMessageIds.slice(-PROCESSED_LIMIT);
-  draft.history.push({ at: now, source, summary: applied.length ? applied : ['No changes'], skipped: skipped.map((s) => `${s.what}: ${s.reason}`) });
+  draft.history.push({ at: now, source, summary: applied.length ? applied : ['No changes'], skipped: [...skipped.map((s) => `${s.what}: ${s.reason}`), ...(doc.warnings || []).map((w) => `Ignored: ${w}`)] });
   draft.history = draft.history.slice(-HISTORY_LIMIT);
   return { record: draft, applied, skipped, unresolved };
 }

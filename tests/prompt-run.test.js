@@ -34,8 +34,8 @@ test('the example inside the prompt is itself a valid answer', () => {
   const example = OUTFIT_PROMPT.match(/Example: (\{.*\})/)[1];
   const p = parseReading(example);
   assert.equal(p.ok, true);
-  assert.equal(p.location, 'in the living room');
-  assert.deepEqual(Object.keys(p.outfit), ['topwear', 'bottomwear', 'eyes-accessory']);
+  assert.equal(p.location, 'at a bookstore');
+  assert.deepEqual(Object.keys(p.outfit), ['topwear', 'bottomwear', 'footwear']);
   assert.deepEqual(p.warnings, []);
 });
 

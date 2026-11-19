@@ -19,7 +19,8 @@ Answer with minified JSON only, on one line: no code fence, no narration, no rol
 Other keys are slots, values are arrays of pieces, innermost layer first. Slots: ${SLOT_LIST}.
 topwear = shirts, sweaters, jackets, coats, dresses; bottomwear = trousers, jeans, skirts, shorts; footwear = shoes, boots; footunderwear = socks, tights; topunderwear and bottomunderwear = bra, undershirt, underpants only; eyes-accessory = glasses; bottom-accessory = hips; bags = backpack, handbag.
 Leave out keys with nothing. If the chat says nothing about either, answer {}.
-Example: {"location":"in the living room","topwear":["a perfumed white shirt","a leather jacket"],"bottomwear":["blue jeans"],"eyes-accessory":["round glasses"]}
+The example only shows the format; never copy its values.
+Example: {"location":"at a bookstore","topwear":["a grey hoodie"],"bottomwear":["black leggings"],"footwear":["white sneakers"]}
 {{recent_chat}}`;export function buildOutfitPrompt({ name, chat = '', template = OUTFIT_PROMPT }) {
   const who = String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, 60) || 'the character';
   const recent = String(chat ?? '').trim();

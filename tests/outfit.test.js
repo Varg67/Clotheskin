@@ -81,7 +81,8 @@ test('location: placeholders are ignored, a wrong type is an error, trailing pun
   const bad = parseReading('{"location":{"room":"kitchen"}}');
   assert.equal(bad.ok, false);
   assert.match(bad.error, /"location" must be a text/);
-  assert.equal(parseReading('{"location":["in the kitchen"]}').ok, false);
+  assert.equal(parseReading('{"location":["in the kitchen"]}').location, 'in the kitchen', 'a list of texts is joined, not rejected');
+  assert.equal(parseReading('{"location":["in the kitchen",5]}').ok, false);
 });
 
 test('location: the key may be written in any case, and it never leaks into the outfit or a warning', () => {

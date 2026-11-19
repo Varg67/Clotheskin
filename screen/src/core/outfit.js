@@ -47,13 +47,16 @@ function cleanPieces(v) {
   return out.slice(0, MAX_PER_SLOT);
 }
 
-/** Slots from a parsed JSON object. `location` belongs to the reading, so it is skipped here without a warning. */
+// The Kin may name the key differently; all of these mean "where you are".
+const isLocationKey = (k) => ['location', 'place', 'where', 'currentlocation', 'currentplace'].includes(String(k).toLowerCase().replace(/[\s_-]+/g, ''));
+
+/** Slots from a parsed JSON object. The location key belongs to the reading, so it is skipped here without a warning. */
 function outfitFromObject(doc) {
   const outfit = {};
   const warnings = [];
   const errors = [];
   for (const [key, value] of Object.entries(doc)) {
-    if (key.toLowerCase() === 'location') continue;
+    if (isLocationKey(key)) continue;
     let slot = normalizeSlot(key);
     if (!slot && LOOSE_CLOTHING.has(key.toLowerCase())) slot = 'clothing';
     if (!slot && LOOSE_ACCESSORIES.has(key.toLowerCase())) slot = 'accessories';
@@ -87,21 +90,61 @@ export function parseOutfit(text) {
 }
 
 // ---- location: a short phrase that already starts with in / at / on ("in the kitchen", "at the hospital")
-const PLACE_PREPOSITION = /^(in|inside|at|on|outside|near|nearby|by|under|over|above|below|around|across|along|between|beside|behind|next|close|through|from|to|towards?|back|heading|going|walking|driving|travell?ing|commuting|on the way)\b/i;
-const NO_PLACE = /^(unknown|unspecified|undefined|null|none|nothing|not (mentioned|specified|stated|known|visible|described)|n\/?a|-+|\?+)$/i;
+const EN_PREP = 'in|inside|at|on|outside|near|nearby|by|under|over|above|below|around|across|along|between|beside|behind|next|close|through|from|to|towards?|back|upstairs|downstairs';
+const MOTION = 'heading|going|walking|driving|travell?ing|commuting|returning|coming|leaving|riding|flying|running|jogging|cycling|biking|sailing';
+const PT_PREP = 'em|na|no|nas|nos|numa|num|ao|à|aos|às|pra|para|de|da|do|das|dos|perto|dentro|fora|sobre|sob|entre|até';
+const STARTS_PLACE = new RegExp(`^(${EN_PREP}|${MOTION}|on the way)\\b`, 'i');
+const STARTS_PORTUGUESE = new RegExp(`^(${PT_PREP})(?=\\s|$)`, 'i'); // \b is unreliable with accents
+const IS_MOTION = new RegExp(`^(${MOTION})$`, 'i');
+const NO_PLACE = /^(unknown|unspecified|undefined|null|none|nothing|nowhere|somewhere( else)?|elsewhere|unclear|unsure|no (specific |particular )?(place|location)|not (mentioned|specified|stated|known|visible|described|sure|clear)|n\/?a|-+|\?+)$/i;
+const MAX_LOCATION = 120;
 
-/** Cleans the Kin's location. Returns a string, null (nothing stated) or undefined (wrong type). */
+/**
+ * Cleans the Kin's location. Returns a string, null (nothing stated) or undefined (wrong type).
+ * The Kin is asked for the place only, so the usual slips are repaired: markdown and quotes around it, a posture or
+ * activity in front of it ("sitting on the sofa in the living room"), a clause after it (", cooking dinner",
+ * "while reading", "wearing a robe"), or a list instead of a text.
+ */
 export function cleanLocation(v) {
   if (v === null || v === undefined) return null;
-  if (typeof v !== 'string') return undefined;
-  const s = cleanString(v, 100).replace(/[.;,]+$/, '');
-  return !s || NO_PLACE.test(s) ? null : s;
+  let s;
+  if (Array.isArray(v)) {
+    if (v.some((x) => typeof x !== 'string')) return undefined;
+    s = v.map((x) => x.trim()).filter(Boolean).slice(0, 3).join(', ');
+  } else if (typeof v === 'string') s = v;
+  else return undefined;
+
+  s = cleanString(s, 400)
+    .replace(/^[\s*_"'“”‘’()[\]]+/, '').replace(/[\s*_"'“”‘’()[\]]+$/, '')
+    .replace(/[.;,!?\s]+$/, '');
+  s = s.replace(/\s*[,;–—-]?\s*\b(wearing|dressed)\b.*$/i, '')            // clothes do not belong here
+    .replace(/\s*[,;]\s*[A-Za-z]+ing\b.*$/i, '')                           // ", cooking dinner"
+    .replace(/\s+(while|as|and)\s+[A-Za-z]+ing\b.*$/i, '')                 // "while reading"
+    .replace(/[.;,!?\s]+$/, '');
+  // A lowercase posture or activity first ("sitting on the sofa", "cooking in the kitchen") is dropped when a place follows.
+  const lead = s.match(/^([a-z]+ing|seated|perched|sat|stood|lay)(?:\s+(.*))?$/);
+  if (lead && !IS_MOTION.test(lead[1])) {
+    const rest = (lead[2] || '').trim();
+    if (STARTS_PLACE.test(rest) || STARTS_PORTUGUESE.test(rest)) s = rest;
+    else return null; // a posture with no place in it
+  }
+  if (!s || NO_PLACE.test(s)) return null;
+  if (s.length > MAX_LOCATION) s = `${s.slice(0, MAX_LOCATION).replace(/\s+\S*$/, '')}…`;
+  return s;
 }
 
-/** "in the kitchen" -> "In the kitchen." A bare place ("Alfenas") gets "In" in front. */
+/**
+ * "in the kitchen" -> "In the kitchen." Only a bare noun phrase is adjusted: articles and proper names get "in",
+ * "home" gets "at"; any other bare word, and anything Portuguese, is shown as written.
+ */
 export function describeLocation(value) {
   if (!value) return 'No location described in the recent chat.';
-  return capitalizeFirst(`${PLACE_PREPOSITION.test(value) ? value : `in ${value}`}.`);
+  const v = value.trim();
+  let phrase = v;
+  if (STARTS_PLACE.test(v) || STARTS_PORTUGUESE.test(v)) phrase = v;
+  else if (/^home$/i.test(v)) phrase = 'at home';
+  else if (/^(the|a|an|my|our|his|her|their|your)\b/i.test(v) || /^[A-Z]/.test(v)) phrase = `in ${v}`;
+  return capitalizeFirst(phrase.endsWith('…') ? phrase : `${phrase}.`);
 }
 
 /** One parse for the whole answer: where the Kin is and what it wears. */
@@ -109,7 +152,7 @@ export function parseReading(text) {
   const p = parseObject(text);
   if (!p.ok) return p;
   const { outfit, warnings, errors } = outfitFromObject(p.doc);
-  const locKey = Object.keys(p.doc).find((k) => k.toLowerCase() === 'location');
+  const locKey = Object.keys(p.doc).find(isLocationKey);
   const location = locKey ? cleanLocation(p.doc[locKey]) : null;
   if (location === undefined) errors.push('"location" must be a text.');
   if (errors.length) return { ok: false, error: errors.join(' ') };

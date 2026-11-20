@@ -100,6 +100,8 @@ git add -A && git commit -m "Clotheskin"
 node kin.mjs send .
 ```
 
+**Or through Kindroid's in-app agent**, pasting the code: `node scripts/build-agent-pack.mjs` writes `kindroid-agent-pack/` (not committed), with the 22 files the app needs split into messages, the rules for the agent (copy exactly, change nothing) and each file's line count, character count and SHA-256 to check the copy. `kin send` remains the safer path: it uploads the exact files.
+
 Then, in Kindroid: Apps → **Waiting for you** → Allow. It reads your Kin's chat, so it always waits for you. To have it follow a Kin, open the app's settings → **Kins** and tick the Kin. Open the screen, pick the Kin of your roleplay, and press **Start**.
 
 ## Still to confirm on the first real run

@@ -218,7 +218,7 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     if (!kin) { chooseKin(); return; }
     if (!isWorkshop) { prepareLocal(); return; }
     // With automatic updates on (and the Kin awake), a manual update is the next automatic step, done now.
-    if (auto.interval() && !auto.hibernation(kin.id)) { auto.runNow(); return; }
+    if (auto.running() && !auto.hibernation(kin.id)) { auto.runNow(); return; }
     await readInWorkshop(kin);
   }
 
@@ -230,28 +230,44 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
       : `Kindroid has not answered ${w.failures} times in a row. It may be down.${when.replace('will try', 'are slowed down and will try')}`;
   }
 
-  /** The ruler: stops from Off to 2 h. The label follows the thumb while dragging; the choice applies on release. */
+  /**
+   * The automation panel: the ruler chooses how often (1 min to 2 h; the label follows the thumb while dragging and the
+   * choice applies on release), and Start / Pause / Stop decide whether it runs.
+   */
   function renderAutomation(kin) {
     const value = snapInterval(settings.value.autoIntervalS);
     const index = Math.max(0, INTERVAL_STEPS.indexOf(value));
-    const label = (s) => (s ? `Every ${formatInterval(s)}` : 'Off');
+    const label = (s) => `Every ${formatInterval(s)}`;
     const out = h('output', { for: 'auto-ruler', class: 'auto-value', 'data-testid': 'auto-value' }, label(value));
+    const run = auto.runState();
     const h8n = auto.hibernation(kin.id);
     const now = clock();
     const at = (d) => formatWhen(d.toISOString(), { now });
-    let status = null;
-    if (h8n) {
-      status = [`Asleep until ${at(h8n.wakeAt)}. The dream question comes at ${at(h8n.until)}. `,
-        h('button', { type: 'button', class: 'link-btn', 'data-key': 'wake-now', onClick: () => auto.wakeNow() }, 'Wake now')];
-    } else if (value && auto.state.busy) status = 'Updating…';
-    else if (value && auto.state.nextAt) status = `Next update at ${at(auto.state.nextAt)}.`;
-    return h('div', { class: 'auto' },
-      h('div', { class: 'auto-head' }, h('label', { class: 'row-label', for: 'auto-ruler' }, 'Automatic update'), out),
+    const asleep = h8n ? `Asleep until ${at(h8n.wakeAt)}. The dream question comes at ${at(h8n.until)}. ` : '';
+    let status;
+    if (run === 'stopped') status = 'Stopped. Press Start to update automatically.';
+    else if (run === 'paused') status = `${asleep}Paused: nothing is asked until you press Resume.`;
+    else if (h8n) status = [asleep, h('button', { type: 'button', class: 'link-btn', 'data-key': 'wake-now', onClick: () => auto.wakeNow() }, 'Wake now')];
+    else if (auto.state.busy) status = 'Updating…';
+    else if (auto.state.nextAt) status = `Next update at ${at(auto.state.nextAt)}.`;
+    const control = (key, text, iconName, enabled, action, focusAfter) => h('button', {
+      type: 'button', class: `btn small${key === 'auto-start' ? ' primary' : ''}`, 'data-key': key, disabled: !enabled,
+      onClick: async () => { await action(); renderAndFocus(focusAfter); announce(`Automatic update ${{ 'auto-start': 'started', 'auto-pause': 'paused', 'auto-stop': 'stopped' }[key]}.`); },
+    }, icon(iconName, { size: 16 }), text);
+    return h('div', { class: 'auto', role: 'group', 'aria-labelledby': 'auto-title' },
+      h('div', { class: 'auto-head' },
+        h('span', { class: 'row-label', id: 'auto-title' }, 'Automatic update'),
+        h('span', { class: `auto-state ${run}`, 'data-testid': 'auto-state' }, { running: 'Running', paused: 'Paused', stopped: 'Stopped' }[run])),
+      h('div', { class: 'auto-controls' },
+        control('auto-start', run === 'paused' ? 'Resume' : 'Start', 'play', run !== 'running', () => auto.start(), 'auto-pause'),
+        control('auto-pause', 'Pause', 'pause', run === 'running', () => auto.pause(), 'auto-start'),
+        control('auto-stop', 'Stop', 'stop', run !== 'stopped', () => auto.stop(), 'auto-start')),
+      h('div', { class: 'auto-head' }, h('label', { class: 'row-label', for: 'auto-ruler' }, 'How often'), out),
       h('input', { type: 'range', id: 'auto-ruler', class: 'ruler', 'data-key': 'auto-ruler', min: 0, max: INTERVAL_STEPS.length - 1, step: 1, value: index,
         'aria-valuetext': label(value),
         onInput: (e) => { const s = INTERVAL_STEPS[Number(e.target.value)]; out.textContent = label(s); e.target.setAttribute('aria-valuetext', label(s)); },
         onChange: (e) => { settings.save({ autoIntervalS: INTERVAL_STEPS[Number(e.target.value)] }); auto.reschedule(); } }),
-      h('div', { class: 'ruler-ends muted', 'aria-hidden': 'true' }, h('span', {}, 'Off'), h('span', {}, '2 h')),
+      h('div', { class: 'ruler-ends muted', 'aria-hidden': 'true' }, h('span', {}, '1 min'), h('span', {}, '2 h')),
       status ? h('p', { class: 'meta auto-status', 'data-testid': 'auto-status' }, status) : null);
   }
 
@@ -297,7 +313,7 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     const result = S.results.get(kin.id);
     const error = S.errors.get(kin.id);
     const dream = auto?.state.dreams.get(kin.id);
-    const warning = auto?.interval() ? auto.warning() : null;
+    const warning = auto?.warning() ?? null;
     const now = clock();
     return h('section', { class: 'card', 'aria-label': `${kin.name} status` },
       h('div', { class: 'card-top' },

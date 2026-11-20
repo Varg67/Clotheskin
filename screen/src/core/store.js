@@ -16,7 +16,8 @@ export const DEFAULT_SETTINGS = {
   theme: 'warm', // 'warm' (stock Kindroid) | 'sage' (green, sampled from a customised desktop window)
   selectedKinId: null,
   localName: 'Isa',
-  autoIntervalS: 0, // automatic readings in the Workshop, in seconds (0 = off); shown as minutes on the ruler
+  autoIntervalS: 600, // automatic readings in the Workshop, in seconds; shown as minutes and hours on the ruler
+  autoState: 'stopped', // 'running' | 'paused' | 'stopped' (Start, Pause, Stop)
   sleep: {}, // kin id -> { wakeAt, until, sleptOn }: the hibernation of a sleeping Kin (times only, nothing about the scene)
 };
 

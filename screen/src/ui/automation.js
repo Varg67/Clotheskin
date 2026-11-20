@@ -5,7 +5,8 @@
 //      └──────────────────────────────────────────────┴──────────── dream question <────────────┘
 //
 // Errors in a row slow the readings down (retryDelay); maintenance or repeated server errors raise a warning.
-// Only the hibernation is saved (settings.sleep), so closing and reopening the screen keeps it.
+// Start, Pause and Stop (settings.autoState): Pause keeps everything and goes on from there; Stop forgets the sleep
+// cycle. The state and the hibernation (settings.sleep) are saved, so closing and reopening the screen keeps them.
 import { retryDelay, errorKind, looksAsleep, planSleep, describeNow, snapInterval, ERRORS_BEFORE_WARNING } from '../core/auto.js';
 
 const HEARTBEAT_MS = 30000; // timers are re-armed in short steps, so a computer waking from sleep catches up
@@ -25,6 +26,8 @@ export function createAutomation({
   let timer = null;
 
   const interval = () => snapInterval(settings.value.autoIntervalS);
+  const runState = () => (['running', 'paused'].includes(settings.value.autoState) ? settings.value.autoState : 'stopped');
+  const running = () => runState() === 'running';
   const sleepOf = (id) => settings.value.sleep?.[id] || null;
   function saveSleep(id, entry) {
     const all = { ...(settings.value.sleep || {}) };
@@ -41,8 +44,8 @@ export function createAutomation({
   function arm(at) {
     if (timer) clearTimer(timer);
     timer = null;
-    state.nextAt = at;
-    if (!at) return;
+    state.nextAt = running() ? at : null; // paused or stopped: a step still in flight ends without planning another
+    if (!state.nextAt) return;
     const ms = Math.max(0, Math.min(at - clock(), HEARTBEAT_MS));
     timer = setTimer(() => { timer = null; if (clock() >= state.nextAt) step(); else arm(state.nextAt); }, ms);
   }
@@ -53,7 +56,7 @@ export function createAutomation({
     const kin = selectedKin();
     state.failures = 0; state.errorKind = null;
     state.kinId = kin?.id ?? null;
-    if (!kin || !interval()) { arm(null); onChange(); return; }
+    if (!kin || !running()) { arm(null); onChange(); return; }
     const h = hibernation(kin.id);
     if (h) { arm(h.until); onChange(); return; }
     const last = lastReadingAt(kin.id);
@@ -91,7 +94,7 @@ export function createAutomation({
 
   async function step() {
     const kin = selectedKin();
-    if (!kin || !interval() || state.busy) return;
+    if (!kin || !running() || state.busy) return;
     if (kin.id !== state.kinId) { reschedule(); return; }
     state.busy = true; onChange();
     try {
@@ -123,6 +126,14 @@ export function createAutomation({
     reschedule,
     hibernation,
     interval,
+    runState,
+    running,
+    /** Start (or Resume after Pause): reads at once if a reading is due, otherwise when it is. */
+    start() { return settings.save({ autoState: 'running' }).then(reschedule); },
+    /** Pause: nothing is asked until Resume; the hibernation and the wake-up time are kept. */
+    pause() { const p = settings.save({ autoState: 'paused' }); reschedule(); return p; },
+    /** Stop: nothing is asked, and the sleep cycle (hibernation, wake-up times, dreams) is forgotten. */
+    stop() { state.dreams.clear(); const p = settings.save({ autoState: 'stopped', sleep: {} }); reschedule(); return p; },
     /** Runs a step now (Update status with automation on, Try now). */
     runNow() { arm(clock()); },
     /** Ends the hibernation early: the dream question is asked now. */
@@ -134,10 +145,10 @@ export function createAutomation({
     },
     /** A warning about Kindroid itself, or null. */
     warning() {
+      if (!running()) return null;
       if (state.errorKind === 'maintenance') return { kind: 'maintenance', nextAt: state.nextAt };
       if (state.errorKind === 'server' && state.failures >= ERRORS_BEFORE_WARNING) return { kind: 'server', failures: state.failures, nextAt: state.nextAt };
       return null;
     },
-    stop() { arm(null); },
   };
 }

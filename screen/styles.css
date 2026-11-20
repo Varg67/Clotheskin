@@ -139,6 +139,12 @@ dialog.sheet::backdrop { background: var(--scrim); -webkit-backdrop-filter: blur
 .auto { margin-top: 14px; padding: 12px 14px 10px; border-radius: var(--radius-md); background: var(--glass); border: 1px solid var(--glass-border); }
 .auto-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 .auto-value { font-weight: 700; color: var(--accent-deep); }
+.auto-controls { display: flex; gap: 8px; margin: 10px 0 12px; }
+.auto-controls .btn { flex: 1; padding-inline: 10px; }
+.btn:disabled { opacity: .5; cursor: default; box-shadow: none; }
+.auto-state { font-size: .8rem; font-weight: 700; padding: 1px 10px; border-radius: var(--radius-pill); background: var(--line-soft); color: var(--text); }
+.auto-state.running { background: var(--ok-tint); color: var(--ok); }
+.auto-state.paused { background: var(--accent-tint); color: var(--accent-deep); }
 .ruler { width: 100%; margin: 10px 0 2px; accent-color: var(--accent); min-height: 24px; cursor: pointer; }
 .ruler-ends { display: flex; justify-content: space-between; font-size: .75rem; }
 .auto-status { margin: 8px 0 0; }

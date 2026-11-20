@@ -13,12 +13,12 @@ process.env.TZ = 'America/Sao_Paulo';
 const at = (s) => new Date(`2026-11-20T${s}:00-03:00`); // local times in São Paulo
 
 test('the ruler: seconds inside, minutes and hours on the label; saved values snap to a stop', () => {
-  assert.deepEqual(INTERVAL_STEPS.slice(0, 6), [0, 60, 120, 300, 600, 900]);
-  assert.deepEqual(INTERVAL_STEPS.map(formatInterval), ['Off', '1 min', '2 min', '5 min', '10 min', '15 min', '20 min', '30 min', '45 min', '1 h', '1 h 30 min', '2 h']);
-  assert.equal(snapInterval(0), 0);
-  assert.equal(snapInterval(undefined), 0);
-  assert.equal(snapInterval(-5), 0);
-  assert.equal(snapInterval(10), 60, 'anything on is at least a minute');
+  assert.deepEqual(INTERVAL_STEPS.slice(0, 5), [60, 120, 300, 600, 900]);
+  assert.deepEqual(INTERVAL_STEPS.map(formatInterval), ['1 min', '2 min', '5 min', '10 min', '15 min', '20 min', '30 min', '45 min', '1 h', '1 h 30 min', '2 h']);
+  assert.equal(snapInterval(0), 600, 'nothing usable: 10 min');
+  assert.equal(snapInterval(undefined), 600);
+  assert.equal(snapInterval(-5), 600);
+  assert.equal(snapInterval(10), 60, 'at least a minute');
   assert.equal(snapInterval(700), 600);
   assert.equal(snapInterval(99999), 7200);
 });
@@ -115,6 +115,7 @@ function harness({ interval = 600, answers = {} } = {}) {
   const log = [];
   const settings = new Settings(new MemoryStorage());
   settings.value.autoIntervalS = interval;
+  settings.value.autoState = 'running';
   const kin = { id: 'k1', name: 'Isa' };
   let last = null;
   const queue = { read: [], ask_sleep: [], ask_dream: [] };
@@ -145,16 +146,63 @@ function harness({ interval = 600, answers = {} } = {}) {
 const awake = (doing = 'Sitting on the sofa, reading.') => ({ ok: true, doing });
 const ASLEEP = 'Lying in bed, sleeping.';
 
-test('automation: reads at once when turned on, then every interval; off means no timer', async () => {
+test('automation: Start reads at once, then every interval; Stop means no timer', async () => {
   const h = harness({ interval: 300, answers: { read: [awake(), awake(), awake()] } });
+  h.settings.value.autoState = 'stopped';
   h.auto.reschedule();
+  await h.advance(3600 * 1000);
+  assert.equal(h.log.length, 0, 'stopped: nothing is asked');
+  await h.auto.start();
   await h.advance(0);
   await h.advance(300 * 1000);
   await h.advance(300 * 1000);
   assert.equal(h.log.filter(([a]) => a === 'read').length, 3);
-  h.settings.value.autoIntervalS = 0; h.auto.reschedule();
+  await h.auto.stop();
   await h.advance(3600 * 1000);
-  assert.equal(h.log.length, 3, 'no reading while off');
+  assert.equal(h.log.length, 3, 'no reading after Stop');
+  assert.equal(h.auto.state.nextAt, null);
+});
+
+test('automation: Pause keeps the night (hibernation, wake-up time) and Resume goes on from there; Stop forgets it', async () => {
+  const h = harness({ interval: 600, answers: {
+    read: [{ ok: true, doing: ASLEEP }],
+    ask_sleep: [{ ok: true, value: { sleeping: true, wake_at: '07:30' } }],
+    ask_dream: [{ ok: true, value: { dream: 'A long corridor', remembered: 'little' } }],
+  } });
+  h.auto.reschedule();
+  await h.advance(0);
+  await h.auto.pause();
+  assert.equal(h.auto.runState(), 'paused');
+  await h.advance(10 * 3600 * 1000); // 08:00: past the dream time, but paused
+  assert.deepEqual(h.log.map(([a]) => a), ['read', 'ask_sleep'], 'nothing asked while paused');
+  assert.ok(h.auto.hibernation('k1'), 'the hibernation is kept');
+  await h.auto.start(); // Resume
+  await h.advance(0);
+  assert.deepEqual(h.log.map(([a]) => a), ['read', 'ask_sleep', 'ask_dream'], 'resumes where it was: the dream question is due');
+  assert.equal(h.auto.state.dreams.get('k1').dream, 'A long corridor');
+  await h.auto.stop();
+  assert.equal(h.auto.runState(), 'stopped');
+  assert.deepEqual(h.settings.value.sleep, {}, 'Stop forgets the sleep cycle');
+  assert.equal(h.auto.state.dreams.size, 0);
+});
+
+test('automation: a step in flight when Pause is pressed does not plan another one', async () => {
+  let release;
+  const settings = new Settings(new MemoryStorage());
+  Object.assign(settings.value, { autoIntervalS: 60, autoState: 'running' });
+  const timers = [];
+  const auto = createAutomation({
+    settings, clock: () => at('12:00'), selectedKin: () => ({ id: 'k1', name: 'Isa' }),
+    read: () => new Promise((r) => { release = () => r({ ok: true, doing: 'Sitting.' }); }), ask: async () => ({ ok: false }),
+    setTimer: (fn) => { timers.push(fn); return fn; }, clearTimer: () => {},
+  });
+  auto.reschedule();
+  timers.shift()(); // the step starts and waits for the Kin
+  await auto.pause();
+  release();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(auto.state.nextAt, null);
+  assert.equal(timers.length, 0);
 });
 
 test('automation: asleep -> sleep question -> hibernation until a little before the wake-up time -> dream -> readings again', async () => {

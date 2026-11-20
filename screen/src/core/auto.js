@@ -3,8 +3,9 @@
 import { cleanString } from './text.js';
 import { parseJsonObject } from './json.js';
 
-/** The ruler's stops, in seconds. 0 is "off". Shown to the person as minutes and hours. */
-export const INTERVAL_STEPS = [0, 60, 120, 300, 600, 900, 1200, 1800, 2700, 3600, 5400, 7200];
+/** The ruler's stops, in seconds. Shown to the person as minutes and hours. Start, Pause and Stop decide whether it runs. */
+export const INTERVAL_STEPS = [60, 120, 300, 600, 900, 1200, 1800, 2700, 3600, 5400, 7200];
+export const DEFAULT_INTERVAL_S = 600;
 export const WAKE_LEAD_S = 600; // the dream question is asked this long before the wake-up time
 export const MIN_SLEEP_S = 15 * 60; // waking up sooner than this: no hibernation, the readings just go on
 export const MAX_SLEEP_S = 14 * 3600; // a wake-up time further away than this is not believed (an old chat, a typo)
@@ -13,21 +14,20 @@ export const ERRORS_BEFORE_SLOWING = 2; // the first error is retried at the nor
 export const ERRORS_BEFORE_WARNING = 3;
 export const MAINTENANCE_RETRY_S = 1800;
 
-/** 0 -> "Off", 60 -> "1 min", 5400 -> "1 h 30 min". */
+/** 60 -> "1 min", 5400 -> "1 h 30 min". */
 export function formatInterval(seconds) {
-  const s = Number(seconds) || 0;
-  if (s <= 0) return 'Off';
+  const s = snapInterval(seconds);
   const m = Math.round(s / 60);
   if (m < 60) return `${m} min`;
   const h = Math.floor(m / 60);
   return m % 60 ? `${h} h ${m % 60} min` : `${h} h`;
 }
 
-/** The stop nearest to a saved value (an old or hand-edited setting still lands on the ruler). */
+/** The stop nearest to a saved value (an old or hand-edited setting still lands on the ruler); nothing usable -> 10 min. */
 export function snapInterval(seconds) {
   const s = Number(seconds);
-  if (!Number.isFinite(s) || s <= 0) return 0;
-  return INTERVAL_STEPS.slice(1).reduce((best, x) => (Math.abs(x - s) < Math.abs(best - s) ? x : best)); // on is at least a minute
+  if (!Number.isFinite(s) || s <= 0) return DEFAULT_INTERVAL_S;
+  return INTERVAL_STEPS.reduce((best, x) => (Math.abs(x - s) < Math.abs(best - s) ? x : best));
 }
 
 /**

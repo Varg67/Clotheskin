@@ -235,11 +235,18 @@ window.addEventListener('message', async (e) => {
     const wait = async (fn, what) => { const end = Date.now() + 6000; let last; while (Date.now() < end) { try { last = await fn(); if (last) return last; } catch (e) { last = e.message; } await p2.waitForTimeout(50); } throw new Error(`timed out waiting for: ${what} (${last})`); };
 
     await f2.locator('[data-testid="auto-value"]').waitFor();
-    assert.equal(await f2.locator('[data-testid="auto-value"]').innerText(), 'Off');
-    assert.equal(await f2.locator('[data-testid="auto-status"]').count(), 0, 'off: no schedule');
-    await k2('auto-ruler').fill('4'); // the fifth stop: 10 min
-    assert.equal(await f2.locator('[data-testid="auto-value"]').innerText(), 'Every 10 min');
-    assert.equal(JSON.parse([...files.values()][0]).autoIntervalS, 600, 'stored in seconds');
+    assert.equal(await f2.locator('[data-testid="auto-state"]').innerText(), 'Stopped');
+    assert.equal(await f2.locator('[data-testid="auto-value"]').innerText(), 'Every 10 min', 'the default');
+    assert.equal(await k2('auto-pause').isDisabled(), true);
+    assert.equal(await k2('auto-stop').isDisabled(), true);
+    await k2('auto-ruler').fill('0'); // 1 min
+    assert.equal(await f2.locator('[data-testid="auto-value"]').innerText(), 'Every 1 min');
+    await k2('auto-ruler').fill('3'); // back to 10 min
+    await wait(() => JSON.parse([...files.values()][0]).autoIntervalS === 600, 'stored in seconds');
+    assert.equal(questions.length, 0, 'moving the ruler asks nothing: Start does');
+    await k2('auto-start').click();
+    assert.equal(await f2.locator('[data-testid="auto-state"]').innerText(), 'Running');
+    assert.equal(await p2.evaluate(() => document.querySelector('#f').contentDocument.activeElement.dataset.key), 'auto-pause', 'focus moves to Pause');
 
     await wait(async () => /Asleep until 7:30 AM tomorrow\./.test(await status()), 'hibernation');
     assert.deepEqual(questions, [['reading'], ['sleep', '22:00 on Friday']], 'a reading at once, then the sleep question with the person\'s time');
@@ -247,7 +254,14 @@ window.addEventListener('message', async (e) => {
     assert.equal(JSON.parse([...files.values()][0]).sleep['k-isa'].wakeAt, new Date('2026-11-21T07:30:00-03:00').toISOString(), 'the wake-up time survives a reload');
     await p2.screenshot({ path: path.join(SHOTS, '11-workshop-asleep.png') });
 
-    await p2.clock.fastForward('08:00:00'); // 06:00: still asleep, nothing asked
+    await k2('auto-pause').click(); // Pause through the dream time: nothing is asked, the night is kept
+    assert.match(await status(), /Asleep until 7:30 AM tomorrow\..*Paused: nothing is asked until you press Resume\./);
+    assert.equal(await k2('auto-start').innerText(), 'Resume');
+    await p2.screenshot({ path: path.join(SHOTS, '14-workshop-paused.png') });
+    await p2.clock.fastForward('08:00:00'); // 06:00
+    await p2.waitForTimeout(300);
+    assert.equal(questions.length, 2);
+    await k2('auto-start').click(); // Resume: still asleep, waits for 07:20
     await p2.waitForTimeout(300);
     assert.equal(questions.length, 2);
     await p2.clock.fastForward('01:21:00'); // 07:21: the dream question
@@ -259,12 +273,20 @@ window.addEventListener('message', async (e) => {
     assert.deepEqual(questions.map(([q]) => q), ['reading', 'sleep', 'dream', 'reading']);
     assert.equal(JSON.parse([...files.values()][0]).sleep['k-isa'], undefined, 'awake and the chat moved on: no sleep kept');
     await p2.screenshot({ path: path.join(SHOTS, '12-workshop-dream.png') });
+    await k2('auto-stop').click();
+    assert.equal(await f2.locator('[data-testid="auto-state"]').innerText(), 'Stopped');
+    assert.equal(await f2.locator('[data-testid="dream"]').count(), 0, 'Stop forgets the dream');
+    assert.equal(await f2.locator('[data-testid="location"]').innerText(), 'In the kitchen.', 'the last reading stays');
+    await p2.clock.fastForward('02:00:00');
+    await p2.waitForTimeout(300);
+    assert.equal(questions.length, 4, 'nothing asked after Stop');
+    assert.equal(JSON.parse([...files.values()][0]).autoState, 'stopped', 'saved: stays stopped after a reload');
     await p2.close();
   });
 
   await step('automatic update: when Kindroid does not answer, readings slow down and a server warning appears', async () => {
     files.clear(); kins = [{ id: 'k-isa', name: 'Isa' }]; delay = 20;
-    files.set('cs/clotheskin~3av2~3asettings.json', JSON.stringify({ autoIntervalS: 60 }));
+    files.set('cs/clotheskin~3av2~3asettings.json', JSON.stringify({ autoIntervalS: 60, autoState: 'running' })); // as left by an earlier visit
     const p3 = await ctx.newPage();
     p3.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
     await p3.clock.install({ time: new Date('2026-11-20T15:00:00-03:00') });

@@ -11,12 +11,12 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const fakeKin = fileURLToPath(new URL('./support/fake-kin-cli.mjs', import.meta.url));
 
-function run(event, { options = {}, settings = { autoState: 'running', kinId: 'k1', tz: 'America/Sao_Paulo' }, bin = fakeKin, stdin } = {}) {
+function run(event, { options = {}, settings = { autoState: 'running', kinId: 'k1', tz: 'America/Sao_Paulo' }, bin = fakeKin, stdin, env = {} } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'clotheskin-run-'));
   mkdirSync(join(dir, 'files'));
   if (settings) writeFileSync(join(dir, 'files', 'settings.json'), JSON.stringify(settings));
   writeFileSync(join(dir, 'options.json'), JSON.stringify(options));
-  const r = spawnSync(process.execPath, ['main.js'], { cwd: root, input: stdin ?? JSON.stringify(event), encoding: 'utf8', env: { ...process.env, KIN_BIN: bin, FAKE_DIR: dir }, timeout: 20000 });
+  const r = spawnSync(process.execPath, ['main.js'], { cwd: root, input: stdin ?? JSON.stringify(event), encoding: 'utf8', env: { ...process.env, KIN_BIN: bin, FAKE_DIR: dir, ...env }, timeout: 20000 });
   const calls = existsSync(join(dir, 'calls.jsonl')) ? readFileSync(join(dir, 'calls.jsonl'), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [];
   const status = existsSync(join(dir, 'files', 'status.json')) ? JSON.parse(readFileSync(join(dir, 'files', 'status.json'), 'utf8')) : null;
   return { code: r.status, stderr: r.stderr, calls, status, ends: calls.filter((c) => c[0] === 'end') };
@@ -45,11 +45,11 @@ test('the action from the screen reads the Kin it names', () => {
 });
 
 test('Kindroid down: the run fails cleanly with kin end --failed, and the slowing down is saved', () => {
-  const r = run({ trigger: 'schedule' }, { options: { askFails: true } });
+  const r = run({ trigger: 'schedule' }, { options: { askFails: 'Kindroid is under scheduled maintenance' } });
   assert.equal(r.code, 0, r.stderr);
   assert.equal(r.ends.length, 1);
   assert.equal(r.ends[0][1], '--failed');
-  assert.match(r.ends[0][2], /kin ask failed: kin: 503 Service Unavailable/);
+  assert.match(r.ends[0][2], /kin ask failed: kin: Kindroid is under scheduled maintenance/);
   assert.equal(r.status.kins.k1.errorKind, 'maintenance');
   assert.equal(r.calls.filter((c) => c[0] === 'ask').length, 1, 'maintenance is not tried again at once');
 });
@@ -73,4 +73,18 @@ test('no kin command at all: exit code 1 with a clear line, no crash', () => {
   assert.equal(r.code, 1);
   assert.match(r.stderr, /the kin command was not found/);
   assert.ok(!/node:internal|ErrnoException/.test(r.stderr), 'no stack trace');
+});
+
+test('a run that hangs is ended by main.js itself, with kin end --failed, before Kindroid would kill it', () => {
+  const r = run({ trigger: 'schedule' }, { options: { askHangs: true }, env: { CLOTHESKIN_WATCHDOG_MS: '1500' } });
+  assert.equal(r.code, 0);
+  assert.deepEqual(r.ends, [['end', '--failed', 'Clotheskin ran out of time in this run. It tries again at the next start.']]);
+  assert.match(r.stderr, /still running after 1\.5 s/);
+});
+
+test('a "not found" that is not kin\'s 404 is a failure: status.json is never written over', () => {
+  const r = run({ trigger: 'schedule' }, { options: { answer: ANSWER, getFails: 'storage node not found' } });
+  assert.equal(r.ends[0][1], '--failed');
+  assert.match(r.ends[0][2], /Could not read the app's files/);
+  assert.equal(r.calls.filter((c) => c[0] === 'files' && c[1] === 'put').length, 0);
 });

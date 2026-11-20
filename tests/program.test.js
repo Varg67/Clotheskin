@@ -134,7 +134,7 @@ test('errors: Kindroid down slows down and warns from the third in a row; mainte
   assert.equal(k.entry().serverFailures, 4);
   assert.equal(k.entry().errorKind, 'server');
   assert.equal(k.asks().length, 8, 'a fast Kindroid failure is tried once more within the run');
-  k.answers.reading.length = 0; k.answers.reading.push(new Error('kin ask failed: 503 Service Unavailable'));
+  k.answers.reading.length = 0; k.answers.reading.push(new Error('kin ask failed: Kindroid is under maintenance'));
   await tick(k);
   assert.equal(k.entry().errorKind, 'maintenance');
   assert.equal((Date.parse(k.entry().retryAt) - k.clock()) / 60000, 60, 'at least 30 min, here the 1-hour slow-down');
@@ -183,17 +183,21 @@ test('Wake now (the action with op "wake") asks the dream question at once', asy
   assert.equal(k.tells().length, 0, 'no dream: nothing to tell');
 });
 
-test('Stop forgets the night and the slowing down, keeps the last reading', async () => {
-  const k = fakeKindroid({ settings: { autoState: 'stopped', kinId: 'k1' } });
+test('Stop forgets the night and the slowing down at once (stoppedAt), keeps the last reading; a stopped start writes nothing', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'stopped', kinId: 'k1', stoppedAt: '2026-11-21T01:00:00Z' } });
   const reading = { location: 'In the bedroom.', doing: 'Lying in bed, sleeping.', outfit: 'Wearing pyjamas.', at: '2026-11-20T23:00:00.000Z' };
-  k.files.set('status.json', JSON.stringify({ kins: { k1: { reading, sleep: { wakeAt: '2026-11-21T10:30:00Z', until: '2026-11-21T10:20:00Z' }, sleptOn: '0000abcd', failures: 2, retryAt: '2026-11-21T00:00:00Z', dream: { dream: 'x', remembered: 'all', at: '2026-11-20T10:00:00Z' } } } }));
+  k.files.set('status.json', JSON.stringify({ kins: { k1: { name: 'Isa', reading, lastRunAt: '2026-11-20T23:00:00Z', sleep: { wakeAt: '2026-11-21T10:30:00Z', until: '2026-11-21T10:20:00Z' }, sleptOn: '0000abcd', failures: 2, retryAt: '2026-11-21T00:00:00Z', dream: { dream: 'x', remembered: 'all', at: '2026-11-20T10:00:00Z' } } } }));
+  k.at('2026-11-21T02:00:00Z');
   await tick(k);
+  assert.equal(k.puts(), 0, 'stopped: nothing to write');
+  k.settings({ autoState: 'running' }); // Start, before any other start of the program
+  k.answers.reading.push(ASLEEP);
+  k.answers.sleep.push('{"sleeping":true,"wake_at":"07:30"}');
+  await tick(k);
+  assert.deepEqual(k.asks(), ['reading', 'sleep'], 'the old night is gone: a reading, not a dream question');
   const e = k.entry();
-  assert.deepEqual([e.sleep, e.sleptOn, e.dream, e.failures, e.retryAt], [null, null, null, 0, null]);
-  assert.deepEqual(e.reading, reading);
-  const puts = k.puts();
-  await tick(k);
-  assert.equal(k.puts(), puts, 'written once');
+  assert.equal(e.dream, null);
+  assert.equal(e.failures, 0);
 });
 
 test('a detached Kin is never asked; the action for a Kin that is not attached is refused', async () => {
@@ -235,4 +239,122 @@ test('unknown triggers and actions end clearly, without asking', async () => {
   assert.match((await runProgram({ event: { trigger: 'action', action: 'toString' }, kin: k.kin })).message, /Nothing to do for the action "toString"/);
   assert.match((await runProgram({ event: { trigger: 'action', action: ACTION, input: {} }, kin: k.kin })).message, /No Kin was given/);
   assert.deepEqual(k.asks(), []);
+});
+
+// ---- from the backend review
+test('time budget: a slow Kin never pushes the run past its budget; the reading is kept and the sleep question waits', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', intervalS: 900, tz: 'America/Sao_Paulo' } });
+  const slow = (text, ms) => () => new Promise((r) => setTimeout(() => r(text), ms));
+  k.answers.reading.push(slow(ASLEEP, 120));
+  k.answers.sleep.push('{"sleeping":true,"wake_at":"07:30"}');
+  const r = await runProgram({ event: { trigger: 'schedule' }, kin: k.kin, clock: k.clock, retryAfterMs: 0, budgetMs: 25120 }); // the reading leaves < 15 s
+  assert.equal(r.ok, true);
+  assert.match(r.message, /The sleep question waits for the next start\.$/);
+  assert.deepEqual(k.asks(), ['reading']);
+  assert.equal(k.entry().reading.doing, 'Lying in bed, sleeping.', 'the reading is kept');
+  assert.equal(k.entry().sleptOn, null, 'the question is still to be asked');
+  assert.equal((Date.parse(k.entry().retryAt) - k.clock()) / 60000, 15, 'at the next start');
+  assert.equal(k.entry().failures, 0, 'not an error');
+});
+
+test('the questions get only the time left: no retry that would not fit', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1' } });
+  const seen = [];
+  const ask = k.kin.ask;
+  k.kin.ask = (p, o) => { seen.push(o.timeoutMs); return ask(p, o); };
+  k.answers.reading.push(new Error('kin ask failed: connection reset'));
+  await runProgram({ event: { trigger: 'schedule' }, kin: k.kin, clock: k.clock, retryAfterMs: 0, budgetMs: 40000 });
+  assert.equal(seen.length, 2);
+  assert.ok(seen.every((t) => t <= 30000), `${seen}`);
+  const k2 = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1' } });
+  k2.answers.reading.push(() => new Promise((_, no) => setTimeout(() => no(new Error('kin ask failed: connection reset')), 1000)));
+  await runProgram({ event: { trigger: 'schedule' }, kin: k2.kin, clock: k2.clock, retryAfterMs: 0, budgetMs: 25500 }); // 15.5 s for the first try, under 15 s after it
+  assert.equal(k2.asks().length, 1, 'less than 15 s would be left for the retry: none');
+});
+
+test('a bare 502/503 is tried again at once; maintenance is not', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1' } });
+  k.answers.reading.push(new Error('kin ask failed: 502 Bad Gateway'), AWAKE);
+  const r = await tick(k);
+  assert.equal(r.ok, true);
+  assert.deepEqual(k.asks(), ['reading', 'reading']);
+});
+
+test('two runs at once: a later run\'s finished night is not brought back by an earlier run that saves last', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', tz: 'America/Sao_Paulo' } });
+  const night = { sleep: { wakeAt: '2026-11-21T10:30:00Z', until: '2026-11-21T10:20:00Z' }, sleptOn: '0000abcd', lastRunAt: '2026-11-21T00:00:00Z' };
+  k.files.set('status.json', JSON.stringify({ kins: { k1: { name: 'Isa', ...night } } }));
+  k.at('2026-11-21T04:00:00Z');
+  // Update status starts first and reads "still asleep"; meanwhile the scheduled start (later) asks the dream and saves.
+  k.answers.reading.push(async () => {
+    k.at('2026-11-21T10:20:00Z');
+    k.answers.dream.push('{"dream":"A lighthouse","remembered":"all"}');
+    await tick(k); // the later run: night over, dream saved
+    k.at('2026-11-21T04:00:30Z');
+    return ASLEEP;
+  });
+  await press(k);
+  const e = k.entry();
+  assert.equal(e.sleep, null, 'the night stays over');
+  assert.equal(e.dream.dream, 'A lighthouse', 'the dream stays');
+  assert.equal(k.tells().length, 1);
+});
+
+test('a save that fails is a failure, not a result', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1' } });
+  k.answers.reading.push(AWAKE);
+  k.kin.put = async () => { throw new Error('kin files put status.json failed: quota'); };
+  await assert.rejects(() => tick(k), /status\.json could not be saved/);
+});
+
+test('Kindroid failing to list the Kins counts like any Kindroid error (slowed down, shown); a detached Kin\'s action fails', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1' } });
+  k.kin.kins = async () => { throw new Error('kin kins failed: 500'); };
+  const r = await tick(k);
+  assert.equal(r.ok, false);
+  assert.equal(k.entry().serverFailures, 1);
+  assert.match(k.entry().error, /Could not list the Kins/);
+  const d = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1' } });
+  assert.equal((await press(d, 'read', 'gone')).ok, false);
+});
+
+test('privacy: an answer that is not JSON never puts its text in the error (logs, status.json, kin end)', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1' } });
+  const logs = [];
+  k.answers.reading.push('*She lies on the motel bed in red lace* {"location": in the motel');
+  const r = await runProgram({ event: { trigger: 'schedule' }, kin: k.kin, clock: k.clock, log: (m) => logs.push(m) });
+  const all = [r.message, k.files.get('status.json'), ...logs].join(' ');
+  assert.ok(!/motel|lace|lies/.test(all), all);
+  assert.match(r.message, /not valid JSON/);
+});
+
+test('"asleep" with a wake-up time too far away is said so (not "not asleep after all")', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', tz: 'America/Sao_Paulo' } });
+  k.at('2026-11-20T23:10:00-03:00');
+  k.answers.reading.push(ASLEEP);
+  k.answers.sleep.push('{"sleeping":true,"wake_at":"23:20"}');
+  const r = await tick(k);
+  assert.match(r.message, /Asleep, but the wake-up time 23:20 is too soon or too far away/);
+});
+
+test('two runs at the same instant: the run that ended the night wins over one that only read "still asleep"', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', tz: 'America/Sao_Paulo' } });
+  k.files.set('status.json', JSON.stringify({ kins: { k1: { name: 'Isa', lastRunAt: '2026-11-21T03:00:00Z', sleep: { wakeAt: '2026-11-22T10:30:00Z', until: '2026-11-22T10:20:00Z' }, sleptOn: '0000abcd' } } }));
+  k.at('2026-11-22T10:15:00Z');
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  k.answers.reading.push(async () => { await gate; return ASLEEP; });
+  k.answers.dream.push('{"dream":"A library with endless floors","remembered":"some"}');
+  const action = press(k); // reads, slowly
+  await new Promise((r) => setTimeout(r, 10));
+  await tick(k); // same instant: the dream question, the night ends
+  release();
+  await action;
+  assert.equal(k.entry().sleep, null);
+  assert.equal(k.entry().dream.dream, 'A library with endless floors');
+  k.advance(15);
+  k.answers.reading.length = 0; k.answers.reading.push(ASLEEP);
+  await tick(k);
+  assert.equal(k.tells().length, 1, 'the dream is told once');
+  assert.deepEqual(k.asks().filter((a) => a === 'dream'), ['dream'], 'and asked once');
 });

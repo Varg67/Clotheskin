@@ -30,13 +30,15 @@ Built from Kindroid's guide for coding tools ("Making things for a Kin with your
   - **The next morning.** The chat usually stays still overnight, so the same "asleep" sentence does not start a new night. A wake-up time less than 15 minutes or more than 14 hours away is not believed, and the readings go on.
   - **Waking up early.** Reading the Kin by hand during its night and finding it awake ends the night.
 - **Errors.**
-  - **Retries:** a fast Kindroid failure is tried once more within the run. Errors in a row slow the next try down: 2× from the second, up to 1 hour.
-  - **Server warning:** three Kindroid errors in a row show a warning with the time of the next try. An error that says maintenance (503, "service unavailable"…) waits at least 30 minutes.
-  - **Kin answers:** a wrong answer from the Kin (in character, not JSON) is the Kin's error, not Kindroid's: it slows the readings down without the server warning.
-  - **Nothing lost:** a file that exists but cannot be read is never written over.
+  - **Retries:** a fast Kindroid failure (a 502, a 503, a dropped connection) is tried once more within the run. Errors in a row slow the next try down: 2× from the second, up to 1 hour.
+  - **Server warning:** three Kindroid errors in a row show a warning with the time of the next try. A failure that says "maintenance", "scheduled downtime" or "outage" shows a maintenance warning and waits at least 30 minutes. A failing `kin kins` counts like any Kindroid error.
+  - **Kin answers:** a wrong answer from the Kin (in character, not JSON) is the Kin's error, not Kindroid's: it slows the readings down without the server warning. The error never quotes the answer.
+  - **Nothing lost:** a file that exists but cannot be read is never written over (only kin's own "404" means "no file yet"). A save that fails ends the run with `--failed`.
+- **Time.** A run has 2 minutes (`kin.json`). The program keeps to 100 s: each question gets only the time left, and a retry or sleep question that would not fit waits for the next start. The reading is saved before the sleep question, so it is never lost. If anything still hangs, `main.js` ends the run itself at 110 s with `kin end --failed`.
+- **Two runs at once** (a scheduled start and Update status): each save re-reads `status.json`. The night goes to the run that changed it (one that asked the dream question beats one that only read "still asleep"). The newest reading and dream are kept.
 - **Start / Pause / Stop.**
   - **Pause:** nothing is asked; the night and its times are kept.
-  - **Stop:** nothing is asked; the next start forgets the night, the dream and any slowing down. The last reading stays.
+  - **Stop:** nothing is asked, and the night, the dream and any slowing down are forgotten at once (Stop saves `stoppedAt`; the run and the screen both set aside what is older). The last reading stays.
   - **The ruler:** moving it applies at once. The planned time is the last run plus the current interval, except when errors are slowing things down; then the later try is kept.
 
 ### What is stored, and what it costs
@@ -82,7 +84,7 @@ npm run try -- action    # the screen's Update status
 | `run/program.js` | the engine: schedule and action, reading, sleep, dream, errors (no Node imports: it also runs in the harness) |
 | `src/core/` | shared logic: reading the Kin's answers (`outfit.js`), prompts, sleep, schedule, time zones, the two files (`state.js`) |
 | `src/screen/` | the screen's sources: channel to the page, app, DOM helpers, icons |
-| `screen/` | what Kindroid serves: `index.html`, `app.js` (**generated**: one classic script from `src/`, no modules, checked for features newer than Safari 14), `styles.css`, `theme.css` |
+| `screen/` | what Kindroid serves: `index.html`, `app.js` (**generated**: one classic script from `src/`, no modules, checked for features newer than Safari 14.1), `styles.css`, `theme.css` |
 | `sample/` | sample `settings.json` and `status.json` for the App Library card's picture |
 | `dev/` | the dev harness |
 | `tests/` | unit tests, `run-main.test.js` (the real `node main.js` with a stand-in `kin`), `e2e/screen.cjs` |
@@ -104,8 +106,8 @@ Everything above is tested against the guide and the dev harness, not yet inside
 1. **`kin ask` output.** It prints the Kin's answer on stdout, as plain text: Aurora Alert reads it that way. The Kin answers with JSON rather than in character.
 2. **`kin files get` for a missing file.** It fails with a "404" or "not found" message (Bunny & Fox BBS checks for `404`). Any other failure is treated as "could not read", and nothing is written over.
 3. **`kin kins` format.** It prints `id<TAB>name`, one per line.
-4. **The screen's single `app.js`.** It loads in the frame, and the screen re-sends its handshake until the page answers.
-5. **The App Library picture.** The picture is taken with the `sample/` files answered and no Kin list; the screen handles that case and saves nothing.
+4. **The screen's single `app.js`.** It loads in the frame (also on phones and older Safari, 14.1+), and the screen re-sends its handshake until the page answers.
+5. **The App Library picture.** The picture is taken with the `sample/` files answered and no Kin list. The screen shows the sample after 1.5 s and saves nothing.
 6. **Questions stay out of the chat.** The `kin ask` questions do not show up in the Kin's chat or memory.
 7. **The run's container clock.** The run does not rely on its clock zone: wake-up times use the time zone the screen saved.
 

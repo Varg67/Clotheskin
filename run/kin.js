@@ -25,7 +25,9 @@ export class KinError extends Error {
   }
 }
 
-const NOT_FOUND = /\b404\b|not found|no such file|does not exist/i;
+// Only kin's own "404" means "no such file" (as Bunny & Fox BBS checks): "storage node not found" is a failure,
+// and reading it as "empty" would write over the real file.
+const NOT_FOUND = /\b404\b/;
 
 /**
  * The kin command as functions. `bin` is `kin` inside a run; KIN_BIN=/path/kin.mjs runs the downloadable kin.mjs
@@ -65,7 +67,7 @@ export function createKin({ bin = process.env.KIN_BIN || 'kin', defaultTimeoutMs
         const body = await call(['files', 'get', path]);
         return body === '' ? null : body;
       } catch (e) {
-        if (NOT_FOUND.test(e.stderr) || NOT_FOUND.test(e.message)) return null;
+        if (typeof e.code === 'number' && NOT_FOUND.test(e.stderr)) return null; // kin ran and said 404
         throw e;
       }
     },
@@ -90,7 +92,9 @@ export function createKin({ bin = process.env.KIN_BIN || 'kin', defaultTimeoutMs
     },
     /** Ends the run: the one line the screen (or a Kin that used an action) gets back. */
     async end(message, { failed = false } = {}) {
-      await call(['end', ...(failed ? ['--failed'] : []), oneLine(message, END_LIMIT)], { timeoutMs: 15000 });
+      let line = oneLine(message, END_LIMIT);
+      if (line.startsWith('-')) line = oneLine(`Clotheskin: ${line}`, END_LIMIT); // never read as an option
+      await call(['end', ...(failed ? ['--failed'] : []), line], { timeoutMs: 15000 });
     },
   };
 }

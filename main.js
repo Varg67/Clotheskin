@@ -14,7 +14,30 @@ async function readStdin() {
   return data;
 }
 
+// kin.json gives a run 2 minutes. program.js keeps to 100 s; if anything still hangs, this ends the run properly
+// at 110 s, so Kindroid never has to kill it without a kin end.
+const WATCHDOG_MS = Number(process.env.CLOTHESKIN_WATCHDOG_MS) || 110000;
+
 const kin = createKin();
+let ended = false;
+async function end(result) {
+  if (ended) return;
+  ended = true;
+  clearTimeout(watchdog);
+  try {
+    await kin.end(result.message, { failed: !result.ok });
+  } catch (e) {
+    log(`kin end failed: ${e.message}`);
+    log(`the run meant to say: ${result.message}`);
+    process.exitCode = 1;
+  }
+}
+const watchdog = setTimeout(async () => {
+  log(`still running after ${WATCHDOG_MS / 1000} s: ending the run`);
+  await end({ ok: false, message: 'Clotheskin ran out of time in this run. It tries again at the next start.' });
+  process.exit(); // whatever still hangs (a kin call) stops here
+}, WATCHDOG_MS);
+
 let result;
 try {
   const text = await readStdin();
@@ -24,10 +47,4 @@ try {
 } catch (e) {
   result = { ok: false, message: `Clotheskin could not finish: ${e.message}` };
 }
-try {
-  await kin.end(result.message, { failed: !result.ok });
-} catch (e) {
-  log(`kin end failed: ${e.message}`);
-  log(`the run meant to say: ${result.message}`);
-  process.exitCode = 1;
-}
+await end(result);

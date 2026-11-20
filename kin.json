@@ -1,7 +1,7 @@
 {
   "kin": 1,
   "name": "Clotheskin",
-  "purpose": "Shows where your Kin is, what it is doing and what it is wearing, read from its recent chat, and follows its nights: when it sleeps and what it dreamt.",
+  "purpose": "Shows where your Kin is, what it is doing and what it is wearing, from its recent chat. Follows its nights and tells it the dream it remembers, if you allow it.",
   "triggers": [
     {
       "on": "schedule",
@@ -28,9 +28,6 @@
         "type": "object",
         "properties": {
           "kin": {
-            "type": "string"
-          },
-          "name": {
             "type": "string"
           },
           "op": {

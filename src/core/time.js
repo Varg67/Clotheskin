@@ -29,17 +29,18 @@ export function zonedParts(date, tz) {
   return { y: Number(p.year), m: Number(p.month), d: Number(p.day), h: Number(p.hour) % 24, min: Number(p.minute), s: Number(p.second), weekday: p.weekday };
 }
 
-/** The moment when the wall clock of a zone shows y-m-d h:min (a time skipped by a daylight-saving change moves forward). */
+/**
+ * The moment when the wall clock of a zone shows y-m-d h:min. Around a daylight-saving change there are two offsets:
+ * both are tried. A time shown twice (clocks go back) is its first moment; a time that is skipped (clocks go forward)
+ * moves forward, in every zone (London, Berlin and Sydney as well as New York).
+ */
 export function zonedTime({ y, m, d, h, min }, tz) {
   const want = Date.UTC(y, m - 1, d, h, min);
-  let t = want;
-  for (let i = 0; i < 3; i += 1) { // converges in one or two steps; the third settles a skipped hour
-    const p = zonedParts(new Date(t), tz);
-    const shown = Date.UTC(p.y, p.m - 1, p.d, p.h, p.min);
-    if (shown === want) break;
-    t += want - shown;
-  }
-  return new Date(t);
+  const shown = (t) => { const p = zonedParts(new Date(t), tz); return Date.UTC(p.y, p.m - 1, p.d, p.h, p.min); };
+  const offsetAt = (t) => shown(t) - t;
+  const candidates = [...new Set([offsetAt(want - 864e5 / 2), offsetAt(want + 864e5 / 2), offsetAt(want)].map((o) => want - o))];
+  const exact = candidates.filter((t) => shown(t) === want);
+  return new Date(exact.length ? Math.min(...exact) : Math.max(...candidates));
 }
 
 /** The next moment, after `now`, when the wall clock of the zone shows h:m. */

@@ -3,7 +3,7 @@
 // speak in minutes and hours. Shared by the run (which decides) and the screen (which shows the next time).
 
 export const TICK_S = 900; // the schedule trigger fires every 15 minutes
-export const DUE_SLACK_S = 300; // a reading due at 10:30:04 is done by the 10:30:00 start, not 15 minutes later
+export const DUE_SLACK_S = 450; // half a start: a reading due at 10:30:04 is done by the 10:30 start, and a start a few minutes late does not push the next one back
 /** The ruler's stops, in seconds: from one start of the program (15 min) to every 16th (4 h). */
 export const INTERVAL_STEPS = [900, 1800, 2700, 3600, 5400, 7200, 10800, 14400];
 export const DEFAULT_INTERVAL_S = 1800;
@@ -39,7 +39,8 @@ export function retryDelay(intervalS, failures, kind) {
   return d;
 }
 
-const MAINTENANCE = /\b(maintenance|scheduled downtime|service unavailable|temporarily unavailable|outage|503|502)\b/i;
+// Words that say Kindroid is down on purpose. A bare 502/503 is a hiccup: it is tried again, not waited out.
+const MAINTENANCE = /\b(maintenance|scheduled downtime|outage)\b/i;
 /** 'maintenance' when a Kindroid error says so, otherwise the kind given. A Kin's own words are never checked. */
 export function errorKind(message, kind = 'server') {
   if (kind === 'answer') return 'answer';

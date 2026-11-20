@@ -11,5 +11,8 @@ export function cleanString(s, max = 200) {
 /** One line, at most `max` characters, marked with "…" when cut (kin end keeps 500). */
 export function oneLine(text, max = 500) {
   const s = String(text ?? '').replace(/\s+/g, ' ').trim();
-  return s.length <= max ? s : `${s.slice(0, max - 1)}…`;
+  if (s.length <= max) return s;
+  let cut = s.slice(0, max - 1);
+  if (/[\uD800-\uDBFF]$/.test(cut)) cut = cut.slice(0, -1); // never half an emoji
+  return `${cut}…`;
 }

@@ -8,11 +8,15 @@
 import { snapInterval, DEFAULT_INTERVAL_S, ERRORS_BEFORE_WARNING } from './schedule.js';
 import { safeTimeZone } from './time.js';
 import { REMEMBERED } from './sleep.js';
+import { oneLine } from './text.js';
 
 export const SETTINGS_FILE = 'settings.json';
 export const STATUS_FILE = 'status.json';
 export const RUN_STATES = ['running', 'paused', 'stopped'];
-export const THEMES = ['warm', 'sage'];
+export const THEMES = { warm: 'Warm (default)', sage: 'Sage green' };
+/** The program's one action (kin.json), used by the screen. One action, so one input rule. */
+export const ACTION = 'update_status';
+export const OPS = ['read', 'wake'];
 
 export const DEFAULT_SETTINGS = Object.freeze({
   v: 1,
@@ -23,6 +27,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   theme: 'warm',
   tellDream: true, // tell the Kin its dream (kin tell), so it can remember it during the day
   reachOut: false, // and let it bring the dream up by itself (kin tell --reach-out)
+  stoppedAt: null, // when Stop was last pressed: any night, dream or slowing down from before it is forgotten
 });
 
 const parse = (raw) => {
@@ -30,6 +35,7 @@ const parse = (raw) => {
   try { const o = JSON.parse(String(raw ?? '')); return o && typeof o === 'object' && !Array.isArray(o) ? o : {}; } catch { return {}; }
 };
 const str = (v, max) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
+const sentence = (v, max) => (typeof v === 'string' && v.trim() ? oneLine(v, max) : null); // cut with "…"
 const iso = (v) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : null);
 const count = (v) => (Number.isInteger(v) && v > 0 ? Math.min(v, 99) : 0);
 
@@ -42,20 +48,21 @@ export function normalizeSettings(raw) {
     autoState: RUN_STATES.includes(o.autoState) ? o.autoState : DEFAULT_SETTINGS.autoState,
     intervalS: snapInterval(o.intervalS),
     tz: safeTimeZone(o.tz),
-    theme: THEMES.includes(o.theme) ? o.theme : DEFAULT_SETTINGS.theme,
+    theme: Object.prototype.hasOwnProperty.call(THEMES, String(o.theme)) ? o.theme : DEFAULT_SETTINGS.theme,
     tellDream: typeof o.tellDream === 'boolean' ? o.tellDream : DEFAULT_SETTINGS.tellDream,
     reachOut: typeof o.reachOut === 'boolean' ? o.reachOut : DEFAULT_SETTINGS.reachOut,
+    stoppedAt: iso(o.stoppedAt),
   };
 }
 
 /** One Kin's entry in status.json, complete and valid. */
 export function normalizeEntry(e = {}) {
   const r = e.reading && typeof e.reading === 'object' ? e.reading : null;
-  const reading = r && str(r.outfit, 600) ? { location: str(r.location, 600) || '', doing: str(r.doing, 600) || '', outfit: str(r.outfit, 600), at: iso(r.at) } : null;
+  const reading = r && sentence(r.outfit, 600) ? { location: sentence(r.location, 300) || '', doing: sentence(r.doing, 300) || '', outfit: sentence(r.outfit, 600), at: iso(r.at) } : null;
   const s = e.sleep && typeof e.sleep === 'object' ? e.sleep : null;
   const sleep = s && iso(s.wakeAt) && iso(s.until) ? { wakeAt: iso(s.wakeAt), until: iso(s.until) } : null;
   const d = e.dream && typeof e.dream === 'object' ? e.dream : null;
-  const dream = d && iso(d.at) ? { dream: str(d.dream, 300), remembered: REMEMBERED.includes(d.remembered) ? d.remembered : 'some', at: iso(d.at) } : null;
+  const dream = d && iso(d.at) ? { dream: sentence(d.dream, 300), remembered: REMEMBERED.includes(d.remembered) ? d.remembered : 'some', at: iso(d.at) } : null;
   return {
     name: str(e.name, 120),
     reading,
@@ -80,6 +87,16 @@ export function normalizeStatus(raw) {
     for (const [id, e] of Object.entries(o.kins)) if (str(id, 120)) kins[id] = normalizeEntry(e && typeof e === 'object' ? e : {});
   }
   return { v: 1, kins };
+}
+
+/**
+ * Stop forgets the sleep cycle and any slowing down (the last reading stays). Stop only writes settings.stoppedAt, so
+ * both the run and the screen apply it the same way, at once: what a Kin's entry holds from before that moment
+ * (it last ran before Stop) is set aside.
+ */
+export function afterStop(entry, settings) {
+  if (!entry || !settings.stoppedAt || (entry.lastRunAt && entry.lastRunAt > settings.stoppedAt)) return entry;
+  return { ...entry, sleep: null, sleptOn: null, dream: null, retryAt: null, failures: 0, serverFailures: 0, errorKind: null, error: null, note: null };
 }
 
 /**

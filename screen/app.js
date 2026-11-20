@@ -66,9 +66,8 @@ function parseJsonObject(text) {
   const first = raw.indexOf('{');
   const last = raw.lastIndexOf('}');
   if (first !== -1 && last > first) candidates.push(raw.slice(first, last + 1));
-  let lastErr = null;
   for (const c of candidates) {
-    try { return { ok: true, value: JSON.parse(c) }; } catch (e) { lastErr = e; }
+    try { return { ok: true, value: JSON.parse(c) }; } catch { /* try the next candidate */ }
   }
   for (const c of candidates) {
     const noTrailing = c.replace(/,(\s*[}\]])/g, '$1');
@@ -76,7 +75,8 @@ function parseJsonObject(text) {
       try { return { ok: true, value: JSON.parse(attempt), repaired: true }; } catch { /* try the next repair */ }
     }
   }
-  return { ok: false, error: `The answer is not valid JSON (${lastErr.message}).` };
+  // Not the parser's message: it quotes the answer, and the answer is the scene (it would reach logs and status.json).
+  return { ok: false, error: 'The answer is not valid JSON.' };
 }
 return { parseJsonObject };
 });
@@ -87,7 +87,7 @@ __def("src/core/schedule.js", function () {
 // speak in minutes and hours. Shared by the run (which decides) and the screen (which shows the next time).
 
 const TICK_S = 900; // the schedule trigger fires every 15 minutes
-const DUE_SLACK_S = 300; // a reading due at 10:30:04 is done by the 10:30:00 start, not 15 minutes later
+const DUE_SLACK_S = 450; // half a start: a reading due at 10:30:04 is done by the 10:30 start, and a start a few minutes late does not push the next one back
 /** The ruler's stops, in seconds: from one start of the program (15 min) to every 16th (4 h). */
 const INTERVAL_STEPS = [900, 1800, 2700, 3600, 5400, 7200, 10800, 14400];
 const DEFAULT_INTERVAL_S = 1800;
@@ -123,7 +123,8 @@ function retryDelay(intervalS, failures, kind) {
   return d;
 }
 
-const MAINTENANCE = /\b(maintenance|scheduled downtime|service unavailable|temporarily unavailable|outage|503|502)\b/i;
+// Words that say Kindroid is down on purpose. A bare 502/503 is a hiccup: it is tried again, not waited out.
+const MAINTENANCE = /\b(maintenance|scheduled downtime|outage)\b/i;
 /** 'maintenance' when a Kindroid error says so, otherwise the kind given. A Kin's own words are never checked. */
 function errorKind(message, kind = 'server') {
   if (kind === 'answer') return 'answer';
@@ -154,7 +155,8 @@ const { nextWallTime } = __req("src/core/time.js");
 
 const WAKE_LEAD_S = 600; // the dream question is due this long before the wake-up time
 const MIN_SLEEP_S = 15 * 60; // waking up sooner than this: no hibernation, the readings just go on
-const MAX_SLEEP_S = 14 * 3600; // a wake-up time further away than this is not believed (an old chat, a typo)
+const MAX_SLEEP_S = 14 * 3600;
+const DREAM_TTL_HOURS = 24; // the Kin is told its dream for a day (kin tell --ttl), and the screen shows it as long // a wake-up time further away than this is not believed (an old chat, a typo)
 
 const ASLEEP = /\b(sleeping|asleep|napping|dozing|slumbering|snoozing)\b(?!\s+(bag|pill|pills|mask|pad|pod|car|quarters|area|beauty)\b)/i;
 const NOT_ASLEEP = /\b(not|never|no longer|unable to|can['’]?t|cannot|trying to|about to|going to|half)\s+(quite\s+|yet\s+|really\s+)?(be\s+|fall\s+|get\s+)?(sleeping|asleep|napping|dozing)\b|\bawake\b/i;
@@ -262,7 +264,7 @@ function dreamFact({ dream, remembered } = {}) {
   const text = cleanString(dream, 240).replace(/["“”]/g, "'");
   return `While you slept, you dreamt: "${text}". Now that you are awake you remember ${amount} of it.`;
 }
-return { WAKE_LEAD_S, MIN_SLEEP_S, MAX_SLEEP_S, sentenceMark, looksAsleep, parseClockTime, planSleep, parseSleepAnswer, REMEMBERED, parseDreamAnswer, describeDream, dreamFact };
+return { WAKE_LEAD_S, MIN_SLEEP_S, MAX_SLEEP_S, DREAM_TTL_HOURS, sentenceMark, looksAsleep, parseClockTime, planSleep, parseSleepAnswer, REMEMBERED, parseDreamAnswer, describeDream, dreamFact };
 });
 
 __def("src/core/state.js", function () {
@@ -276,11 +278,15 @@ __def("src/core/state.js", function () {
 const { snapInterval, DEFAULT_INTERVAL_S, ERRORS_BEFORE_WARNING } = __req("src/core/schedule.js");
 const { safeTimeZone } = __req("src/core/time.js");
 const { REMEMBERED } = __req("src/core/sleep.js");
+const { oneLine } = __req("src/core/text.js");
 
 const SETTINGS_FILE = 'settings.json';
 const STATUS_FILE = 'status.json';
 const RUN_STATES = ['running', 'paused', 'stopped'];
-const THEMES = ['warm', 'sage'];
+const THEMES = { warm: 'Warm (default)', sage: 'Sage green' };
+/** The program's one action (kin.json), used by the screen. One action, so one input rule. */
+const ACTION = 'update_status';
+const OPS = ['read', 'wake'];
 
 const DEFAULT_SETTINGS = Object.freeze({
   v: 1,
@@ -291,6 +297,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   theme: 'warm',
   tellDream: true, // tell the Kin its dream (kin tell), so it can remember it during the day
   reachOut: false, // and let it bring the dream up by itself (kin tell --reach-out)
+  stoppedAt: null, // when Stop was last pressed: any night, dream or slowing down from before it is forgotten
 });
 
 const parse = (raw) => {
@@ -298,6 +305,7 @@ const parse = (raw) => {
   try { const o = JSON.parse(String(raw ?? '')); return o && typeof o === 'object' && !Array.isArray(o) ? o : {}; } catch { return {}; }
 };
 const str = (v, max) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
+const sentence = (v, max) => (typeof v === 'string' && v.trim() ? oneLine(v, max) : null); // cut with "…"
 const iso = (v) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : null);
 const count = (v) => (Number.isInteger(v) && v > 0 ? Math.min(v, 99) : 0);
 
@@ -310,20 +318,21 @@ function normalizeSettings(raw) {
     autoState: RUN_STATES.includes(o.autoState) ? o.autoState : DEFAULT_SETTINGS.autoState,
     intervalS: snapInterval(o.intervalS),
     tz: safeTimeZone(o.tz),
-    theme: THEMES.includes(o.theme) ? o.theme : DEFAULT_SETTINGS.theme,
+    theme: Object.prototype.hasOwnProperty.call(THEMES, String(o.theme)) ? o.theme : DEFAULT_SETTINGS.theme,
     tellDream: typeof o.tellDream === 'boolean' ? o.tellDream : DEFAULT_SETTINGS.tellDream,
     reachOut: typeof o.reachOut === 'boolean' ? o.reachOut : DEFAULT_SETTINGS.reachOut,
+    stoppedAt: iso(o.stoppedAt),
   };
 }
 
 /** One Kin's entry in status.json, complete and valid. */
 function normalizeEntry(e = {}) {
   const r = e.reading && typeof e.reading === 'object' ? e.reading : null;
-  const reading = r && str(r.outfit, 600) ? { location: str(r.location, 600) || '', doing: str(r.doing, 600) || '', outfit: str(r.outfit, 600), at: iso(r.at) } : null;
+  const reading = r && sentence(r.outfit, 600) ? { location: sentence(r.location, 300) || '', doing: sentence(r.doing, 300) || '', outfit: sentence(r.outfit, 600), at: iso(r.at) } : null;
   const s = e.sleep && typeof e.sleep === 'object' ? e.sleep : null;
   const sleep = s && iso(s.wakeAt) && iso(s.until) ? { wakeAt: iso(s.wakeAt), until: iso(s.until) } : null;
   const d = e.dream && typeof e.dream === 'object' ? e.dream : null;
-  const dream = d && iso(d.at) ? { dream: str(d.dream, 300), remembered: REMEMBERED.includes(d.remembered) ? d.remembered : 'some', at: iso(d.at) } : null;
+  const dream = d && iso(d.at) ? { dream: sentence(d.dream, 300), remembered: REMEMBERED.includes(d.remembered) ? d.remembered : 'some', at: iso(d.at) } : null;
   return {
     name: str(e.name, 120),
     reading,
@@ -351,6 +360,16 @@ function normalizeStatus(raw) {
 }
 
 /**
+ * Stop forgets the sleep cycle and any slowing down (the last reading stays). Stop only writes settings.stoppedAt, so
+ * both the run and the screen apply it the same way, at once: what a Kin's entry holds from before that moment
+ * (it last ran before Stop) is set aside.
+ */
+function afterStop(entry, settings) {
+  if (!entry || !settings.stoppedAt || (entry.lastRunAt && entry.lastRunAt > settings.stoppedAt)) return entry;
+  return { ...entry, sleep: null, sleptOn: null, dream: null, retryAt: null, failures: 0, serverFailures: 0, errorKind: null, error: null, note: null };
+}
+
+/**
  * When the next step for a Kin is planned: the end of its night, a retry after errors, or its last run plus the
  * current interval (so moving the ruler applies at once). null: at once.
  */
@@ -369,7 +388,7 @@ function warningOf(entry) {
   if (entry.errorKind === 'server' && entry.serverFailures >= ERRORS_BEFORE_WARNING) return { kind: 'server', failures: entry.serverFailures };
   return null;
 }
-return { SETTINGS_FILE, STATUS_FILE, RUN_STATES, THEMES, DEFAULT_SETTINGS, normalizeSettings, normalizeEntry, normalizeStatus, plannedAt, warningOf };
+return { SETTINGS_FILE, STATUS_FILE, RUN_STATES, THEMES, ACTION, OPS, DEFAULT_SETTINGS, normalizeSettings, normalizeEntry, normalizeStatus, afterStop, plannedAt, warningOf };
 });
 
 __def("src/core/text.js", function () {
@@ -386,7 +405,10 @@ function cleanString(s, max = 200) {
 /** One line, at most `max` characters, marked with "…" when cut (kin end keeps 500). */
 function oneLine(text, max = 500) {
   const s = String(text ?? '').replace(/\s+/g, ' ').trim();
-  return s.length <= max ? s : `${s.slice(0, max - 1)}…`;
+  if (s.length <= max) return s;
+  let cut = s.slice(0, max - 1);
+  if (/[\uD800-\uDBFF]$/.test(cut)) cut = cut.slice(0, -1); // never half an emoji
+  return `${cut}…`;
 }
 return { capitalizeFirst, cleanString, oneLine };
 });
@@ -423,17 +445,18 @@ function zonedParts(date, tz) {
   return { y: Number(p.year), m: Number(p.month), d: Number(p.day), h: Number(p.hour) % 24, min: Number(p.minute), s: Number(p.second), weekday: p.weekday };
 }
 
-/** The moment when the wall clock of a zone shows y-m-d h:min (a time skipped by a daylight-saving change moves forward). */
+/**
+ * The moment when the wall clock of a zone shows y-m-d h:min. Around a daylight-saving change there are two offsets:
+ * both are tried. A time shown twice (clocks go back) is its first moment; a time that is skipped (clocks go forward)
+ * moves forward, in every zone (London, Berlin and Sydney as well as New York).
+ */
 function zonedTime({ y, m, d, h, min }, tz) {
   const want = Date.UTC(y, m - 1, d, h, min);
-  let t = want;
-  for (let i = 0; i < 3; i += 1) { // converges in one or two steps; the third settles a skipped hour
-    const p = zonedParts(new Date(t), tz);
-    const shown = Date.UTC(p.y, p.m - 1, p.d, p.h, p.min);
-    if (shown === want) break;
-    t += want - shown;
-  }
-  return new Date(t);
+  const shown = (t) => { const p = zonedParts(new Date(t), tz); return Date.UTC(p.y, p.m - 1, p.d, p.h, p.min); };
+  const offsetAt = (t) => shown(t) - t;
+  const candidates = [...new Set([offsetAt(want - 864e5 / 2), offsetAt(want + 864e5 / 2), offsetAt(want)].map((o) => want - o))];
+  const exact = candidates.filter((t) => shown(t) === want);
+  return new Date(exact.length ? Math.min(...exact) : Math.max(...candidates));
 }
 
 /** The next moment, after `now`, when the wall clock of the zone shows h:m. */
@@ -460,16 +483,14 @@ __def("src/screen/app.js", function () {
 // work, every 15 minutes or when Update status is pressed; the screen never asks the Kin anything itself.
 const { h, keepFocus } = __req("src/screen/dom.js");
 const { icon, spinner, poseIcon } = __req("src/screen/icons.js");
-const { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, warningOf, SETTINGS_FILE, STATUS_FILE } = __req("src/core/state.js");
+const { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, warningOf, SETTINGS_FILE, STATUS_FILE, ACTION, THEMES } = __req("src/core/state.js");
 const { INTERVAL_STEPS, formatInterval, snapInterval, startDueFor } = __req("src/core/schedule.js");
-const { describeDream } = __req("src/core/sleep.js");
+const { describeDream, DREAM_TTL_HOURS } = __req("src/core/sleep.js");
 const { deviceTimeZone } = __req("src/core/time.js");
 const { formatClock, formatRelative, formatWhen } = __req("src/core/format.js");
 
-const ACTION = 'update_status'; // run/program.js
 const POLL_MS = 60000; // status.json is read again every minute while the screen is visible
-const DREAM_SHOWN_H = 24;
-const THEME_LABELS = { warm: 'Warm (default)', sage: 'Sage green' };
+const RUN_WORDS = { running: 'started', paused: 'paused', stopped: 'stopped' };
 
 /**
  * Starts the screen on a connected channel. `kins` is the first list from the page (null when the page answered
@@ -481,108 +502,148 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
     kinsKnown: Array.isArray(kins),
     settings: normalizeSettings(null),
     status: normalizeStatus(null),
-    busy: null, // 'read' | 'wake': the action is running
-    error: null, // a problem of the screen itself (the action did not answer, a save failed)
+    statusText: null, // status.json as last read: an unchanged file is not rendered again
+    loaded: false, // the first read of status.json is not announced (nothing changed: the screen just opened)
+    busy: {}, // kin id -> 'read' | 'wake': the action running for that Kin
+    error: null, // { kinId, text } (the action did not answer) or { save: true, text } (a setting was not saved)
     picking: false, // the Kin list is open on the card
-    loaded: false,
+    settingsOpen: false,
   };
 
   // ------------------------------------------------------------ announcements
   // Two regions that stay in the page (a region rebuilt on every render would be read again and again): results
-  // and notes are polite, errors are assertive. Each message is read once.
+  // and notes are polite, errors are assertive. Messages of one moment are joined, so none hides another.
   const live = h('div', { class: 'sr-only', role: 'status', 'aria-live': 'polite' });
   const alertLive = h('div', { class: 'sr-only', role: 'alert' });
   document.body.append(live, alertLive);
   const say = (region, text) => { region.textContent = ''; setTimeout(() => { region.textContent = text; }, 30); };
-  const announce = (text) => say(live, text);
+  const announce = (text) => { if (text) say(live, text); };
   let lastAlert = '';
   const alertOnce = (text) => { if (text && text !== lastAlert) say(alertLive, text); lastAlert = text || ''; };
 
   // ------------------------------------------------------------ data
-  function selectedKin() {
-    const known = S.kinsKnown ? S.kins : kinsFromStatus();
-    const found = known.find((k) => k.id === S.settings.kinId);
-    if (found) return found;
-    return known.length === 1 ? known[0] : null; // several Kins and none chosen: the person picks
-  }
+  const known = () => (S.kinsKnown ? S.kins : kinsFromStatus());
   function kinsFromStatus() {
     return Object.entries(S.status.kins).filter(([, e]) => e.name).map(([id, e]) => ({ id, name: e.name }));
   }
-  const entryOf = (id) => S.status.kins[id] || normalizeEntry();
+  function selectedKin() {
+    const list = known();
+    return list.find((k) => k.id === S.settings.kinId) || (list.length === 1 ? list[0] : null); // several and none chosen: the person picks
+  }
+  /** A Kin's entry as the run will see it: what Stop forgot is not shown either. */
+  const entryOf = (id) => afterStop(S.status.kins[id] || normalizeEntry(), S.settings);
 
   async function saveSettings(patch) {
     S.settings = normalizeSettings({ ...S.settings, ...patch });
-    try { await channel.write(SETTINGS_FILE, JSON.stringify(S.settings)); if (S.error && S.error.save) S.error = null; } catch (e) {
+    render(); // at once; the save goes on
+    try {
+      await channel.write(SETTINGS_FILE, JSON.stringify(S.settings));
+      if (S.error && S.error.save) { S.error = null; render(); }
+    } catch {
       S.error = { save: true, text: 'Your change could not be saved in Kindroid. Try again in a moment.' };
       alertOnce(S.error.text);
+      render();
     }
-    render();
   }
 
-  async function loadStatus() {
+  /**
+   * What the run needs from the screen, saved whenever the Kins are known (at start or later): the person's time zone
+   * (wake-up times are on their clock) and, when only one Kin is attached, that Kin. Never from a still picture of the
+   * screen (no Kin list): it saves nothing.
+   */
+  function syncSettings() {
+    if (!S.kinsKnown) return;
+    const fixes = {};
+    const tz = deviceTimeZone();
+    if (S.settings.tz !== tz) fixes.tz = tz;
+    if (S.kins.length === 1 && S.settings.kinId !== S.kins[0].id) fixes.kinId = S.kins[0].id;
+    if (Object.keys(fixes).length) saveSettings(fixes);
+  }
+
+  async function loadStatus({ asked = false } = {}) {
     let body;
-    try { body = await channel.read(STATUS_FILE); } catch { return; } // the next poll tries again
+    try { body = await channel.read(STATUS_FILE); } catch { if (asked) render(); return; } // the next poll tries again
+    if (body === S.statusText && !asked) return; // nothing new: no render, focus left alone
     const before = S.status;
+    S.statusText = body;
     S.status = normalizeStatus(body);
+    const kin = selectedKin();
+    if (kin && S.error && S.error.kinId === kin.id && entryOf(kin.id).lastRunAt !== (before.kins[kin.id] || {}).lastRunAt) S.error = null; // a newer run
+    if (S.loaded || asked) announceChanges(before, S.status, asked);
     S.loaded = true;
-    announceChanges(before, S.status);
     render();
   }
 
-  /** What changed for the Kin on screen since the last read: told once, in plain words. */
-  function announceChanges(before, after) {
+  /** What changed for the Kin on screen: told once, in plain words. After Update status the reading is always told. */
+  function announceChanges(before, after, asked) {
     const kin = selectedKin();
     if (!kin) return;
-    const a = before.kins[kin.id] || normalizeEntry();
-    const b = after.kins[kin.id] || normalizeEntry();
+    const a = afterStop(before.kins[kin.id] || normalizeEntry(), S.settings);
+    const b = afterStop(after.kins[kin.id] || normalizeEntry(), S.settings);
     const text = (r) => (r ? `${r.location} ${r.doing} ${r.outfit}` : '');
-    if (b.reading && b.reading.at !== (a.reading && a.reading.at) && text(b.reading) !== text(a.reading)) announce(text(b.reading));
-    if (b.sleep && !a.sleep) announce(`${kin.name} is asleep until ${formatWhen(b.sleep.wakeAt, { now: clock() })}.`);
-    if (b.dream && b.dream.at !== (a.dream && a.dream.at)) announce(`${kin.name} woke up. Dream: ${describeDream(b.dream)}`);
+    const parts = [];
+    if (b.reading && (asked ? b.reading.at !== (a.reading && a.reading.at) : text(b.reading) !== text(a.reading))) parts.push(text(b.reading));
+    if (b.sleep && (!a.sleep || asked)) parts.push(`${kin.name} is asleep until ${formatWhen(b.sleep.wakeAt, { now: clock() })}.`);
+    if (b.dream && b.dream.at !== (a.dream && a.dream.at)) parts.push(`${kin.name} woke up. Dream: ${describeDream(b.dream)}`);
     const w = warningOf(b);
-    if (w && !warningOf(a)) announce(warningText(w, b));
-    if (b.error && b.error !== a.error) alertOnce(b.note || b.error);
+    if (w && (!warningOf(a) || warningOf(a).kind !== w.kind)) parts.push(warningText(w, b));
+    announce(parts.join(' '));
+    if (b.error && !w && (b.error !== a.error || b.lastRunAt !== a.lastRunAt)) alertOnce(problemText(b, kin));
   }
 
   // ------------------------------------------------------------ actions
   async function update(op = 'read') {
     const kin = selectedKin();
-    if (!kin || S.busy) return; // repeated clicks join the run in progress
-    S.busy = op; S.error = null; render();
-    try {
-      const r = await channel.action(ACTION, { kin: kin.id, name: kin.name, op });
-      if (!r.ok && r.summary) S.error = { text: r.summary };
-    } catch (e) {
-      S.error = { text: 'Kindroid did not answer. Try again in a moment.' };
-    }
-    S.busy = null;
-    if (S.error) alertOnce(S.error.text);
-    await loadStatus();
+    if (!kin || S.busy[kin.id]) return; // repeated clicks join the run in progress
+    S.busy[kin.id] = op;
+    S.error = null; lastAlert = ''; // the same error after a new try is told again
+    const ranBefore = entryOf(kin.id).lastRunAt;
     render();
+    try {
+      const r = await channel.action(ACTION, { kin: kin.id, op });
+      if (!r.ok && r.summary) S.error = { kinId: kin.id, text: r.summary };
+    } catch {
+      S.error = { kinId: kin.id, text: 'Kindroid did not answer. Try again in a moment.' };
+    }
+    delete S.busy[kin.id];
+    await loadStatus({ asked: true });
+    // When the run recorded its own outcome, its words (friendlier, with the next try) replace the raw reply.
+    if (S.error && entryOf(kin.id).lastRunAt !== ranBefore) { S.error = null; render(); }
+    if (S.error) alertOnce(S.error.text);
   }
 
   function pick(kin) {
     S.picking = false;
-    saveSettings({ kinId: kin.id }); // render at once; the save goes on
+    S.error = null;
+    saveSettings({ kinId: kin.id });
     renderAndFocus('update');
     announce(`Selected ${kin.name}.`);
   }
 
   function setRun(state) {
     if (S.settings.autoState === state) return;
-    saveSettings({ autoState: state });
-    announce(`Automatic update ${{ running: 'started', paused: 'paused', stopped: 'stopped' }[state]}.`);
+    saveSettings(state === 'stopped' ? { autoState: state, stoppedAt: clock().toISOString() } : { autoState: state });
+    announce(`Automatic update ${RUN_WORDS[state]}.`);
   }
 
-  // ------------------------------------------------------------ rendering
+  // ------------------------------------------------------------ text
   const at = (iso) => formatWhen(iso, { now: clock() });
+  const nextTry = (entry) => at(startDueFor(plannedAt(entry, S.settings), clock()).toISOString());
 
   function warningText(w, entry) {
-    const next = startDueFor(plannedAt(entry, S.settings), clock());
-    const when = ` The next try is around ${at(next.toISOString())}.`;
+    const when = ` The next try is around ${nextTry(entry)}.`;
     return w.kind === 'maintenance' ? `Kindroid seems to be under maintenance.${when}` : `Kindroid has not answered ${w.failures} times in a row. It may be down.${when}`;
   }
 
+  /** The last run's problem in plain words (the technical detail in brackets, for anyone who reports it). */
+  function problemText(e, kin) {
+    if (e.note) return e.note;
+    if (e.errorKind === 'answer') return `${kin.name}'s answer could not be read: ${e.error}`;
+    if (e.errorKind === 'server') return `Kindroid did not answer this time (${e.error}). It tries again around ${nextTry(e)}.`;
+    return e.error;
+  }
+
+  // ------------------------------------------------------------ rendering
   function avatar(size) {
     return h('span', { class: 'avatar', style: `width:${size}px;height:${size}px` }, icon('person', { size: Math.round(size * 0.55) }));
   }
@@ -591,9 +652,9 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
     const current = selectedKin();
     return h('div', { class: 'picker' },
       intro,
-      h('ul', { class: 'profile-list', role: 'list' }, ...(S.kinsKnown ? S.kins : kinsFromStatus()).map((k) => {
+      h('ul', { class: 'profile-list', role: 'list' }, ...known().map((k) => {
         const e = entryOf(k.id);
-        const state = e.sleep && S.settings.autoState !== 'stopped' ? `Asleep until ${at(e.sleep.wakeAt)}`
+        const state = e.sleep ? `Asleep until ${at(e.sleep.wakeAt)}`
           : e.reading ? `${e.reading.location.replace(/\.$/, '')} · ${formatRelative(e.reading.at, clock())}` : 'Not read yet';
         const isCurrent = current && current.id === k.id;
         return h('li', {},
@@ -611,10 +672,11 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
   }
 
   function renderCard() {
-    const known = S.kinsKnown ? S.kins : kinsFromStatus();
+    const list = known();
     const kin = selectedKin();
     if (!kin) {
-      if (!known.length) {
+      if (!list.length && !S.kinsKnown) return h('section', { class: 'card empty' }, h('p', { class: 'muted' }, 'Connecting to Kindroid…'));
+      if (!list.length) {
         return h('section', { class: 'card empty' },
           h('div', { class: 'empty-art' }, icon('users', { size: 40 })),
           h('h2', {}, 'Select a Kin'),
@@ -627,11 +689,11 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
     const e = entryOf(kin.id);
     const r = e.reading;
     const now = clock();
-    const stopped = S.settings.autoState === 'stopped';
-    const dream = !stopped && e.dream && e.dream.dream && now - new Date(e.dream.at) < DREAM_SHOWN_H * 3600e3 ? e.dream : null;
-    const others = known.length - 1;
+    const busy = S.busy[kin.id];
+    const dream = e.dream && e.dream.dream && now - new Date(e.dream.at) < DREAM_TTL_HOURS * 3600e3 ? e.dream : null;
+    const others = list.length - 1;
     const warning = S.settings.autoState === 'running' ? warningOf(e) : null;
-    const problem = S.error ? S.error.text : e.error ? (e.note || e.error) : null;
+    const problem = S.error && (S.error.save || S.error.kinId === kin.id) ? S.error.text : e.error ? problemText(e, kin) : null;
 
     return h('section', { class: 'card', 'aria-label': `${kin.name}: current status` },
       h('div', { class: 'card-top' },
@@ -646,21 +708,21 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
           fact(r ? poseIcon(r.doing) : 'person', 'Pose and action', 'doing', r && r.doing, 'No pose or action read yet.'),
           fact('hanger', 'Outfit', 'outfit', r && r.outfit, 'No outfit read yet. Press Update status.'),
           dream ? fact('moon', 'Last dream', 'dream', describeDream(dream), '') : null),
-        h('button', { type: 'button', class: 'btn primary block', 'data-key': 'update', 'aria-busy': String(Boolean(S.busy)), onClick: () => update('read') },
-          S.busy ? [spinner(), S.busy === 'wake' ? 'Asking about the dream…' : 'Reading…'] : [icon('refresh', { size: 18 }), 'Update status']),
+        h('button', { type: 'button', class: 'btn primary block', 'data-key': 'update', 'aria-busy': String(Boolean(busy)), onClick: () => update('read') },
+          busy ? [spinner(), busy === 'wake' ? 'Asking about the dream…' : 'Reading…'] : [icon('refresh', { size: 18 }), 'Update status']),
         h('p', { class: 'meta', 'data-testid': 'last-checked' }, 'Last read: ',
           r && r.at ? [h('time', { datetime: r.at }, formatClock(r.at, { now })), ' · ', h('span', { class: 'rel', 'data-iso': r.at }, formatRelative(r.at, now))] : 'never'),
         warning ? h('div', { class: 'banner warn', 'data-testid': 'server-warning' }, icon('alert', { size: 18 }), h('span', { class: 'banner-text' }, warningText(warning, e)),
           h('button', { type: 'button', class: 'btn small', 'data-key': 'retry', onClick: () => update('read') }, 'Try now'))
-          : problem && !S.busy ? h('div', { class: 'banner error', 'data-testid': 'banner' }, icon('alert', { size: 18 }), h('span', { class: 'banner-text' }, problem),
+          : problem && !busy ? h('div', { class: 'banner error', 'data-testid': 'banner' }, icon('alert', { size: 18 }), h('span', { class: 'banner-text' }, problem),
             h('button', { type: 'button', class: 'btn small', 'data-key': 'retry', onClick: () => update('read') }, 'Try again')) : null,
-        renderAutomation(kin, e)));
+        renderAutomation(e, busy)));
   }
 
   // Start / Pause / Stop and the ruler. The ruler's label follows the thumb while dragging; the choice is saved on
   // release (a render is held back while the thumb is held, so a status refresh cannot cut the drag short).
   let dragging = false;
-  function renderAutomation(kin, e) {
+  function renderAutomation(e, busy) {
     const run = S.settings.autoState;
     const value = snapInterval(S.settings.intervalS);
     const label = (s) => `Every ${formatInterval(s)}`;
@@ -670,12 +732,11 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
     let status;
     if (run === 'stopped') status = 'Stopped. Press Start to update automatically.';
     else if (night) {
-      const dreamAt = startDueFor(plannedAt(e, S.settings), now).toISOString();
-      const asleep = new Date(night.until) > now ? `Asleep until ${at(night.wakeAt)}. The dream question comes around ${at(dreamAt)}. ` : `Waking up: the dream question comes around ${at(dreamAt)}. `;
+      const asleep = new Date(night.until) > now ? `Asleep until ${at(night.wakeAt)}. The dream question comes around ${nextTry(e)}. ` : `Waking up: the dream question comes around ${nextTry(e)}. `;
       status = run === 'paused' ? `${asleep}Paused: nothing is asked until you press Resume.`
-        : [asleep, h('button', { type: 'button', class: 'link-btn', 'data-key': 'wake-now', disabled: Boolean(S.busy), onClick: () => update('wake') }, 'Wake now')];
+        : [asleep, busy ? null : h('button', { type: 'button', class: 'link-btn', 'data-key': 'wake-now', onClick: () => update('wake') }, 'Wake now')];
     } else if (run === 'paused') status = 'Paused: nothing is asked until you press Resume.';
-    else status = `Next update around ${at(startDueFor(plannedAt(e, S.settings), now).toISOString())}.`;
+    else status = `Next update around ${nextTry(e)}.`;
     const control = (key, text, iconName, enabled, state, focusAfter) => h('button', {
       type: 'button', class: `btn small${key === 'auto-start' ? ' primary' : ''}`, 'data-key': key, disabled: !enabled,
       onClick: () => { setRun(state); renderAndFocus(focusAfter); },
@@ -695,24 +756,24 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
         onChange: (ev) => { dragging = false; saveSettings({ intervalS: INTERVAL_STEPS[Number(ev.target.value)] }); } }),
       h('div', { class: 'ruler-ends muted', 'aria-hidden': 'true' }, h('span', {}, '15 min'), h('span', {}, '4 h')),
       h('p', { class: 'meta auto-status', 'data-testid': 'auto-status' }, status),
-      e.note && run === 'running' && !warningOf(e) && !e.error ? h('p', { class: 'meta auto-note', 'data-testid': 'auto-note' }, e.note) : null,
       h('p', { class: 'help cost' }, 'Kindroid starts Clotheskin every 15 minutes, even while it is stopped. Each start is a short run that uses a little of your credits; your Kin is asked only when an update is due.'));
   }
 
   function renderSettings() {
     const s = S.settings;
+    const reachOn = s.tellDream && s.reachOut;
     return h('details', { class: 'reader', open: S.settingsOpen ? '' : undefined, onToggle: (ev) => { S.settingsOpen = ev.currentTarget.open; } },
       h('summary', { 'data-key': 'settings-summary' }, 'Settings'),
       h('div', { class: 'reader-body' },
         h('h3', { class: 'sub' }, 'Dreams'),
         h('label', { class: 'check' }, h('input', { type: 'checkbox', 'data-key': 'tell-dream', checked: s.tellDream || undefined, onChange: (ev) => saveSettings({ tellDream: ev.target.checked }) }),
           h('span', {}, 'Tell my Kin its dream, so it can remember it during the day')),
-        h('label', { class: 'check' }, h('input', { type: 'checkbox', 'data-key': 'reach-out', checked: s.reachOut || undefined, disabled: !s.tellDream || undefined, onChange: (ev) => saveSettings({ reachOut: ev.target.checked }) }),
-          h('span', {}, 'Let my Kin bring the dream up by itself')),
+        h('label', { class: `check${s.tellDream ? '' : ' off'}` }, h('input', { type: 'checkbox', 'data-key': 'reach-out', checked: reachOn || undefined, disabled: !s.tellDream || undefined, 'aria-describedby': s.tellDream ? undefined : 'reach-why', onChange: (ev) => saveSettings({ reachOut: ev.target.checked }) }),
+          h('span', {}, 'Let my Kin bring the dream up by itself', s.tellDream ? null : h('span', { class: 'why', id: 'reach-why' }, ' (needs the option above)'))),
         h('h3', { class: 'sub' }, 'Appearance'),
         h('label', { class: 'label', for: 'theme-pick' }, 'Theme'),
-        h('select', { id: 'theme-pick', class: 'text-input', 'data-key': 'theme-pick', onChange: (ev) => { saveSettings({ theme: ev.target.value }); applyTheme(ev.target.value); } },
-          ...Object.entries(THEME_LABELS).map(([id, text]) => h('option', { value: id, selected: s.theme === id ? '' : undefined }, text))),
+        h('select', { id: 'theme-pick', class: 'text-input', 'data-key': 'theme-pick', onChange: (ev) => { applyTheme(ev.target.value); saveSettings({ theme: ev.target.value }); } },
+          ...Object.entries(THEMES).map(([id, text]) => h('option', { value: id, selected: s.theme === id ? '' : undefined }, text))),
         h('h3', { class: 'sub' }, 'How it works'),
         h('p', { class: 'help' }, 'Your Kin looks at its recent chat with you and says where it is, how it is positioned, what it is doing and what it is wearing; Clotheskin shows that as three sentences. When it is asleep, Clotheskin asks when it will wake up, lets it sleep, and asks about its dream in the morning. Only the last reading and the night’s times are kept, never the chat.')));
   }
@@ -731,6 +792,7 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
   function render() {
     if (dragging) { renderPending = true; return; }
     renderPending = false;
+    const hadFocus = root.contains(document.activeElement);
     keepFocus(root, () => {
       const parts = [
         h('header', { class: 'app-head' }, h('h1', {}, 'Clotheskin'), h('p', {}, 'Where your Kin is, what it is doing and what it is wearing')),
@@ -739,6 +801,11 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
       ];
       root.replaceChildren(...parts.filter(Boolean)); // replaceChildren would show a null as the text "null"
     });
+    // The focused control is gone (a banner closed, Wake now done, the Kin detached): the keyboard stays in the app.
+    if (hadFocus && !root.contains(document.activeElement)) {
+      const fallback = root.querySelector('[data-key="update"], [data-key^="pick-"], button');
+      if (fallback) fallback.focus();
+    }
   }
   function renderAndFocus(key) { render(); const el = root.querySelector(`[data-key="${key}"]`); if (el) el.focus(); }
 
@@ -746,23 +813,15 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
   try { S.settings = normalizeSettings(await channel.read(SETTINGS_FILE)); } catch { /* defaults; saving will retry */ }
   applyTheme(S.settings.theme);
   await loadStatus();
-  // The run needs the person's time zone (wake-up times are on their clock) and, with one Kin, which Kin to read.
-  // Only with a real Kindroid around (it listed the Kins): a still picture of the screen saves nothing.
-  const fixes = {};
-  const tz = deviceTimeZone();
-  if (S.settings.tz !== tz) fixes.tz = tz;
-  const only = S.kinsKnown && S.kins.length === 1 ? S.kins[0] : null;
-  if (only && S.settings.kinId !== only.id) fixes.kinId = only.id;
-  if (S.kinsKnown && Object.keys(fixes).length) saveSettings(fixes);
-
-  channel.onKins((list) => { S.kins = list; S.kinsKnown = true; loadStatus(); });
+  syncSettings();
+  channel.onKins((list) => { S.kins = list; S.kinsKnown = true; syncSettings(); loadStatus({ asked: false }); render(); });
   setInterval(() => { if (document.visibilityState !== 'hidden') loadStatus(); }, POLL_MS);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') loadStatus(); });
   setInterval(() => { for (const el of root.querySelectorAll('.rel[data-iso]')) el.textContent = formatRelative(el.dataset.iso, clock()); }, 30000);
   render();
   return { S, render, update };
 }
-return { ACTION, startApp };
+return { startApp };
 });
 
 __def("src/screen/channel.js", function () {
@@ -888,7 +947,7 @@ function h(tag, attrs = {}, ...children) {
     if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
     else if (k === 'class') el.className = v;
     else if (k === 'value') el.value = v;
-    else if (k === 'checked' || k === 'disabled' || k === 'open' || k === 'readOnly') el[k] = true; // undefined/false were skipped above
+    else if (k === 'checked' || k === 'disabled' || k === 'open') el[k] = true; // undefined/false were skipped above
     else el.setAttribute(k, v === true ? '' : String(v));
   }
   append(el, children);
@@ -903,18 +962,14 @@ function append(el, children) {
   return el;
 }
 
-/** Runs `fn` (which rebuilds DOM inside `root`) and restores focus + caret by data-key. */
+/** Runs `fn` (which rebuilds the DOM inside `root`) and gives focus back to the control with the same data-key. */
 function keepFocus(root, fn) {
   const active = document.activeElement;
   const key = active && root.contains(active) ? active.getAttribute('data-key') : null;
-  const sel = key && 'selectionStart' in active ? [active.selectionStart, active.selectionEnd] : null;
   fn();
   if (!key) return;
   const next = root.querySelector(`[data-key="${CSS.escape(key)}"]`);
-  if (next) {
-    next.focus({ preventScroll: true });
-    if (sel && 'setSelectionRange' in next) { try { next.setSelectionRange(...sel); } catch { /* not a text control */ } }
-  }
+  if (next) next.focus({ preventScroll: true });
 }
 return { h, append, keepFocus };
 });
@@ -964,7 +1019,7 @@ return { icon, spinner, poseIcon };
 
 __def("src/screen/main.js", function () {
 // The screen's entry. Inside Kindroid it is a locked frame: it connects to the page around it, then shows the app.
-// If nothing answers, it says so (and keeps trying) instead of showing an empty app.
+// If nothing answers, it says so (and keeps trying for a while) instead of showing an empty app.
 const { frameChannel } = __req("src/screen/channel.js");
 const { startApp } = __req("src/screen/app.js");
 const { h } = __req("src/screen/dom.js");
@@ -973,6 +1028,7 @@ const { SETTINGS_FILE } = __req("src/core/state.js");
 
 const RETRY_EVERY_MS = 10000;
 const RETRY_FOR_MS = 5 * 60000;
+const FILES_ONLY_AFTER_MS = 1500; // the page answered files but not the Kins this long: a still picture of the screen
 
 function boot() {
   const root = document.getElementById('app');
@@ -980,15 +1036,17 @@ function boot() {
   let started = false;
 
   /**
-   * Connected when the page lists the Kins. A page that answers files but not Kins also counts: the App Library takes
-   * its picture of the screen from the sample/ files, with no Kindroid around (the names then come from status.json).
-   * Both are asked at once, so neither waits for the other.
+   * Connected when the page lists the Kins (Kindroid answers that at once). A page that answers files but not the Kins
+   * also counts, after a short wait: the App Library takes its picture of the screen from the sample/ files, with no
+   * Kindroid around (the names then come from status.json; if the Kins come later, the app takes them then).
    */
-  async function connect(timeout) {
-    const files = channel.read(SETTINGS_FILE).then(() => true, () => false);
-    try { return { kins: await channel.kins(timeout) }; } catch { /* no Kin list: maybe files */ }
-    if (!channel.heard) return null; // nothing at all answered: no need to wait for the file read to time out
-    return (await files) ? { kins: null } : null;
+  function connect(timeout) {
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (v) => { if (!done) { done = true; resolve(v); } };
+      channel.kins(timeout).then((kins) => finish({ kins }), () => { if (!channel.heard) finish(null); });
+      channel.read(SETTINGS_FILE).then(() => setTimeout(() => finish({ kins: null }), FILES_ONLY_AFTER_MS), () => finish(null));
+    });
   }
 
   async function start(kins) {
@@ -999,32 +1057,38 @@ function boot() {
     if (hadFocus) { const el = root.querySelector('[data-key="update"], [data-key^="pick-"], button'); if (el) el.focus(); }
   }
 
+  /** The "Could not reach Kindroid" card: the alert is built once; later attempts only change the button and the text. */
   function notConnected(why) {
     let trying = false;
-    const attempt = async () => {
+    let givenUp = false;
+    const text = h('p', { class: 'muted' }, why);
+    const button = h('button', { type: 'button', class: 'btn primary', 'data-key': 'connect-retry', onClick: () => attempt() });
+    const paint = () => {
+      button.setAttribute('aria-busy', String(trying));
+      button.replaceChildren(...(trying ? [spinner(), 'Trying…'] : [icon('refresh', { size: 18 }), 'Try again']));
+      if (givenUp) text.textContent = 'Clotheskin stopped trying by itself. Press Try again, or close and reopen the app.';
+    };
+    root.replaceChildren(h('section', { class: 'card empty', role: 'alert', 'data-testid': 'not-connected' },
+      h('div', { class: 'empty-art' }, icon('alert', { size: 40 })),
+      h('h1', { class: 'not-connected-title' }, 'Could not reach Kindroid'),
+      text, channel ? button : null));
+    paint();
+    if (!channel) return;
+
+    async function attempt() {
       if (trying || started) return;
-      trying = true; render();
-      const c = channel ? await connect(5000) : null;
+      trying = true; paint();
+      const c = await connect(5000);
       trying = false;
       if (c) { await start(c.kins); return; }
-      render();
-    };
-    const render = () => {
-      if (started) return;
-      const focused = root.contains(document.activeElement) ? document.activeElement.getAttribute('data-key') : null;
-      root.replaceChildren(
-        h('section', { class: 'card empty', role: 'alert', 'data-testid': 'not-connected' },
-          h('div', { class: 'empty-art' }, icon('alert', { size: 40 })),
-          h('h1', { class: 'not-connected-title' }, 'Could not reach Kindroid'),
-          h('p', { class: 'muted' }, why),
-          channel ? h('button', { type: 'button', class: 'btn primary', 'data-key': 'connect-retry', 'aria-busy': String(trying), onClick: attempt },
-            trying ? [spinner(), 'Trying…'] : [icon('refresh', { size: 18 }), 'Try again']) : null));
-      if (focused) { const el = root.querySelector(`[data-key="${focused}"]`); if (el) el.focus(); }
-    };
-    render();
-    if (!channel) return;
+      paint();
+    }
     const until = Date.now() + RETRY_FOR_MS;
-    const timer = setInterval(() => { if (started || Date.now() > until) clearInterval(timer); else attempt(); }, RETRY_EVERY_MS);
+    const timer = setInterval(() => {
+      if (started) { clearInterval(timer); return; }
+      if (Date.now() > until) { clearInterval(timer); givenUp = true; paint(); return; }
+      attempt();
+    }, RETRY_EVERY_MS);
   }
 
   if (!channel) {
@@ -1033,7 +1097,7 @@ function boot() {
   }
   connect().then((c) => {
     if (c) start(c.kins);
-    else notConnected('The page around Clotheskin did not answer. It keeps trying by itself; if it keeps failing, close and reopen the app. Kindroid may be busy or under maintenance.');
+    else notConnected('The page around Clotheskin did not answer. It keeps trying by itself for a few minutes; if it keeps failing, close and reopen the app. Kindroid may be busy or under maintenance.');
   });
 }
 return { boot };

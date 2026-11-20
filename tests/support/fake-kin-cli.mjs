@@ -12,6 +12,7 @@ const files = join(dir, 'files');
 mkdirSync(files, { recursive: true });
 
 if (cmd === 'files' && args[0] === 'get') {
+  if (opt.getFails && args[1] === 'status.json') { process.stderr.write(`kin: ${opt.getFails}\n`); process.exit(5); }
   const f = join(files, args[1]);
   if (!existsSync(f)) { process.stderr.write(`404 ${args[1]} not found\n`); process.exit(4); }
   process.stdout.write(readFileSync(f));
@@ -20,13 +21,17 @@ if (cmd === 'files' && args[0] === 'get') {
 } else if (cmd === 'kins') {
   process.stdout.write('k1\tIsa\nk2\tBea Maria\n');
 } else if (cmd === 'ask') {
-  if (opt.askFails) { process.stderr.write('kin: 503 Service Unavailable\n'); process.exit(3); }
+  if (opt.askHangs) { setTimeout(() => {}, 600000); }
+  else {
+  if (opt.askFails) { process.stderr.write(`kin: ${opt.askFails}\n`); process.exit(3); }
   // The answer leaves in two writes, split inside a 3-byte character (a curly quote): it must still be read whole.
   const buf = Buffer.from(opt.answer, 'utf8');
   const cut = buf.indexOf(Buffer.from('“')) + 1 || 1;
   process.stdout.write(buf.subarray(0, cut));
   setTimeout(() => process.stdout.write(buf.subarray(cut)), 40);
+  }
 } else if (cmd === 'end') {
+  if (opt.endHangs) setTimeout(() => {}, 60000);
   if (opt.endFails) { process.stderr.write('kin end: rejected\n'); process.exit(2); }
 } else if (cmd === 'tell') {
   // accepted

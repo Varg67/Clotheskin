@@ -226,6 +226,9 @@ const step = async (name, fn) => {
     await t.page.clock.fastForward('00:05');
     await t.fr.locator('[data-testid="not-connected"]').waitFor();
     await t.page.screenshot({ path: path.join(SHOTS, '08-not-connected.png') });
+    const section = await t.fr.locator('[data-testid="not-connected"]').elementHandle();
+    await t.page.clock.fastForward('00:25'); // two automatic attempts
+    assert.ok(await section.evaluate((el) => el.isConnected), 'the alert is not rebuilt (it would be read again)');
     await t.dev(() => window.dev.silent(false));
     await t.key('connect-retry').click();
     await t.key('update').waitFor({ timeout: 8000 });
@@ -246,6 +249,63 @@ const step = async (name, fn) => {
     assert.equal(writes, 0, 'nothing saved');
     await t.page.screenshot({ path: path.join(SHOTS, '09-card-picture.png') });
     await t.ctx.close();
+  });
+
+  await step('the run always knows the Kin: one Kin left after a detach, or a Kin list that comes late, is saved for it', async () => {
+    const t = await open({ kins: [{ id: 'kin-isa', name: 'Isa' }, { id: 'kin-bea', name: 'Bea' }] });
+    await t.key('pick-kin-bea').click();
+    await t.until(async () => (await t.settings()).kinId === 'kin-bea', 'Bea saved');
+    await t.dev(() => window.dev.setKins([{ id: 'kin-isa', name: 'Isa' }])); // Bea detached: only Isa is left
+    await t.until(async () => (await t.settings()).kinId === 'kin-isa', 'Isa saved for the run');
+    await t.key('auto-start').click();
+    await t.until(async () => (await t.settings()).autoState === 'running', 'running');
+    const r = await t.dev(() => window.dev.tick());
+    assert.match(r.message, /^Isa: In the living room\./, 'the scheduled start reads Isa');
+    await t.ctx.close();
+  });
+
+  await step('an old error is cleared by a later successful run; Update status on one Kin does not show "Reading…" on another', async () => {
+    const t = await open({ kins: [{ id: 'kin-isa', name: 'Isa' }, { id: 'kin-bea', name: 'Bea' }], files: { 'settings.json': JSON.stringify({ kinId: 'kin-isa', autoState: 'running', tz: 'America/Sao_Paulo' }) } });
+    await t.dev(() => window.dev.answers({ reading: '*giggles* No.' }));
+    await t.key('update').click(); await t.idle();
+    await t.fr.locator('[data-testid="banner"]').waitFor();
+    await t.dev(() => window.dev.scene('pt-jeans-jacket'));
+    await t.page.clock.setSystemTime(new Date('2026-11-20T22:30:00-03:00'));
+    await t.dev(() => window.dev.tick()); // the scheduled start succeeds
+    await t.page.clock.fastForward('01:00');
+    await t.until(async () => (await t.fr.locator('[data-testid="banner"]').count()) === 0, 'banner cleared');
+    await t.dev(() => { window.dev.state.actionDelayMs = 3000; });
+    await t.key('update').click();
+    await t.key('switch').click();
+    await t.key('pick-kin-bea').click();
+    assert.equal(await t.key('update').getAttribute('aria-busy'), 'false', 'Bea is not being read');
+    await t.ctx.close();
+  });
+
+  await step('focus never falls out of the app: after Wake now, and after Try again', async () => {
+    const night = { 'settings.json': JSON.stringify({ kinId: 'kin-isa', autoState: 'running', tz: 'America/Sao_Paulo' }), 'status.json': JSON.stringify({ kins: { 'kin-isa': { name: 'Isa', lastRunAt: '2026-11-21T03:00:00Z', sleep: { wakeAt: '2026-11-21T10:30:00Z', until: '2026-11-21T10:20:00Z' } } } }) };
+    const t = await open({ kins: [{ id: 'kin-isa', name: 'Isa' }], scene: 'night', files: night, time: '2026-11-21T01:00:00-03:00' });
+    await t.key('wake-now').focus();
+    await t.page.keyboard.press('Enter');
+    await t.idle();
+    assert.notEqual(await t.frameEval(() => document.activeElement.tagName), 'BODY');
+    await t.ctx.close();
+  });
+
+  await step('the reading is told after Update status even when nothing changed; Stop forgets the night at once', async () => {
+    const t = await open({ kins: [{ id: 'kin-isa', name: 'Isa' }] });
+    await t.key('update').click(); await t.idle();
+    await t.page.clock.fastForward('00:02');
+    await t.key('update').click(); await t.idle();
+    await t.until(async () => /In the living room\./.test(await t.frameEval(() => document.querySelector('[role=status][aria-live]').textContent)), 'told again');
+    const night = { 'settings.json': JSON.stringify({ kinId: 'kin-isa', autoState: 'running', tz: 'America/Sao_Paulo' }), 'status.json': JSON.stringify({ kins: { 'kin-isa': { name: 'Isa', lastRunAt: '2026-11-21T03:00:00Z', sleep: { wakeAt: '2026-11-21T10:30:00Z', until: '2026-11-21T10:20:00Z' }, dream: { dream: 'An old dream', remembered: 'all', at: '2026-11-21T00:00:00Z' } } } }) };
+    const u = await open({ kins: [{ id: 'kin-isa', name: 'Isa' }], files: night, time: '2026-11-21T01:00:00-03:00' });
+    await u.until(async () => /Asleep until/.test(await u.text('auto-status')), 'asleep');
+    await u.key('auto-stop').click();
+    await u.key('auto-start').click(); // before any start of the program
+    assert.match(await u.text('auto-status'), /^Next update around/, 'the night is gone at once');
+    assert.equal(await u.fr.locator('[data-testid="dream"]').count(), 0, 'and the dream');
+    await t.ctx.close(); await u.ctx.close();
   });
 
   await step('no page errors or console errors', async () => { assert.deepEqual(problems, []); });

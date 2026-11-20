@@ -11,9 +11,8 @@ export function parseJsonObject(text) {
   const first = raw.indexOf('{');
   const last = raw.lastIndexOf('}');
   if (first !== -1 && last > first) candidates.push(raw.slice(first, last + 1));
-  let lastErr = null;
   for (const c of candidates) {
-    try { return { ok: true, value: JSON.parse(c) }; } catch (e) { lastErr = e; }
+    try { return { ok: true, value: JSON.parse(c) }; } catch { /* try the next candidate */ }
   }
   for (const c of candidates) {
     const noTrailing = c.replace(/,(\s*[}\]])/g, '$1');
@@ -21,5 +20,6 @@ export function parseJsonObject(text) {
       try { return { ok: true, value: JSON.parse(attempt), repaired: true }; } catch { /* try the next repair */ }
     }
   }
-  return { ok: false, error: `The answer is not valid JSON (${lastErr.message}).` };
+  // Not the parser's message: it quotes the answer, and the answer is the scene (it would reach logs and status.json).
+  return { ok: false, error: 'The answer is not valid JSON.' };
 }

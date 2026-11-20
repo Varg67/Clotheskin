@@ -2,16 +2,14 @@
 // work, every 15 minutes or when Update status is pressed; the screen never asks the Kin anything itself.
 import { h, keepFocus } from './dom.js';
 import { icon, spinner, poseIcon } from './icons.js';
-import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, warningOf, SETTINGS_FILE, STATUS_FILE } from '../core/state.js';
+import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, warningOf, SETTINGS_FILE, STATUS_FILE, ACTION, THEMES } from '../core/state.js';
 import { INTERVAL_STEPS, formatInterval, snapInterval, startDueFor } from '../core/schedule.js';
-import { describeDream } from '../core/sleep.js';
+import { describeDream, DREAM_TTL_HOURS } from '../core/sleep.js';
 import { deviceTimeZone } from '../core/time.js';
 import { formatClock, formatRelative, formatWhen } from '../core/format.js';
 
-export const ACTION = 'update_status'; // run/program.js
 const POLL_MS = 60000; // status.json is read again every minute while the screen is visible
-const DREAM_SHOWN_H = 24;
-const THEME_LABELS = { warm: 'Warm (default)', sage: 'Sage green' };
+const RUN_WORDS = { running: 'started', paused: 'paused', stopped: 'stopped' };
 
 /**
  * Starts the screen on a connected channel. `kins` is the first list from the page (null when the page answered
@@ -23,108 +21,148 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
     kinsKnown: Array.isArray(kins),
     settings: normalizeSettings(null),
     status: normalizeStatus(null),
-    busy: null, // 'read' | 'wake': the action is running
-    error: null, // a problem of the screen itself (the action did not answer, a save failed)
+    statusText: null, // status.json as last read: an unchanged file is not rendered again
+    loaded: false, // the first read of status.json is not announced (nothing changed: the screen just opened)
+    busy: {}, // kin id -> 'read' | 'wake': the action running for that Kin
+    error: null, // { kinId, text } (the action did not answer) or { save: true, text } (a setting was not saved)
     picking: false, // the Kin list is open on the card
-    loaded: false,
+    settingsOpen: false,
   };
 
   // ------------------------------------------------------------ announcements
   // Two regions that stay in the page (a region rebuilt on every render would be read again and again): results
-  // and notes are polite, errors are assertive. Each message is read once.
+  // and notes are polite, errors are assertive. Messages of one moment are joined, so none hides another.
   const live = h('div', { class: 'sr-only', role: 'status', 'aria-live': 'polite' });
   const alertLive = h('div', { class: 'sr-only', role: 'alert' });
   document.body.append(live, alertLive);
   const say = (region, text) => { region.textContent = ''; setTimeout(() => { region.textContent = text; }, 30); };
-  const announce = (text) => say(live, text);
+  const announce = (text) => { if (text) say(live, text); };
   let lastAlert = '';
   const alertOnce = (text) => { if (text && text !== lastAlert) say(alertLive, text); lastAlert = text || ''; };
 
   // ------------------------------------------------------------ data
-  function selectedKin() {
-    const known = S.kinsKnown ? S.kins : kinsFromStatus();
-    const found = known.find((k) => k.id === S.settings.kinId);
-    if (found) return found;
-    return known.length === 1 ? known[0] : null; // several Kins and none chosen: the person picks
-  }
+  const known = () => (S.kinsKnown ? S.kins : kinsFromStatus());
   function kinsFromStatus() {
     return Object.entries(S.status.kins).filter(([, e]) => e.name).map(([id, e]) => ({ id, name: e.name }));
   }
-  const entryOf = (id) => S.status.kins[id] || normalizeEntry();
+  function selectedKin() {
+    const list = known();
+    return list.find((k) => k.id === S.settings.kinId) || (list.length === 1 ? list[0] : null); // several and none chosen: the person picks
+  }
+  /** A Kin's entry as the run will see it: what Stop forgot is not shown either. */
+  const entryOf = (id) => afterStop(S.status.kins[id] || normalizeEntry(), S.settings);
 
   async function saveSettings(patch) {
     S.settings = normalizeSettings({ ...S.settings, ...patch });
-    try { await channel.write(SETTINGS_FILE, JSON.stringify(S.settings)); if (S.error && S.error.save) S.error = null; } catch (e) {
+    render(); // at once; the save goes on
+    try {
+      await channel.write(SETTINGS_FILE, JSON.stringify(S.settings));
+      if (S.error && S.error.save) { S.error = null; render(); }
+    } catch {
       S.error = { save: true, text: 'Your change could not be saved in Kindroid. Try again in a moment.' };
       alertOnce(S.error.text);
+      render();
     }
-    render();
   }
 
-  async function loadStatus() {
+  /**
+   * What the run needs from the screen, saved whenever the Kins are known (at start or later): the person's time zone
+   * (wake-up times are on their clock) and, when only one Kin is attached, that Kin. Never from a still picture of the
+   * screen (no Kin list): it saves nothing.
+   */
+  function syncSettings() {
+    if (!S.kinsKnown) return;
+    const fixes = {};
+    const tz = deviceTimeZone();
+    if (S.settings.tz !== tz) fixes.tz = tz;
+    if (S.kins.length === 1 && S.settings.kinId !== S.kins[0].id) fixes.kinId = S.kins[0].id;
+    if (Object.keys(fixes).length) saveSettings(fixes);
+  }
+
+  async function loadStatus({ asked = false } = {}) {
     let body;
-    try { body = await channel.read(STATUS_FILE); } catch { return; } // the next poll tries again
+    try { body = await channel.read(STATUS_FILE); } catch { if (asked) render(); return; } // the next poll tries again
+    if (body === S.statusText && !asked) return; // nothing new: no render, focus left alone
     const before = S.status;
+    S.statusText = body;
     S.status = normalizeStatus(body);
+    const kin = selectedKin();
+    if (kin && S.error && S.error.kinId === kin.id && entryOf(kin.id).lastRunAt !== (before.kins[kin.id] || {}).lastRunAt) S.error = null; // a newer run
+    if (S.loaded || asked) announceChanges(before, S.status, asked);
     S.loaded = true;
-    announceChanges(before, S.status);
     render();
   }
 
-  /** What changed for the Kin on screen since the last read: told once, in plain words. */
-  function announceChanges(before, after) {
+  /** What changed for the Kin on screen: told once, in plain words. After Update status the reading is always told. */
+  function announceChanges(before, after, asked) {
     const kin = selectedKin();
     if (!kin) return;
-    const a = before.kins[kin.id] || normalizeEntry();
-    const b = after.kins[kin.id] || normalizeEntry();
+    const a = afterStop(before.kins[kin.id] || normalizeEntry(), S.settings);
+    const b = afterStop(after.kins[kin.id] || normalizeEntry(), S.settings);
     const text = (r) => (r ? `${r.location} ${r.doing} ${r.outfit}` : '');
-    if (b.reading && b.reading.at !== (a.reading && a.reading.at) && text(b.reading) !== text(a.reading)) announce(text(b.reading));
-    if (b.sleep && !a.sleep) announce(`${kin.name} is asleep until ${formatWhen(b.sleep.wakeAt, { now: clock() })}.`);
-    if (b.dream && b.dream.at !== (a.dream && a.dream.at)) announce(`${kin.name} woke up. Dream: ${describeDream(b.dream)}`);
+    const parts = [];
+    if (b.reading && (asked ? b.reading.at !== (a.reading && a.reading.at) : text(b.reading) !== text(a.reading))) parts.push(text(b.reading));
+    if (b.sleep && (!a.sleep || asked)) parts.push(`${kin.name} is asleep until ${formatWhen(b.sleep.wakeAt, { now: clock() })}.`);
+    if (b.dream && b.dream.at !== (a.dream && a.dream.at)) parts.push(`${kin.name} woke up. Dream: ${describeDream(b.dream)}`);
     const w = warningOf(b);
-    if (w && !warningOf(a)) announce(warningText(w, b));
-    if (b.error && b.error !== a.error) alertOnce(b.note || b.error);
+    if (w && (!warningOf(a) || warningOf(a).kind !== w.kind)) parts.push(warningText(w, b));
+    announce(parts.join(' '));
+    if (b.error && !w && (b.error !== a.error || b.lastRunAt !== a.lastRunAt)) alertOnce(problemText(b, kin));
   }
 
   // ------------------------------------------------------------ actions
   async function update(op = 'read') {
     const kin = selectedKin();
-    if (!kin || S.busy) return; // repeated clicks join the run in progress
-    S.busy = op; S.error = null; render();
-    try {
-      const r = await channel.action(ACTION, { kin: kin.id, name: kin.name, op });
-      if (!r.ok && r.summary) S.error = { text: r.summary };
-    } catch (e) {
-      S.error = { text: 'Kindroid did not answer. Try again in a moment.' };
-    }
-    S.busy = null;
-    if (S.error) alertOnce(S.error.text);
-    await loadStatus();
+    if (!kin || S.busy[kin.id]) return; // repeated clicks join the run in progress
+    S.busy[kin.id] = op;
+    S.error = null; lastAlert = ''; // the same error after a new try is told again
+    const ranBefore = entryOf(kin.id).lastRunAt;
     render();
+    try {
+      const r = await channel.action(ACTION, { kin: kin.id, op });
+      if (!r.ok && r.summary) S.error = { kinId: kin.id, text: r.summary };
+    } catch {
+      S.error = { kinId: kin.id, text: 'Kindroid did not answer. Try again in a moment.' };
+    }
+    delete S.busy[kin.id];
+    await loadStatus({ asked: true });
+    // When the run recorded its own outcome, its words (friendlier, with the next try) replace the raw reply.
+    if (S.error && entryOf(kin.id).lastRunAt !== ranBefore) { S.error = null; render(); }
+    if (S.error) alertOnce(S.error.text);
   }
 
   function pick(kin) {
     S.picking = false;
-    saveSettings({ kinId: kin.id }); // render at once; the save goes on
+    S.error = null;
+    saveSettings({ kinId: kin.id });
     renderAndFocus('update');
     announce(`Selected ${kin.name}.`);
   }
 
   function setRun(state) {
     if (S.settings.autoState === state) return;
-    saveSettings({ autoState: state });
-    announce(`Automatic update ${{ running: 'started', paused: 'paused', stopped: 'stopped' }[state]}.`);
+    saveSettings(state === 'stopped' ? { autoState: state, stoppedAt: clock().toISOString() } : { autoState: state });
+    announce(`Automatic update ${RUN_WORDS[state]}.`);
   }
 
-  // ------------------------------------------------------------ rendering
+  // ------------------------------------------------------------ text
   const at = (iso) => formatWhen(iso, { now: clock() });
+  const nextTry = (entry) => at(startDueFor(plannedAt(entry, S.settings), clock()).toISOString());
 
   function warningText(w, entry) {
-    const next = startDueFor(plannedAt(entry, S.settings), clock());
-    const when = ` The next try is around ${at(next.toISOString())}.`;
+    const when = ` The next try is around ${nextTry(entry)}.`;
     return w.kind === 'maintenance' ? `Kindroid seems to be under maintenance.${when}` : `Kindroid has not answered ${w.failures} times in a row. It may be down.${when}`;
   }
 
+  /** The last run's problem in plain words (the technical detail in brackets, for anyone who reports it). */
+  function problemText(e, kin) {
+    if (e.note) return e.note;
+    if (e.errorKind === 'answer') return `${kin.name}'s answer could not be read: ${e.error}`;
+    if (e.errorKind === 'server') return `Kindroid did not answer this time (${e.error}). It tries again around ${nextTry(e)}.`;
+    return e.error;
+  }
+
+  // ------------------------------------------------------------ rendering
   function avatar(size) {
     return h('span', { class: 'avatar', style: `width:${size}px;height:${size}px` }, icon('person', { size: Math.round(size * 0.55) }));
   }
@@ -133,9 +171,9 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
     const current = selectedKin();
     return h('div', { class: 'picker' },
       intro,
-      h('ul', { class: 'profile-list', role: 'list' }, ...(S.kinsKnown ? S.kins : kinsFromStatus()).map((k) => {
+      h('ul', { class: 'profile-list', role: 'list' }, ...known().map((k) => {
         const e = entryOf(k.id);
-        const state = e.sleep && S.settings.autoState !== 'stopped' ? `Asleep until ${at(e.sleep.wakeAt)}`
+        const state = e.sleep ? `Asleep until ${at(e.sleep.wakeAt)}`
           : e.reading ? `${e.reading.location.replace(/\.$/, '')} · ${formatRelative(e.reading.at, clock())}` : 'Not read yet';
         const isCurrent = current && current.id === k.id;
         return h('li', {},
@@ -153,10 +191,11 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
   }
 
   function renderCard() {
-    const known = S.kinsKnown ? S.kins : kinsFromStatus();
+    const list = known();
     const kin = selectedKin();
     if (!kin) {
-      if (!known.length) {
+      if (!list.length && !S.kinsKnown) return h('section', { class: 'card empty' }, h('p', { class: 'muted' }, 'Connecting to Kindroid…'));
+      if (!list.length) {
         return h('section', { class: 'card empty' },
           h('div', { class: 'empty-art' }, icon('users', { size: 40 })),
           h('h2', {}, 'Select a Kin'),
@@ -169,11 +208,11 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
     const e = entryOf(kin.id);
     const r = e.reading;
     const now = clock();
-    const stopped = S.settings.autoState === 'stopped';
-    const dream = !stopped && e.dream && e.dream.dream && now - new Date(e.dream.at) < DREAM_SHOWN_H * 3600e3 ? e.dream : null;
-    const others = known.length - 1;
+    const busy = S.busy[kin.id];
+    const dream = e.dream && e.dream.dream && now - new Date(e.dream.at) < DREAM_TTL_HOURS * 3600e3 ? e.dream : null;
+    const others = list.length - 1;
     const warning = S.settings.autoState === 'running' ? warningOf(e) : null;
-    const problem = S.error ? S.error.text : e.error ? (e.note || e.error) : null;
+    const problem = S.error && (S.error.save || S.error.kinId === kin.id) ? S.error.text : e.error ? problemText(e, kin) : null;
 
     return h('section', { class: 'card', 'aria-label': `${kin.name}: current status` },
       h('div', { class: 'card-top' },
@@ -188,21 +227,21 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
           fact(r ? poseIcon(r.doing) : 'person', 'Pose and action', 'doing', r && r.doing, 'No pose or action read yet.'),
           fact('hanger', 'Outfit', 'outfit', r && r.outfit, 'No outfit read yet. Press Update status.'),
           dream ? fact('moon', 'Last dream', 'dream', describeDream(dream), '') : null),
-        h('button', { type: 'button', class: 'btn primary block', 'data-key': 'update', 'aria-busy': String(Boolean(S.busy)), onClick: () => update('read') },
-          S.busy ? [spinner(), S.busy === 'wake' ? 'Asking about the dream…' : 'Reading…'] : [icon('refresh', { size: 18 }), 'Update status']),
+        h('button', { type: 'button', class: 'btn primary block', 'data-key': 'update', 'aria-busy': String(Boolean(busy)), onClick: () => update('read') },
+          busy ? [spinner(), busy === 'wake' ? 'Asking about the dream…' : 'Reading…'] : [icon('refresh', { size: 18 }), 'Update status']),
         h('p', { class: 'meta', 'data-testid': 'last-checked' }, 'Last read: ',
           r && r.at ? [h('time', { datetime: r.at }, formatClock(r.at, { now })), ' · ', h('span', { class: 'rel', 'data-iso': r.at }, formatRelative(r.at, now))] : 'never'),
         warning ? h('div', { class: 'banner warn', 'data-testid': 'server-warning' }, icon('alert', { size: 18 }), h('span', { class: 'banner-text' }, warningText(warning, e)),
           h('button', { type: 'button', class: 'btn small', 'data-key': 'retry', onClick: () => update('read') }, 'Try now'))
-          : problem && !S.busy ? h('div', { class: 'banner error', 'data-testid': 'banner' }, icon('alert', { size: 18 }), h('span', { class: 'banner-text' }, problem),
+          : problem && !busy ? h('div', { class: 'banner error', 'data-testid': 'banner' }, icon('alert', { size: 18 }), h('span', { class: 'banner-text' }, problem),
             h('button', { type: 'button', class: 'btn small', 'data-key': 'retry', onClick: () => update('read') }, 'Try again')) : null,
-        renderAutomation(kin, e)));
+        renderAutomation(e, busy)));
   }
 
   // Start / Pause / Stop and the ruler. The ruler's label follows the thumb while dragging; the choice is saved on
   // release (a render is held back while the thumb is held, so a status refresh cannot cut the drag short).
   let dragging = false;
-  function renderAutomation(kin, e) {
+  function renderAutomation(e, busy) {
     const run = S.settings.autoState;
     const value = snapInterval(S.settings.intervalS);
     const label = (s) => `Every ${formatInterval(s)}`;
@@ -212,12 +251,11 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
     let status;
     if (run === 'stopped') status = 'Stopped. Press Start to update automatically.';
     else if (night) {
-      const dreamAt = startDueFor(plannedAt(e, S.settings), now).toISOString();
-      const asleep = new Date(night.until) > now ? `Asleep until ${at(night.wakeAt)}. The dream question comes around ${at(dreamAt)}. ` : `Waking up: the dream question comes around ${at(dreamAt)}. `;
+      const asleep = new Date(night.until) > now ? `Asleep until ${at(night.wakeAt)}. The dream question comes around ${nextTry(e)}. ` : `Waking up: the dream question comes around ${nextTry(e)}. `;
       status = run === 'paused' ? `${asleep}Paused: nothing is asked until you press Resume.`
-        : [asleep, h('button', { type: 'button', class: 'link-btn', 'data-key': 'wake-now', disabled: Boolean(S.busy), onClick: () => update('wake') }, 'Wake now')];
+        : [asleep, busy ? null : h('button', { type: 'button', class: 'link-btn', 'data-key': 'wake-now', onClick: () => update('wake') }, 'Wake now')];
     } else if (run === 'paused') status = 'Paused: nothing is asked until you press Resume.';
-    else status = `Next update around ${at(startDueFor(plannedAt(e, S.settings), now).toISOString())}.`;
+    else status = `Next update around ${nextTry(e)}.`;
     const control = (key, text, iconName, enabled, state, focusAfter) => h('button', {
       type: 'button', class: `btn small${key === 'auto-start' ? ' primary' : ''}`, 'data-key': key, disabled: !enabled,
       onClick: () => { setRun(state); renderAndFocus(focusAfter); },
@@ -237,24 +275,24 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
         onChange: (ev) => { dragging = false; saveSettings({ intervalS: INTERVAL_STEPS[Number(ev.target.value)] }); } }),
       h('div', { class: 'ruler-ends muted', 'aria-hidden': 'true' }, h('span', {}, '15 min'), h('span', {}, '4 h')),
       h('p', { class: 'meta auto-status', 'data-testid': 'auto-status' }, status),
-      e.note && run === 'running' && !warningOf(e) && !e.error ? h('p', { class: 'meta auto-note', 'data-testid': 'auto-note' }, e.note) : null,
       h('p', { class: 'help cost' }, 'Kindroid starts Clotheskin every 15 minutes, even while it is stopped. Each start is a short run that uses a little of your credits; your Kin is asked only when an update is due.'));
   }
 
   function renderSettings() {
     const s = S.settings;
+    const reachOn = s.tellDream && s.reachOut;
     return h('details', { class: 'reader', open: S.settingsOpen ? '' : undefined, onToggle: (ev) => { S.settingsOpen = ev.currentTarget.open; } },
       h('summary', { 'data-key': 'settings-summary' }, 'Settings'),
       h('div', { class: 'reader-body' },
         h('h3', { class: 'sub' }, 'Dreams'),
         h('label', { class: 'check' }, h('input', { type: 'checkbox', 'data-key': 'tell-dream', checked: s.tellDream || undefined, onChange: (ev) => saveSettings({ tellDream: ev.target.checked }) }),
           h('span', {}, 'Tell my Kin its dream, so it can remember it during the day')),
-        h('label', { class: 'check' }, h('input', { type: 'checkbox', 'data-key': 'reach-out', checked: s.reachOut || undefined, disabled: !s.tellDream || undefined, onChange: (ev) => saveSettings({ reachOut: ev.target.checked }) }),
-          h('span', {}, 'Let my Kin bring the dream up by itself')),
+        h('label', { class: `check${s.tellDream ? '' : ' off'}` }, h('input', { type: 'checkbox', 'data-key': 'reach-out', checked: reachOn || undefined, disabled: !s.tellDream || undefined, 'aria-describedby': s.tellDream ? undefined : 'reach-why', onChange: (ev) => saveSettings({ reachOut: ev.target.checked }) }),
+          h('span', {}, 'Let my Kin bring the dream up by itself', s.tellDream ? null : h('span', { class: 'why', id: 'reach-why' }, ' (needs the option above)'))),
         h('h3', { class: 'sub' }, 'Appearance'),
         h('label', { class: 'label', for: 'theme-pick' }, 'Theme'),
-        h('select', { id: 'theme-pick', class: 'text-input', 'data-key': 'theme-pick', onChange: (ev) => { saveSettings({ theme: ev.target.value }); applyTheme(ev.target.value); } },
-          ...Object.entries(THEME_LABELS).map(([id, text]) => h('option', { value: id, selected: s.theme === id ? '' : undefined }, text))),
+        h('select', { id: 'theme-pick', class: 'text-input', 'data-key': 'theme-pick', onChange: (ev) => { applyTheme(ev.target.value); saveSettings({ theme: ev.target.value }); } },
+          ...Object.entries(THEMES).map(([id, text]) => h('option', { value: id, selected: s.theme === id ? '' : undefined }, text))),
         h('h3', { class: 'sub' }, 'How it works'),
         h('p', { class: 'help' }, 'Your Kin looks at its recent chat with you and says where it is, how it is positioned, what it is doing and what it is wearing; Clotheskin shows that as three sentences. When it is asleep, Clotheskin asks when it will wake up, lets it sleep, and asks about its dream in the morning. Only the last reading and the night’s times are kept, never the chat.')));
   }
@@ -273,6 +311,7 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
   function render() {
     if (dragging) { renderPending = true; return; }
     renderPending = false;
+    const hadFocus = root.contains(document.activeElement);
     keepFocus(root, () => {
       const parts = [
         h('header', { class: 'app-head' }, h('h1', {}, 'Clotheskin'), h('p', {}, 'Where your Kin is, what it is doing and what it is wearing')),
@@ -281,6 +320,11 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
       ];
       root.replaceChildren(...parts.filter(Boolean)); // replaceChildren would show a null as the text "null"
     });
+    // The focused control is gone (a banner closed, Wake now done, the Kin detached): the keyboard stays in the app.
+    if (hadFocus && !root.contains(document.activeElement)) {
+      const fallback = root.querySelector('[data-key="update"], [data-key^="pick-"], button');
+      if (fallback) fallback.focus();
+    }
   }
   function renderAndFocus(key) { render(); const el = root.querySelector(`[data-key="${key}"]`); if (el) el.focus(); }
 
@@ -288,16 +332,8 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
   try { S.settings = normalizeSettings(await channel.read(SETTINGS_FILE)); } catch { /* defaults; saving will retry */ }
   applyTheme(S.settings.theme);
   await loadStatus();
-  // The run needs the person's time zone (wake-up times are on their clock) and, with one Kin, which Kin to read.
-  // Only with a real Kindroid around (it listed the Kins): a still picture of the screen saves nothing.
-  const fixes = {};
-  const tz = deviceTimeZone();
-  if (S.settings.tz !== tz) fixes.tz = tz;
-  const only = S.kinsKnown && S.kins.length === 1 ? S.kins[0] : null;
-  if (only && S.settings.kinId !== only.id) fixes.kinId = only.id;
-  if (S.kinsKnown && Object.keys(fixes).length) saveSettings(fixes);
-
-  channel.onKins((list) => { S.kins = list; S.kinsKnown = true; loadStatus(); });
+  syncSettings();
+  channel.onKins((list) => { S.kins = list; S.kinsKnown = true; syncSettings(); loadStatus({ asked: false }); render(); });
   setInterval(() => { if (document.visibilityState !== 'hidden') loadStatus(); }, POLL_MS);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') loadStatus(); });
   setInterval(() => { for (const el of root.querySelectorAll('.rel[data-iso]')) el.textContent = formatRelative(el.dataset.iso, clock()); }, 30000);

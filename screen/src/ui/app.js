@@ -1,12 +1,13 @@
 import { h, keepFocus, openSheet } from './dom.js';
 import { icon, spinner } from './icons.js';
 import { buildOutfitPrompt } from '../core/prompt.js';
-import { parseReading, describeReading, poseIcon } from '../core/outfit.js';
+import { parseReading, describeReading, poseIcon, NO_HAIR, NO_MAKEUP } from '../core/outfit.js';
 import { formatClock, formatRelative } from '../core/format.js';
 import { DEMO_SCENES } from '../demo/demo.js';
-import { ReadingStore } from '../core/readings.js';
-import { normalizeInterval, effectiveMinutes, autoFailureLines, SCHEDULE_TICK_MINUTES, AUTO_MIN_MINUTES, AUTO_MAX_MINUTES } from '../core/auto.js';
+import { ReadingStore, JournalStore, SENTENCE_KEYS, HISTORY_MAX, clearHistory } from '../core/readings.js';
+import { normalizeInterval, effectiveMinutes, autoFailureLines, adaptiveLine, SCHEDULE_TICK_MINUTES, AUTO_MIN_MINUTES, AUTO_MAX_MINUTES, ADAPTIVE_MAX_FACTOR } from '../core/auto.js';
 import { HOST_NO_ANSWER } from '../core/errors.js';
+import { flag } from '../core/store.js';
 
 export const THEMES = [
   { id: 'warm', label: 'Kindroid warm (default)' },
@@ -22,6 +23,19 @@ function applyTheme(id) {
 }
 
 const LOCAL_ID = 'local';
+const NO_LOCATION = 'No location described in the recent chat.';
+const NO_DOING = 'No pose or action described in the recent chat.';
+const NO_OUTFIT = 'No outfit described in the recent chat.';
+/** The sentences of a reading, with the "nothing described" text for any that is missing. */
+const sentencesOf = (o) => ({
+  location: typeof o?.location === 'string' ? o.location : NO_LOCATION,
+  doing: typeof o?.doing === 'string' ? o.doing : NO_DOING,
+  outfit: typeof o?.outfit === 'string' ? o.outfit : NO_OUTFIT,
+  hair: typeof o?.hair === 'string' ? o.hair : NO_HAIR,
+  makeup: typeof o?.makeup === 'string' ? o.makeup : NO_MAKEUP,
+});
+const DEFAULTS = new Set([NO_LOCATION, NO_DOING, NO_OUTFIT, NO_HAIR, NO_MAKEUP]);
+const secs = (ms) => (typeof ms === 'number' ? `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s` : '—');
 
 /**
  * The tracker: ask the Kin where it is, what it is doing and what it is wearing; show the answer as sentences.
@@ -36,7 +50,10 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
 
   const S = {
     kins: isWorkshop ? (host.kins || []) : [{ id: LOCAL_ID, name: settings.value.localName }],
-    results: new Map(), // kin id -> { location, doing, outfit, at, source }  (three sentences)
+    results: new Map(), // kin id -> { location, doing, outfit, hair, makeup, at, source }  (five sentences)
+    journals: new Map(), // Workshop: kin id -> { history, log }, loaded when History or Diagnostics is opened
+    historyOpen: false,
+    diagOpen: false,
     cached: new Map(), // Workshop: kin id -> the stored reading, including the last attempt and its error
     errors: new Map(), // kin id -> message
     reading: new Set(), // kin ids with a reading in progress
@@ -51,6 +68,7 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
   };
 
   const readings = isWorkshop ? new ReadingStore(host.storage) : null;
+  const journals = isWorkshop ? new JournalStore(host.storage) : null;
   const live = h('div', { class: 'sr-only', role: 'status', 'aria-live': 'polite' });
   document.body.append(live);
   const announce = (t) => { live.textContent = ''; setTimeout(() => { live.textContent = t; }, 30); };
@@ -74,15 +92,28 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     const before = JSON.stringify(S.cached.get(kin.id) ?? null);
     S.cached.set(kin.id, stored);
     const mine = S.results.get(kin.id);
-    const newer = stored.at && stored.location !== null && (!mine || Date.parse(stored.at) > Date.parse(mine.at));
-    if (newer) S.results.set(kin.id, { location: stored.location, doing: stored.doing, outfit: stored.outfit, at: stored.at, source: stored.source });
-    return newer || JSON.stringify(stored) !== before;
+    // Same time as what is shown = the stored copy of that very reading, which is never shortened: take it.
+    // A reading whose date was lost (corrupt file) is still shown when there is nothing else, as "unknown time".
+    const newer = stored.location !== null && (!mine || (stored.at !== null && Date.parse(stored.at) >= Date.parse(mine.at)));
+    const next = newer ? { ...sentencesOf(stored), at: stored.at, source: stored.source } : null;
+    if (newer) S.results.set(kin.id, next);
+    return (newer && JSON.stringify(next) !== JSON.stringify(mine)) || JSON.stringify(stored) !== before;
   }
+
+  /** Workshop: history and diagnostics, read only while one of them is open. */
+  async function loadJournal(kin) {
+    if (!journals || !kin) return;
+    S.journals.set(kin.id, await journals.get(kin.id));
+  }
+  const journalWanted = () => S.historyOpen || S.diagOpen;
 
   async function pollReading() {
     const kin = selectedKin();
     if (!isWorkshop || !kin || S.reading.has(kin.id)) return;
-    if (await loadReading(kin)) render();
+    if (await loadReading(kin)) {
+      if (journalWanted()) await loadJournal(kin);
+      render();
+    }
   }
 
   /** Keep the ticked Kins in the settings in step with the Kins the host reports (names change, Kins get detached). */
@@ -104,7 +135,7 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
         body.append(
           h('ul', { class: 'profile-list', role: 'list' }, ...S.kins.map((k) => h('li', {},
             h('button', { type: 'button', class: `profile-pick${k.id === selectedKin()?.id ? ' selected' : ''}`, 'aria-pressed': String(k.id === selectedKin()?.id), 'data-key': `pick-${k.id}`,
-              onClick: async () => { S.info = null; await settings.save({ selectedKinId: k.id }); await loadReading(k); api.close(); render(); announce(`Selected ${k.name}`); } },
+              onClick: async () => { S.info = null; await settings.save({ selectedKinId: k.id }); await loadReading(k); if (journalWanted()) await loadJournal(k); api.close(); render(); announce(`Selected ${k.name}`); } },
             avatar(36), h('span', { class: 'pp-text' }, h('strong', {}, displayName(k)), h('span', { class: 'muted' }, 'From Kindroid')),
             k.id === selectedKin()?.id ? h('span', { class: 'tag' }, 'Selected') : null)))),
           h('p', { class: 'help' }, 'These are the Kins attached to this app. To add or remove one, open the app’s settings in Kindroid Apps and use Kins.'));
@@ -115,27 +146,29 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
   // ------------------------------------------------------------------ reading
   function show(kinId, outcome) {
     if (outcome.ok) {
-      S.results.set(kinId, { location: outcome.location, doing: outcome.doing, outfit: outcome.outfit, at: clock().toISOString(), source: 'manual' });
+      S.results.set(kinId, { ...sentencesOf(outcome), at: outcome.at || clock().toISOString(), source: 'manual' });
       S.errors.delete(kinId);
       const c = S.cached.get(kinId);
       if (c) S.cached.set(kinId, { ...c, error: null }); // a success clears an earlier automatic failure, even if it could not be stored
     } else S.errors.set(kinId, outcome.error);
   }
 
-  /** The run ends with {"location":"…","doing":"…","outfit":"…"}. Plain text (an older run) is shown as the outfit. */
+  /**
+   * The run ends with {"at":"…","location":"…","doing":"…","outfit":"…","hair":"…","makeup":"…"}; `at` is when it stored
+   * the reading, so the stored (never shortened) copy can replace it. Plain text (an older run) is shown as the outfit.
+   */
   function readSummary(summary) {
-    const NO_LOCATION = 'No location described in the recent chat.';
-    const NO_DOING = 'No pose or action described in the recent chat.';
     try {
       const o = JSON.parse(summary);
       if (o && typeof o.outfit === 'string') {
-        return { ok: true, location: typeof o.location === 'string' ? o.location : NO_LOCATION, doing: typeof o.doing === 'string' ? o.doing : NO_DOING, outfit: o.outfit };
+        const at = typeof o.at === 'string' && Number.isFinite(Date.parse(o.at)) ? o.at : null;
+        return { ok: true, ...sentencesOf(o), at, cut: o.cut === true };
       }
     } catch { /* not JSON */ }
-    return { ok: true, location: NO_LOCATION, doing: NO_DOING, outfit: summary || 'No outfit described in the recent chat.' };
+    return { ok: true, ...sentencesOf({ outfit: summary || NO_OUTFIT }), at: null };
   }
 
-  const announceResult = (id) => S.errors.get(id) || (S.results.get(id) ? `${S.results.get(id).location} ${S.results.get(id).doing} ${S.results.get(id).outfit}` : '');
+  const announceResult = (id) => S.errors.get(id) || (S.results.get(id) ? SENTENCE_KEYS.map((k) => S.results.get(id)[k]).filter((t) => !DEFAULTS.has(t)).join(' ') : '');
 
   /** What the person should read when the Workshop itself does not answer (the connection, not the Kin). */
   const friendlyHostError = (e) => (/did not answer/i.test(e.message) ? HOST_NO_ANSWER : e.message);
@@ -148,10 +181,14 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     const slowTimer = setTimeout(() => { if (S.reading.has(kin.id)) { S.slow.add(kin.id); render(); } }, S.slowAfterMs);
     try {
       const r = await host.channel.runAction('read_outfit', { kin: kin.id, name: kin.name });
-      show(kin.id, r.ok ? readSummary(r.summary) : { ok: false, error: r.summary || 'The reading could not be completed.' });
+      const outcome = r.ok ? readSummary(r.summary) : { ok: false, error: r.summary || 'The reading could not be completed.' };
+      show(kin.id, outcome);
+      // The line back is limited to 500 characters; the stored copy is whole. Pick it up (same time = same reading).
+      if (outcome.ok && outcome.at) await loadReading(kin);
     } catch (e) {
       show(kin.id, { ok: false, error: friendlyHostError(e) });
     }
+    if (journalWanted()) { try { await loadJournal(kin); } catch { /* the reading counts; the journal can wait */ } }
     clearTimeout(slowTimer);
     S.slow.delete(kin.id);
     S.reading.delete(kin.id);
@@ -239,7 +276,15 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
           h('div', { class: `fact${result ? '' : ' empty'}` },
             h('span', { class: 'row-icon' }, icon('hanger', { size: 24 })),
             h('span', { class: 'fact-text' }, h('span', { class: 'row-label' }, 'Outfit'),
-              h('span', { class: 'fact-value', 'data-testid': 'outfit' }, result ? result.outfit : 'No outfit read yet. Press Update status.')))),
+              h('span', { class: 'fact-value', 'data-testid': 'outfit' }, result ? result.outfit : 'No outfit read yet. Press Update status.'))),
+          h('div', { class: `fact${result ? '' : ' empty'}` },
+            h('span', { class: 'row-icon' }, icon(/\b(up|bun|ponytail|braid|tied)\b/i.test(result?.hair || '') ? 'hair-up' : 'hair-down', { size: 24 })),
+            h('span', { class: 'fact-text' }, h('span', { class: 'row-label' }, 'Hair'),
+              h('span', { class: 'fact-value', 'data-testid': 'hair' }, result ? result.hair : 'No hair read yet.'))),
+          h('div', { class: `fact${result ? '' : ' empty'}` },
+            h('span', { class: 'row-icon' }, icon('makeup', { size: 24 })),
+            h('span', { class: 'fact-text' }, h('span', { class: 'row-label' }, 'Makeup'),
+              h('span', { class: 'fact-value', 'data-testid': 'makeup' }, result ? result.makeup : 'No makeup read yet.')))),
         h('button', { type: 'button', class: 'btn primary block', 'data-key': 'update', 'aria-busy': String(reading), onClick: update },
           reading ? [spinner(), isWorkshop ? (S.slow.has(kin.id) ? 'Still waiting for the Kin…' : 'Reading…') : 'Waiting for the answer…'] : [icon('refresh', { size: 18 }), 'Update status']),
         reading && S.slow.has(kin.id) ? h('p', { class: 'help', 'data-testid': 'slow-note' }, 'The Kin is taking longer than usual. This can take up to a minute. You can keep using the app.') : null,
@@ -248,6 +293,80 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
         error ? h('div', { class: 'banner error', role: 'alert', 'data-testid': 'banner' }, icon('alert', { size: 18 }), h('span', { class: 'banner-text' }, ...[].concat(error).map((line, i) => h('span', { class: `banner-line${i === 0 ? ' first' : ''}` }, line))),
           h('button', { type: 'button', class: 'btn small', 'data-key': 'retry', onClick: update }, 'Try again'))
           : S.info ? h('div', { class: `banner ${S.info.kind}`, role: 'status', 'data-testid': 'banner' }, icon('refresh', { size: 18 }), h('span', { class: 'banner-text' }, S.info.text)) : null));
+  }
+
+  const toggleJournal = (flag) => async (e) => {
+    const open = e.currentTarget.open;
+    if (S[flag] === open) return;
+    S[flag] = open;
+    const kin = selectedKin();
+    if (open && kin && !S.journals.has(kin.id)) { await loadJournal(kin); render(); }
+    else if (open && kin) { loadJournal(kin).then(render).catch(() => {}); }
+  };
+
+  /** Workshop: the last readings of the selected Kin, newest first. Only what changed is repeated in each entry. */
+  function renderHistory() {
+    const kin = selectedKin();
+    if (!isWorkshop || !kin) return null;
+    const j = S.journals.get(kin.id);
+    const now = clock();
+    const LABELS = { location: 'Location', doing: 'Pose and action', outfit: 'Outfit', hair: 'Hair', makeup: 'Makeup' };
+    const entries = (j?.history || []).map((e, i, all) => {
+      const older = all[i + 1];
+      const rows = SENTENCE_KEYS.filter((k) => e[k] && !DEFAULTS.has(e[k]) && (!older || e[k] !== older[k]));
+      return h('li', { class: 'hist-item', 'data-testid': 'history-item' },
+        h('p', { class: 'hist-when' }, h('time', { datetime: e.at }, formatClock(e.at, { now })), ' · ', h('span', { class: 'rel', 'data-iso': e.at }, formatRelative(e.at, now)), e.source === 'auto' ? ' · automatic' : ''),
+        rows.length
+          ? h('dl', { class: 'hist-rows' }, ...rows.map((k) => [h('dt', {}, LABELS[k]), h('dd', {}, e[k])]))
+          : h('p', { class: 'help' }, 'Same as the reading before.'));
+    });
+    return h('details', { class: 'reader history', open: S.historyOpen ? '' : undefined, onToggle: toggleJournal('historyOpen') },
+      h('summary', { 'data-key': 'history-summary' }, icon('history', { size: 18 }), ' History'),
+      h('div', { class: 'reader-body' },
+        h('div', { class: 'full' },
+          !j ? h('p', { class: 'help' }, 'Loading…')
+            : entries.length ? h('ol', { class: 'hist-list', role: 'list' }, ...entries)
+              : h('p', { class: 'help', 'data-testid': 'history-empty' }, 'No readings yet. Each new reading (yours or automatic) is added here.'),
+          h('p', { class: 'help' }, `The last ${HISTORY_MAX} readings of ${displayName(kin)} are kept in the app’s own folder; each entry shows only what changed. Automatic checks that found nothing new are not repeated.`),
+          // Two presses instead of confirm(): a locked frame may not allow dialogs.
+          j?.history.length ? h('button', { type: 'button', class: 'btn small ghost', 'data-key': 'history-clear', onClick: async () => {
+            if (S.confirmClear !== kin.id) { S.confirmClear = kin.id; render(); return; }
+            S.confirmClear = null;
+            try { S.journals.set(kin.id, await clearHistory(journals, kin.id)); announce('History cleared'); } catch { S.info = { kind: 'info', text: 'Could not clear the history: the Workshop did not respond.' }; }
+            render();
+          } }, icon('trash', { size: 16 }), S.confirmClear === kin.id ? 'Press again to clear (the current status stays)' : 'Clear history') : null)));
+  }
+
+  /** Workshop: what the last attempts did, to check how the Kin and the platform behave. */
+  function renderDiagnostics() {
+    const kin = selectedKin();
+    if (!kin) return null;
+    const j = S.journals.get(kin.id);
+    const log = j?.log || [];
+    const now = clock();
+    const ok = log.filter((l) => l.ok);
+    const avg = ok.length ? ok.reduce((n, l) => n + (l.ms || 0), 0) / ok.length : null;
+    const sized = ok.filter((l) => typeof l.chars === 'number');
+    const avgChars = sized.length ? Math.round(sized.reduce((n, l) => n + l.chars, 0) / sized.length) : null;
+    const notEn = ok.filter((l) => l.notEnglish?.length).length;
+    const describe = (l) => (l.ok ? (l.unchanged ? 'ok · nothing new' : 'ok') : `failed · ${l.kind || 'unknown'}`);
+    return h('details', { class: 'sub-details diagnostics', open: S.diagOpen ? '' : undefined, onToggle: toggleJournal('diagOpen') },
+      h('summary', { 'data-key': 'diag-summary' }, icon('pulse', { size: 18 }), ' Diagnostics'),
+      !j ? h('p', { class: 'help' }, 'Loading…') : !log.length ? h('p', { class: 'help', 'data-testid': 'diag-empty' }, `No attempts recorded for ${displayName(kin)} yet.`) : [
+        h('p', { class: 'help', 'data-testid': 'diag-summary-line' }, `Last ${log.length} attempts: ${ok.length} succeeded${avg !== null ? `, answered in ${secs(avg)} on average` : ''}${avgChars !== null ? `, ${avgChars} characters per answer` : ''}.`),
+        h('p', { class: `help${notEn ? ' warn' : ''}`, 'data-testid': 'diag-english' }, notEn
+          ? `${notEn} of ${ok.length} answers were not fully in English. English answers are shorter and cost fewer tokens.`
+          : ok.length ? 'Every answer was in English.' : null),
+        h('ol', { class: 'diag-list', role: 'list' }, ...log.map((l) => h('li', { class: `diag-item${l.ok ? '' : ' failed'}`, 'data-testid': 'diag-item' },
+          h('span', { class: 'diag-head' }, h('time', { datetime: l.at }, formatClock(l.at, { now })), ` · ${l.source === 'auto' ? 'automatic' : 'manual'} · `, h('strong', {}, describe(l))),
+          h('span', { class: 'diag-meta' }, [`${secs(l.ms)}`, l.tries > 1 ? `${l.tries} tries` : null, l.chars !== null ? `answer ${l.chars} characters` : null, l.cut ? 'shortened on the way back (full copy stored)' : null, l.notEnglish?.length ? `not in English: ${l.notEnglish.join(', ')}` : null].filter(Boolean).join(' · ')),
+          l.error ? h('span', { class: 'diag-error' }, l.error) : null))),
+        h('button', { type: 'button', class: 'btn small', 'data-key': 'diag-copy', onClick: async () => {
+          const text = JSON.stringify({ kin: kin.name, log }, null, 1);
+          try { await navigator.clipboard.writeText(text); S.info = { kind: 'ok', text: 'Diagnostics copied.' }; } catch { S.info = { kind: 'info', text: 'Copy is blocked here.' }; }
+          announce(S.info.text); render();
+        } }, icon('copy', { size: 16 }), 'Copy diagnostics')],
+      h('p', { class: 'help' }, 'Time, size of the answer and the reason of any failure for the last attempts of the selected Kin. The Kin’s answer itself is not kept.'));
   }
 
   function renderReader() {
@@ -289,7 +408,7 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
   }
 
   function renderAutoSettings() {
-    const on = !!settings.value.autoUpdate;
+    const on = flag(settings.value.autoUpdate, false);
     const minutes = normalizeInterval(settings.value.autoIntervalMinutes);
     const eff = effectiveMinutes(minutes);
     const ticked = new Set((settings.value.autoKins || []).map((k) => k.id));
@@ -324,9 +443,15 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
           h('input', { type: 'checkbox', id: `auto-kin-${k.id}`, 'data-key': `auto-kin-${k.id}`, checked: ticked.has(k.id),
             onChange: async (e) => { if (e.target.checked) ticked.add(k.id); else ticked.delete(k.id); noteSave(await saveKins(ticked)); render(); } }),
           displayName(k)))) : null,
+      h('label', { class: 'check' },
+        h('input', { type: 'checkbox', id: 'auto-adaptive', 'data-key': 'auto-adaptive', disabled: !isWorkshop, checked: flag(settings.value.autoAdaptive, true),
+          onChange: async (e) => { noteSave(await settings.save({ autoAdaptive: e.target.checked })); render(); } }),
+        'Wait longer when nothing changes'),
+      h('p', { class: 'help' }, `Each check that finds the same status doubles the wait, up to ${ADAPTIVE_MAX_FACTOR}× your interval. The first change, a failure or Update status goes back to your interval. Saves credits when the scene is quiet.`),
       isWorkshop && kin && stored?.attemptedAt ? h('p', { class: 'help', 'data-testid': 'auto-status' }, `Last check for ${displayName(kin)}: `, h('span', { class: 'rel', 'data-iso': stored.attemptedAt }, formatRelative(stored.attemptedAt, clock())), stored.error ? ' (failed)' : '') : null,
+      isWorkshop && on && kin && stored && !stored.error && flag(settings.value.autoAdaptive, true) && ticked.has(kin.id) && adaptiveLine(stored, minutes) ? h('p', { class: 'help', 'data-testid': 'adaptive-status' }, adaptiveLine(stored, minutes)) : null,
       S.autoNote ? h('p', { class: 'form-error', role: 'alert', 'data-testid': 'auto-note' }, S.autoNote) : null,
-      h('p', { class: 'help' }, 'Each check asks the Kin one question and uses running time from your credits. Only the latest reading of each Kin is kept, so it can be shown when you open the app.'));
+      h('p', { class: 'help' }, 'Each check asks the Kin one question and uses running time from your credits. The latest reading and a short history of each Kin are kept, so they can be shown when you open the app.'));
   }
 
   function renderWorkshopSettings() {
@@ -335,8 +460,9 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
       h('div', { class: 'reader-body' },
         h('div', { class: 'full' },
           h('h3', { class: 'sub' }, 'How it works'),
-          h('p', { class: 'help' }, 'Update status asks the selected Kin to look at its recent chat and say where it is, how it is positioned, what it is doing and what it is wearing. Each answer is shown as one sentence.'),
+          h('p', { class: 'help' }, 'Update status asks the selected Kin to look at its recent chat and say where it is, how it is positioned, what it is doing, what it is wearing and how its hair and makeup look. Each answer is shown as one sentence.'),
           renderAutoSettings(),
+          renderDiagnostics(),
           renderThemePicker())));
   }
 
@@ -346,7 +472,7 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
       root.replaceChildren(
         h('header', { class: 'app-head' }, h('h1', {}, 'Clotheskin'), h('p', { class: 'muted' }, 'Where your Kin is, what it is doing and what it is wearing')),
         h('div', { class: `layout${isWorkshop ? ' frame' : ''}` },
-          h('div', { class: 'col-status' }, renderCard()),
+          h('div', { class: 'col-status' }, renderCard(), renderHistory()),
           h('div', { class: 'col-work' }, work)),
         h('footer', { class: 'foot muted' }, `Mode: ${host.label}`));
     });

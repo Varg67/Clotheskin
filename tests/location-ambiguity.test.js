@@ -7,6 +7,9 @@ import { OUTFIT_PROMPT, buildOutfitPrompt } from '../screen/src/core/prompt.js';
 import { handleRun } from '../run/actions.js';
 import { DEMO_SCENES } from '../screen/src/demo/demo.js';
 
+// The run also says when it stored the reading; that is checked in prompt-run.test.js.
+const noAt = ({ at, ...rest }) => { assert.match(at, /^\d{4}-\d\d-\d\dT/); return rest; };
+
 const NONE = 'No location described in the recent chat.';
 const where = (location) => { const p = parseReading(JSON.stringify({ location })); assert.ok(p.ok, p.error); return describeReading(p).location; };
 
@@ -116,30 +119,30 @@ test('a messy realistic answer through the whole run gives clean sentences', asy
   const messy = '```json\n{“location”: “*sitting on the sofa in the living room, drinking coffee*”, “topwear”: [“a grey hoodie”,], “bottomwear”: “black leggings”,}\n```';
   const out = await handleRun({ event: { trigger: 'action', action: 'read_outfit', input: { kin: 'k', name: 'Isa' } }, provider: { extract: async () => messy } });
   assert.equal(out.ok, true);
-  assert.deepEqual(JSON.parse(out.message), { location: 'On the sofa in the living room.', doing: 'No pose or action described in the recent chat.', outfit: 'Wearing a grey hoodie and black leggings.' });
+  assert.deepEqual(noAt(JSON.parse(out.message)), { location: 'On the sofa in the living room.', doing: 'No pose or action described in the recent chat.', outfit: 'Wearing a grey hoodie and black leggings.' });
 });
 
 // ---- 11. The wording: each ambiguous idea is pinned down in what the Kin reads
 test('the prompt pins down the location ideas', () => {
   const p = buildOutfitPrompt({ name: 'Isa' });
   const must = [
-    [/"location": where you are right now/, 'what location means'],
+    [/"location": the place only/, 'what location means'],
     [/starting with in, at or on/, 'shape'],
-    [/The place only, not your posture or what you are doing/, 'no posture or activity'],
-    [/If you are travelling, say so/, 'travelling is a place'],
-    [/planning to go somewhere is not being there/, 'a plan is not a move'],
+    [/not your posture or activity/, 'no posture or activity'],
+    [/Travelling is a place/, 'travelling is a place'],
+    [/planning to go is not/, 'a plan is not a move'],
     [/a place you have left is no longer where you are/, 'old places expire'],
     [/never guess/, 'no guessing'],
     [/Describe only yourself/, 'not the person'],
-    [/only shows the format; never copy its values/, 'do not copy the example'],
-    [/If the chat says nothing about either, answer \{\}/, 'empty answer allowed'],
+    [/shows the format only; never copy its values/, 'do not copy the example'],
+    [/if the chat says nothing about any of this, reply \{\}/, 'empty answer allowed'],
   ];
   for (const [re, why] of must) assert.match(p, re, why);
 });
 
 test('the example in the prompt is not any demo scenario, so a Kin that copies it is distinguishable', () => {
   const example = JSON.parse(OUTFIT_PROMPT.match(/Example: (\{.*\})/)[1]);
-  assert.ok(parseReading(JSON.stringify(example)).ok);
+  assert.match(parseReading(JSON.stringify(example)).error, /copied the example/, 'a copy is caught');
   for (const s of DEMO_SCENES) {
     let r; try { r = JSON.parse(s.response); } catch { continue; }
     assert.notEqual(r.location, example.location, s.id);

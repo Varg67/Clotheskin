@@ -6,6 +6,9 @@ import { OUTFIT_PROMPT, buildOutfitPrompt } from '../screen/src/core/prompt.js';
 import { handleRun } from '../run/actions.js';
 import { DEMO_SCENES } from '../screen/src/demo/demo.js';
 
+// The run also says when it stored the reading; that is checked in prompt-run.test.js.
+const noAt = ({ at, ...rest }) => { assert.match(at, /^\d{4}-\d\d-\d\dT/); return rest; };
+
 const NOD = 'No pose or action described in the recent chat.';
 const doing = (o) => { const p = parseReading(JSON.stringify(o)); assert.ok(p.ok, p.error); return describeReading(p).doing; };
 const act = (action) => doing({ action });
@@ -128,7 +131,7 @@ test('a messy answer with everything gives three clean sentences; the worst case
   const messy = '*smiles* ```json\n{“location”: “in the kitchen”, “pose”: “*standing at the counter*”, “action”: “I am chopping onions”, “topwear”: [“a white shirt”,],}\n```';
   const ev = { trigger: 'action', action: 'read_outfit', input: { kin: 'k', name: 'Isa' } };
   const out = await handleRun({ event: ev, provider: { extract: async () => messy } });
-  assert.deepEqual(JSON.parse(out.message), { location: 'In the kitchen.', doing: 'Standing at the counter, chopping onions.', outfit: 'Wearing a white shirt.' });
+  assert.deepEqual(noAt(JSON.parse(out.message)), { location: 'In the kitchen.', doing: 'Standing at the counter, chopping onions.', outfit: 'Wearing a white shirt.' });
 
   const w = (n) => Array.from({ length: n }, (_, i) => `word${i}`).join(' ');
   const worst = JSON.stringify({ location: `in ${w(60)}`, pose: `standing ${w(40)}`, action: `reading ${w(40)}`, topwear: Array.from({ length: 8 }, (_, i) => `a very long descriptive jacket number ${i} with details`), 'neck-accessory': Array.from({ length: 8 }, (_, i) => `a very long necklace number ${i}`) });
@@ -143,12 +146,12 @@ test('a messy answer with everything gives three clean sentences; the worst case
 test('the prompt pins down pose and action and how they differ from the location', () => {
   const p = buildOutfitPrompt({ name: 'Isa' });
   const must = [
-    [/how you are positioned, what you are doing and what you are wearing/, 'the four things asked'],
-    [/"pose": your body position right now/, 'what pose means'],
-    [/It may name the furniture or spot you are on; "location" is the room or place/, 'pose vs location'],
-    [/"action": what you are doing right now, as a short -ing phrase/, 'what action means'],
-    [/Not plans, not things already finished, not feelings/, 'what action is not'],
-    [/an action you have finished is no longer what you are doing/, 'old actions expire'],
+    [/your pose, what you are doing, what you are wearing, and your hair and makeup/, 'the four things asked'],
+    [/"pose": your body position/, 'what pose means'],
+    [/it may name the furniture, "location" is the room or place/, 'pose vs location'],
+    [/"action": what you are doing now, a short -ing phrase/, 'what action means'],
+    [/not plans, finished things or feelings/, 'what action is not'],
+    [/a finished action is no longer what you are doing/, 'old actions expire'],
     [/never copy its values/, 'do not copy the example'],
   ];
   for (const [re, why] of must) assert.match(p, re, why);

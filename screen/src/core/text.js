@@ -29,8 +29,14 @@ export function capitalizeFirst(s) {
   return str ? str.charAt(0).toUpperCase() + str.slice(1) : str;
 }
 
+// Invisible characters a model may leak (zero-width space, word joiner, byte-order mark, soft hyphen). The zero-width
+// joiner is kept: emoji sequences need it.
+const INVISIBLE = /[\u200B\u2060\uFEFF\u00AD]/g;
+/** Never ends in half of an emoji (a lone surrogate) after a cut. */
+export const dropHalfChar = (s) => s.replace(/[\uD800-\uDBFF]$/, '');
+
 export function cleanString(s, max = 200) {
-  return String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+  return dropHalfChar(String(s ?? '').replace(INVISIBLE, '').replace(/\s+/g, ' ').trim().slice(0, max));
 }
 
 export function sameJSON(a, b) {

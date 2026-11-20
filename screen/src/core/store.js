@@ -22,7 +22,16 @@ export const DEFAULT_SETTINGS = {
   autoUpdate: false,
   autoIntervalMinutes: 15,
   autoKins: [], // [{ id, name }]
+  autoAdaptive: true, // wait longer while nothing changes (see auto.js, adaptiveWaitMinutes)
 };
+
+/**
+ * A yes/no setting read from a file: only a real true is yes and only a real false is no; anything else (a corrupt
+ * file, the text "false") gives the default. Automatic updates default to off, so corruption never spends credits.
+ */
+export function flag(v, dflt) {
+  return typeof v === 'boolean' ? v : dflt;
+}
 
 /** Preferences only (theme, which Kin is selected, the local-mode name, the automatic-update schedule). */
 export class Settings {

@@ -180,7 +180,7 @@ window.addEventListener('message', async (e) => {
     assert.equal(asked.length, before, 'showing it cost no question');
     assert.match(await fr.locator('[data-testid="last-checked"]').innerText(), /Last checked: \d{1,2}:\d{2} (AM|PM)/);
     const stored = readingFile('k-isa');
-    assert.deepEqual(Object.keys(stored).sort(), ['at', 'attemptedAt', 'doing', 'error', 'errorKind', 'failures', 'location', 'outfit', 'source']);
+    assert.deepEqual(Object.keys(stored).sort(), ['at', 'attemptedAt', 'doing', 'error', 'errorKind', 'failures', 'hair', 'location', 'makeup', 'outfit', 'source', 'stableCount']);
     assert.equal(stored.source, 'manual');
   });
 
@@ -241,7 +241,9 @@ window.addEventListener('message', async (e) => {
 
   await step('an automatic failure keeps the last good sentences and says so; Try again recovers', async () => {
     kinAnswer = async () => '*giggles* No forms today!';
-    const r = await beat(31 + 31 + 31);
+    // The beat at 62 found nothing new, so the adaptive interval doubled the 30-minute wait: due again at 122.
+    assert.match((await beat(31 + 31 + 31)).message, /No Kin is due yet/);
+    const r = await beat(31 + 31 + 62);
     assert.equal(r.ok, false);
     await poll();
     const banner = fr.locator('[data-testid="banner"]');
@@ -416,20 +418,76 @@ window.addEventListener('message', async (e) => {
     await until(async () => /Isa/.test(await fr.locator('.card-top .name').innerText()), 'Isa still selected after the list changed');
   });
 
-  await step('the Workshop files hold only preferences and each Kin\'s latest reading (sentences and times); the theme works in the frame', async () => {
+  await step('hair and makeup are shown, a long reading arrives whole, and History and Diagnostics show it', async () => {
+    delay = 50;
+    await pick('k-isa');
+    const tops = Array.from({ length: 8 }, (_, i) => `a very long descriptive layered jacket number ${i}`);
+    kinAnswer = async () => JSON.stringify({ location: 'in the studio', pose: 'standing', action: 'painting', topwear: tops, hair: 'long auburn hair in a loose braid', makeup: 'winged eyeliner and red lipstick' });
+    await key('update').click(); await idle();
+    const full = readingFile('k-isa').outfit;
+    assert.ok(full.length > 400 && !full.endsWith('…'), 'the stored copy is whole');
+    await until(async () => (await outfit()) === full, 'the whole outfit replaces the shortened line');
+    assert.equal(await fr.locator('[data-testid="hair"]').innerText(), 'Long auburn hair in a loose braid.');
+    assert.equal(await fr.locator('[data-testid="makeup"]').innerText(), 'Winged eyeliner and red lipstick.');
+    await key('history-summary').click();
+    await until(async () => (await fr.locator('[data-testid="history-item"]').count()) >= 2, 'history entries');
+    const first = await fr.locator('[data-testid="history-item"]').first().innerText();
+    assert.match(first, /In the studio\./); assert.match(first, /Hair/);
+    await page.screenshot({ path: path.join(SHOTS, '13-workshop-history.png') });
+    await key('history-clear').click();
+    assert.match(await key('history-clear').innerText(), /Press again/);
+    await key('history-clear').click();
+    await until(async () => (await fr.locator('[data-testid="history-empty"]').count()) === 1, 'history cleared');
+    assert.equal(await outfit(), full, 'clearing the history keeps the current status');
+    await key('history-summary').click();
+    await openSettings();
+    await key('diag-summary').click();
+    await until(async () => (await fr.locator('[data-testid="diag-item"]').count()) >= 2, 'diagnostics entries');
+    assert.match(await fr.locator('[data-testid="diag-summary-line"]').innerText(), /succeeded.*characters per answer/);
+    assert.match(await fr.locator('[data-testid="diag-english"]').innerText(), /Every answer was in English/);
+    assert.match(await fr.locator('[data-testid="diag-item"]').first().innerText(), /manual · ok[\s\S]*shortened on the way back/);
+    assert.ok(await fr.locator('.diag-item.failed').count() >= 1, 'earlier failures are listed');
+    await fr.locator('[data-key="diag-summary"]').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(SHOTS, '14-workshop-diagnostics.png') });
+    const m = await frameEval(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    assert.ok(m <= 0, 'no horizontal scroll');
+    await key('diag-summary').click();
+  });
+
+  await step('the Workshop files hold only preferences, each Kin\'s latest reading and its journal (sentences and times); the theme works in the frame', async () => {
     if (!(await fr.locator('#theme-pick').isVisible())) await key('reader-summary').click();
     await fr.locator('#theme-pick').selectOption('sage');
     await until(async () => (await frameEval(() => document.documentElement.dataset.theme)) === 'sage', 'sage applied');
     await until(async () => savedSettings().theme === 'sage', 'theme saved');
     const names = [...files.keys()].sort();
-    assert.ok(names.every((n) => /^cs\/clotheskin~3av2~3a(settings|reading~3ak-[a-z0-9-]+)\.json$/.test(n)), names.join(', '));
+    assert.ok(names.every((n) => /^cs\/clotheskin~3av2~3a(settings|(reading|journal)~3ak-[a-z0-9-]+)\.json$/.test(n)), names.join(', '));
     assert.ok(names.includes(SETTINGS));
-    for (const n of names.filter((x) => x !== SETTINGS)) {
+    for (const n of names.filter((x) => /reading/.test(x))) {
       const o = JSON.parse(files.get(n));
-      assert.deepEqual(Object.keys(o).sort(), ['at', 'attemptedAt', 'doing', 'error', 'errorKind', 'failures', 'location', 'outfit', 'source'], n);
+      assert.deepEqual(Object.keys(o).sort(), ['at', 'attemptedAt', 'doing', 'error', 'errorKind', 'failures', 'hair', 'location', 'makeup', 'outfit', 'source', 'stableCount'], n);
     }
-    assert.deepEqual(Object.keys(savedSettings()).sort(), ['autoIntervalMinutes', 'autoKins', 'autoUpdate', 'localName', 'selectedKinId', 'theme']);
+    for (const n of names.filter((x) => /journal/.test(x))) {
+      const o = JSON.parse(files.get(n));
+      assert.deepEqual(Object.keys(o).sort(), ['history', 'log'], n);
+      assert.ok(!/"pose"|RECENT CHAT/.test(files.get(n)), 'no answer or chat text is kept');
+    }
+    assert.deepEqual(Object.keys(savedSettings()).sort(), ['autoAdaptive', 'autoIntervalMinutes', 'autoKins', 'autoUpdate', 'localName', 'selectedKinId', 'theme']);
     await page.screenshot({ path: path.join(SHOTS, '10-workshop-settings-sage.png') });
+  });
+
+  await step('what if: corrupt files (broken dates, junk entries) for a Kin never crash the screen', async () => {
+    kins = [...kins, { id: 'k-nova', name: 'Nova' }];
+    await page.evaluate(() => window.pushKins());
+    files.set(keyToPath('clotheskin:v2:reading:k-nova'), JSON.stringify({ at: 'yesterday', attemptedAt: 'soon', location: 'In the void.', doing: 5, outfit: null, stableCount: -3 }));
+    files.set(keyToPath('clotheskin:v2:journal:k-nova'), JSON.stringify({ history: [{ at: 'x', location: 'In A.' }, { at: '2026-11-20T10:00:00Z', location: 'In the void.', doing: 'Floating.' }, 7, null], log: [{ at: 'never' }, { at: '2026-11-20T10:00:00Z', ok: 'yes', ms: -5, tries: 1e9 }] }));
+    await pick('k-nova');
+    await until(async () => (await where()) === 'In the void.', 'the readable part is shown');
+    if (!(await fr.locator('[data-testid="history-item"]').first().isVisible().catch(() => false))) await key('history-summary').click();
+    await until(async () => (await fr.locator('[data-testid="history-item"]').count()) === 1, 'only the valid history entry');
+    await openSettings();
+    if (!(await fr.locator('[data-testid="diag-item"]').first().isVisible().catch(() => false))) await key('diag-summary').click();
+    await until(async () => (await fr.locator('[data-testid="diag-item"]').count()) === 1, 'only the valid log entry');
+    assert.equal(await key('update').isEnabled(), true, 'the app still works');
   });
 
   await step('no page errors or console errors', async () => { assert.deepEqual(problems, []); });

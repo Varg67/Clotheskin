@@ -2,10 +2,11 @@
 // (parseReading -> describeReading, and the whole run) and we check what the card would say.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseReading, describeReading, describeLocation, cleanLocation } from '../screen/src/core/outfit.js';
-import { OUTFIT_PROMPT, buildOutfitPrompt } from '../screen/src/core/prompt.js';
-import { handleRun } from '../run/actions.js';
-import { DEMO_SCENES } from '../screen/src/demo/demo.js';
+import { parseReading, describeReading, describeLocation, cleanLocation } from '../src/core/outfit.js';
+import { OUTFIT_PROMPT, buildOutfitPrompt } from '../src/core/prompt.js';
+import { runProgram, ACTION } from '../run/program.js';
+import { fakeKindroid } from './support/fake-kindroid.js';
+import { DEMO_SCENES } from '../dev/scenes.js';
 
 const NONE = 'No location described in the recent chat.';
 const where = (location) => { const p = parseReading(JSON.stringify({ location })); assert.ok(p.ok, p.error); return describeReading(p).location; };
@@ -111,12 +112,15 @@ test('a very long location is cut at a word, with an ellipsis, so it cannot floo
   assert.ok(!/place\d+…?\.?$/.test(out) || !out.includes('plac…'), 'not cut mid-word');
 });
 
-// ---- 10. The whole run: a messy answer still yields clean sentences within the kin end limit
+// ---- 10. The whole run: a messy answer still yields clean sentences
 test('a messy realistic answer through the whole run gives clean sentences', async () => {
   const messy = '```json\n{“location”: “*sitting on the sofa in the living room, drinking coffee*”, “topwear”: [“a grey hoodie”,], “bottomwear”: “black leggings”,}\n```';
-  const out = await handleRun({ event: { trigger: 'action', action: 'read_outfit', input: { kin: 'k', name: 'Isa' } }, provider: { extract: async () => messy } });
+  const k = fakeKindroid();
+  k.answers.reading.push(messy);
+  const out = await runProgram({ event: { trigger: 'action', action: ACTION, input: { kin: 'k1' } }, kin: k.kin, clock: k.clock });
   assert.equal(out.ok, true);
-  assert.deepEqual(JSON.parse(out.message), { kin: 'k', location: 'On the sofa in the living room.', doing: 'No pose or action described in the recent chat.', outfit: 'Wearing a grey hoodie and black leggings.' });
+  const { location, doing, outfit } = k.entry().reading;
+  assert.deepEqual({ location, doing, outfit }, { location: 'On the sofa in the living room.', doing: 'No pose or action described in the recent chat.', outfit: 'Wearing a grey hoodie and black leggings.' });
 });
 
 // ---- 11. The wording: each ambiguous idea is pinned down in what the Kin reads

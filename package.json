@@ -1,14 +1,17 @@
 {
   "name": "clotheskin",
-  "version": "0.1.0",
-  "description": "Kindroid Workshop app: where a Kin is, its pose and action and what it is wearing, read from its recent chat, with automatic updates and a sleep and dream cycle.",
+  "version": "0.2.0",
+  "description": "Kindroid app: where a Kin is, its pose and action and what it is wearing, read from its recent chat, with automatic updates and a sleep and dream cycle.",
   "type": "module",
   "private": true,
   "scripts": {
     "start": "node server.mjs",
+    "build": "node scripts/build-screen.mjs && node scripts/build-manifest.mjs",
     "test": "node --test \"tests/*.test.js\"",
-    "test:e2e": "node tests/e2e/run.cjs && node tests/e2e/workshop.cjs",
-    "build:manifest": "node scripts/build-manifest.mjs"
+    "test:e2e": "node tests/e2e/screen.cjs",
+    "try": "node scripts/try-run.mjs"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=22"
+  }
 }

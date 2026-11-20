@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { formatClock, formatRelative } from '../screen/src/core/format.js';
+import { formatClock, formatRelative } from '../src/core/format.js';
 
 test('times are English and respect the supplied time zone', () => {
   const now = new Date('2026-11-19T15:00:00Z');
@@ -17,7 +17,7 @@ test('relative times are English', () => {
 });
 
 test('formatWhen: a time tomorrow says so; today is just the time', async () => {
-  const { formatWhen } = await import('../screen/src/core/format.js');
+  const { formatWhen } = await import('../src/core/format.js');
   const now = new Date('2026-11-20T22:00:00-03:00');
   assert.equal(formatWhen('2026-11-21T10:30:00Z', { timeZone: 'America/Sao_Paulo', now }), '7:30 AM tomorrow');
   assert.equal(formatWhen('2026-11-21T01:50:00Z', { timeZone: 'America/Sao_Paulo', now }), '10:50 PM');
@@ -25,7 +25,7 @@ test('formatWhen: a time tomorrow says so; today is just the time', async () => 
 });
 
 test('formatWhen: the nights of a daylight-saving change still say "tomorrow" only for the next calendar day', async () => {
-  const { formatWhen } = await import('../screen/src/core/format.js');
+  const { formatWhen } = await import('../src/core/format.js');
   const tz = 'America/New_York';
   // 00:30 on Nov 1 (the clocks go back that night): 07:30 the same day is not "tomorrow"
   assert.equal(formatWhen('2026-11-01T12:30:00Z', { timeZone: tz, now: new Date('2026-11-01T04:30:00Z') }), '7:30 AM');

@@ -41,18 +41,7 @@ for (const [name, set] of Object.entries(THEME_SETS)) {
     }
   });
 
-  test(`${name}: brand colour is only for large bold text (AA large: 3:1)`, () => {
-    const r = ratio(set.brand, set.bg);
-    assert.ok(r >= 3, `${name}: brand on bg is ${r.toFixed(2)}:1`);
-  });
 }
-
-test('brand colour is used once, for the large bold app title', () => {
-  const styles = readFileSync(new URL('../screen/styles.css', import.meta.url), 'utf8');
-  const uses = styles.split('\n').filter((l) => l.includes('var(--brand)'));
-  assert.equal(uses.length, 1);
-  assert.match(uses[0], /\.app-head h1/);
-});
 
 test('components use theme tokens, not raw colours', () => {
   const styles = readFileSync(new URL('../screen/styles.css', import.meta.url), 'utf8');

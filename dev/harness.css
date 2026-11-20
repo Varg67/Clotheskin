@@ -1,0 +1,22 @@
+/* The dev harness page around the screen (not part of the app). */
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #1f2522; background: #e7ece9; }
+header { padding: 14px 22px 4px; }
+header h1 { margin: 0; font-size: 18px; } header h1 span { font-weight: 500; color: #5d6b64; }
+header p { margin: 4px 0 0; color: #4c5852; max-width: 900px; }
+main { display: flex; gap: 22px; padding: 14px 22px 30px; align-items: flex-start; flex-wrap: wrap; }
+.device { flex: none; width: 390px; height: 780px; border-radius: 28px; overflow: hidden; box-shadow: 0 12px 40px rgba(0, 0, 0, .18); background: #fff; }
+.device iframe { width: 390px; height: 780px; border: 0; display: block; }
+.controls { flex: 1 1 360px; display: grid; gap: 12px; min-width: 300px; max-width: 560px; }
+fieldset { border: 1px solid #c7d1cc; border-radius: 12px; padding: 10px 14px 12px; background: #f6f8f7; display: grid; gap: 6px; }
+legend { font-weight: 700; padding: 0 6px; }
+label { font-weight: 600; font-size: 13px; color: #3d4843; }
+label.inline { font-weight: 500; display: flex; gap: 8px; align-items: center; }
+textarea, select { width: 100%; font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; padding: 6px 8px; border: 1px solid #c7d1cc; border-radius: 8px; background: #fff; }
+select { font-family: inherit; font-size: 13px; }
+button { font: inherit; padding: 8px 14px; border-radius: 999px; border: 1px solid #2f6b55; background: #2f6b55; color: #fff; cursor: pointer; justify-self: start; }
+button.quiet { background: transparent; color: #2f6b55; }
+.chat { margin: 0; font-style: italic; color: #4c5852; }
+.hint { margin: 0; color: #5d6b64; }
+.log ol { margin: 0; padding-left: 18px; max-height: 260px; overflow: auto; font: 11.5px/1.4 ui-monospace, Menlo, Consolas, monospace; }
+code { font-size: 12px; }

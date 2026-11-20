@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Clotheskin · dev harness</title>
+  <link rel="stylesheet" href="/dev/harness.css">
+</head>
+<body>
+  <header>
+    <h1>Clotheskin <span>dev harness</span></h1>
+    <p>A stand-in for Kindroid: the real screen in a 390-point frame, and the real run (<code>run/program.js</code>) with a stand-in Kin. Files live in this browser.</p>
+  </header>
+  <main>
+    <section class="device" aria-label="The screen, as in Kindroid">
+      <iframe id="frame" title="Clotheskin screen" src="/screen/index.html"></iframe>
+    </section>
+    <section class="controls" aria-label="Kindroid stand-in">
+      <fieldset>
+        <legend>Attached Kins</legend>
+        <div id="kins"></div>
+      </fieldset>
+      <fieldset>
+        <legend>The Kin's answers</legend>
+        <label for="scene">Scene</label>
+        <select id="scene"></select>
+        <p id="chat" class="chat"></p>
+        <label for="a-reading">Reading answer</label>
+        <textarea id="a-reading" rows="4" spellcheck="false"></textarea>
+        <label for="a-sleep">Sleep answer</label>
+        <textarea id="a-sleep" rows="2" spellcheck="false"></textarea>
+        <label for="a-dream">Dream answer</label>
+        <textarea id="a-dream" rows="2" spellcheck="false"></textarea>
+        <label for="kindroid">Kindroid</label>
+        <select id="kindroid">
+          <option value="up">answers</option>
+          <option value="down">does not answer (connection refused)</option>
+          <option value="maintenance">is under maintenance (503)</option>
+        </select>
+      </fieldset>
+      <fieldset>
+        <legend>Schedule</legend>
+        <p class="hint">Kindroid starts the program every 15 minutes (cron <code>*/15 * * * *</code>).</p>
+        <button type="button" id="tick">Run the 15-minute start now</button>
+        <label class="inline"><input type="checkbox" id="auto-ticks"> Start it at each quarter hour</label>
+        <button type="button" id="reset" class="quiet">Forget all files</button>
+      </fieldset>
+      <fieldset class="log">
+        <legend>kin calls</legend>
+        <ol id="log" aria-live="off"></ol>
+      </fieldset>
+    </section>
+  </main>
+  <script type="module" src="/dev/harness.js"></script>
+</body>
+</html>

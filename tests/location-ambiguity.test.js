@@ -142,7 +142,7 @@ test('the prompt pins down the location ideas', () => {
 
 test('the example in the prompt is not any demo scenario, so a Kin that copies it is distinguishable', () => {
   const example = JSON.parse(OUTFIT_PROMPT.match(/Example: (\{.*\})/)[1]);
-  assert.ok(parseReading(JSON.stringify(example)).ok);
+  assert.match(parseReading(JSON.stringify(example)).error, /copied the example/, 'a copy is caught');
   for (const s of DEMO_SCENES) {
     let r; try { r = JSON.parse(s.response); } catch { continue; }
     assert.notEqual(r.location, example.location, s.id);

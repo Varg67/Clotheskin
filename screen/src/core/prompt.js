@@ -10,8 +10,8 @@ const SLOT_LIST = [...CLOTHING_SLOTS, ...ACCESSORY_SLOTS, BAG_SLOT].join(', ');
  * In local mode the pasted chat goes there.
  */
 export const OUTFIT_PROMPT = `You are {{name}}. Look at your recent chat with the person and say where you are, how you are positioned, what you are doing, what you are wearing and how your hair and makeup look, as of your last message.
-The chat may be in Portuguese or English: understand both, but answer in English only.
-Include only what the chat states; never guess. Apply later changes: something taken off is no longer worn, a place you have left is no longer where you are, and an action you have finished is no longer what you are doing.
+The chat may be in Portuguese or English: understand both, but answer in English only, with the keys exactly as written here.
+Include only what the chat states; never guess. Use your recent chat only: not your memories, journal or backstory, and not earlier days, unless the recent chat says it is still so. Apply later changes: something taken off is no longer worn, a place you have left is no longer where you are, and an action you have finished is no longer what you are doing.
 Ignore plans, wishes and hypothetical outfits. Describe only yourself.
 Be concise: write each piece as a short noun phrase with its article and key traits ("a perfumed white shirt", "blue jeans", "a leather jacket"), at most 6 words.
 Answer with minified JSON only, on one line: no code fence, no narration, no roleplay, no commentary.
@@ -31,4 +31,16 @@ Example: {"location":"at a bookstore","pose":"standing by a shelf","action":"fli
     name: who,
     recent_chat: recent ? `\nRECENT CHAT:\n${recent}\n` : '',
   }[k] ?? m));
+}
+
+
+/** The example's values, to notice a Kin that copied them instead of answering. */
+const EXAMPLE = JSON.parse(OUTFIT_PROMPT.match(/Example: (\{.*\})/)[1]);
+const flat = (v) => (Array.isArray(v) ? v.join('|') : String(v ?? '')).trim().toLowerCase();
+
+/** True when at least three of the example's values come back unchanged: a copy, not a reading. */
+export function looksCopiedFromExample(doc) {
+  if (!doc || typeof doc !== 'object') return false;
+  const same = Object.entries(EXAMPLE).filter(([k, v]) => flat(doc[k]) === flat(v)).length;
+  return same >= 3;
 }

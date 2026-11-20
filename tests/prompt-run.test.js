@@ -33,13 +33,15 @@ test('the prompt demands English-only, concise, one-line JSON and pins down the 
   assert.ok(!p.includes('{{'), 'no unfilled placeholder');
 });
 
-test('the example inside the prompt is itself a valid answer', () => {
+test('the example inside the prompt has the valid format, but sent back unchanged it is a copy, not a reading', () => {
   const example = OUTFIT_PROMPT.match(/Example: (\{.*\})/)[1];
-  const p = parseReading(example);
+  assert.match(parseReading(example).error, /copied the example/);
+  // the same shape with the Kin's own values is a valid answer
+  const p = parseReading(example.replace('flipping through a book', 'reading a novel').replace('a grey hoodie', 'a red hoodie').replace('black leggings', 'blue jeans').replace('white sneakers', 'boots').replace('a loose braid', 'a bun'));
   assert.equal(p.ok, true);
   assert.equal(p.location, 'at a bookstore');
   assert.equal(p.pose, 'standing by a shelf');
-  assert.equal(p.action, 'flipping through a book');
+  assert.equal(p.action, 'reading a novel');
   assert.deepEqual(Object.keys(p.outfit), ['topwear', 'bottomwear', 'footwear']);
   assert.deepEqual(p.warnings, []);
 });

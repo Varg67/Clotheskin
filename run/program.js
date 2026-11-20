@@ -105,9 +105,12 @@ async function read(ctx, who, entry) {
   const parsed = parseReading(answer.text);
   if (!parsed.ok) return fail(ctx, who, e, { kind: 'answer', error: `${parsed.error} Nothing was changed.`, length: answer.text.length }, now, null, entry);
   const reading = describeReading(parsed);
+  // Hair and makeup are kept only when the Kin described them (the card shows those rows only then).
+  if (!parsed.hair) reading.hair = null;
+  if (!parsed.makeup) reading.makeup = null;
   e.reading = { ...reading, at: now.toISOString() };
   e.serverFailures = 0; // Kindroid answered
-  const line = `${who.name}: ${reading.location} ${reading.doing} ${reading.outfit}`;
+  const line = `${who.name}: ${[reading.location, reading.doing, reading.outfit, reading.hair, reading.makeup].filter(Boolean).join(' ')}`;
 
   if (!looksAsleep(reading.doing)) {
     await save(ctx, who.id, succeeded({ ...e, sleep: null, sleptOn: null }), entry); // awake: any night is over

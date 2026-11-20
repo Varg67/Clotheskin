@@ -12,27 +12,41 @@ const { deviceTimeZone: userTimeZone } = __req("src/core/time.js");
 
 const LOCALE = 'en-US';
 
+// Creating an Intl formatter is slow next to using one, and the screen formats several dates per render: formatters
+// are made once per time zone and kind, then reused.
+const cache = new Map();
+const fmt = (kind, timeZone, options) => {
+  const key = `${kind}|${timeZone}`;
+  if (!cache.has(key)) cache.set(key, new Intl.DateTimeFormat(LOCALE, { ...options, timeZone }));
+  return cache.get(key);
+};
+let rtf;
+
+const valid = (iso) => typeof iso === 'string' && Number.isFinite(Date.parse(iso));
+
 /** The calendar day of a moment in a time zone, as [year, month, day]. */
 function calendarDay(x, timeZone) {
-  const parts = new Intl.DateTimeFormat(LOCALE, { year: 'numeric', month: 'numeric', day: 'numeric', timeZone }).formatToParts(x);
+  const parts = fmt('day', timeZone, { year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(x);
   const get = (t) => Number(parts.find((p) => p.type === t).value);
   return [get('year'), get('month'), get('day')];
 }
 const sameDay = (a, b) => a.every((v, i) => v === b[i]);
 
+/** "10:05 PM" today, "Nov 20, 10:05 PM" another day. A broken date (corrupt file) is "unknown time", never a crash. */
 function formatClock(iso, { timeZone = userTimeZone(), now = new Date() } = {}) {
+  if (!valid(iso)) return 'unknown time';
   const d = new Date(iso);
-  const time = new Intl.DateTimeFormat(LOCALE, { hour: 'numeric', minute: '2-digit', timeZone }).format(d);
+  const time = fmt('time', timeZone, { hour: 'numeric', minute: '2-digit' }).format(d);
   if (sameDay(calendarDay(d, timeZone), calendarDay(now, timeZone))) return time;
-  const date = new Intl.DateTimeFormat(LOCALE, { month: 'short', day: 'numeric', timeZone }).format(d);
-  return `${date}, ${time}`;
+  return `${fmt('date', timeZone, { month: 'short', day: 'numeric' }).format(d)}, ${time}`;
 }
 
 function formatRelative(iso, now = new Date()) {
+  if (!valid(iso)) return 'at an unknown time';
   const diff = (new Date(iso).getTime() - now.getTime()) / 1000;
   const abs = Math.abs(diff);
   if (abs < 45) return 'just now';
-  const rtf = new Intl.RelativeTimeFormat(LOCALE, { numeric: 'auto' });
+  if (!rtf) rtf = new Intl.RelativeTimeFormat(LOCALE, { numeric: 'auto' });
   if (abs < 3600) return rtf.format(Math.round(diff / 60), 'minute');
   if (abs < 86400) return rtf.format(Math.round(diff / 3600), 'hour');
   return rtf.format(Math.round(diff / 86400), 'day');
@@ -43,6 +57,7 @@ function formatRelative(iso, now = new Date()) {
  * "Tomorrow" is the next calendar day in the time zone, so a night with a daylight-saving change is right too.
  */
 function formatWhen(iso, { timeZone = userTimeZone(), now = new Date() } = {}) {
+  if (!valid(iso)) return 'unknown time';
   const [y, m, d] = calendarDay(now, timeZone);
   const next = new Date(Date.UTC(y, m - 1, d + 1));
   const tomorrow = [next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate()];
@@ -54,8 +69,11 @@ return { formatClock, formatRelative, formatWhen };
 
 __def("src/core/json.js", function () {
 /**
- * Extracts a JSON object from plain JSON, a fenced block, or text containing one object.
- * Only when strict parsing fails, two common slips are repaired: trailing commas and curly double quotes.
+ * Extracts a JSON object from what a Kin answered. A roleplay model often wraps it: narration before or after, a code
+ * fence, a remark with braces after it ("Hope that helps {wink}"), the format example echoed before the real answer.
+ * Strict JSON is tried first; only then are the usual slips repaired (trailing commas, curly quotes, comments,
+ * 'single quotes', bare keys, Python's True/False/None, an object sent as a JSON string). A cut-off answer is an
+ * error, never completed by guessing.
  */
 function parseJsonObject(text) {
   const raw = String(text ?? '').trim();
@@ -63,22 +81,94 @@ function parseJsonObject(text) {
   const candidates = [raw];
   const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fence) candidates.push(fence[1].trim());
+  // Every balanced {...} in the text, the last first: when the example is echoed, the real answer comes after it.
+  candidates.push(...balancedObjects(raw).reverse());
   const first = raw.indexOf('{');
   const last = raw.lastIndexOf('}');
   if (first !== -1 && last > first) candidates.push(raw.slice(first, last + 1));
+
   for (const c of candidates) {
-    try { return { ok: true, value: JSON.parse(c) }; } catch { /* try the next candidate */ }
+    try { return unwrap(JSON.parse(c), false); } catch { /* try the next candidate */ }
   }
   for (const c of candidates) {
-    const noTrailing = c.replace(/,(\s*[}\]])/g, '$1');
-    for (const attempt of [noTrailing, noTrailing.replace(/[“”]/g, '"')]) {
-      try { return { ok: true, value: JSON.parse(attempt), repaired: true }; } catch { /* try the next repair */ }
+    const loose = normalizeLoose(c);
+    for (const attempt of [loose, loose.replace(/[“”]/g, '"')]) {
+      try { return unwrap(JSON.parse(attempt), true); } catch { /* try the next repair */ }
     }
   }
+  if (first !== -1 && !balancedObjects(raw.slice(first)).length) return { ok: false, error: 'The answer was cut off before the end, so it is not valid JSON.' };
   // Not the parser's message: it quotes the answer, and the answer is the scene (it would reach logs and status.json).
   return { ok: false, error: 'The answer is not valid JSON.' };
 }
-return { parseJsonObject };
+
+/** An object sent as a JSON string ("{\"location\":…}") is read as the object. */
+function unwrap(value, repaired) {
+  if (typeof value === 'string' && /^\s*\{/.test(value)) {
+    try { return { ok: true, value: JSON.parse(value), repaired: true }; } catch { /* keep the string */ }
+  }
+  return repaired ? { ok: true, value, repaired: true } : { ok: true, value };
+}
+
+/** The top-level {...} spans of a text, aware of quoted strings (both quote styles). */
+function balancedObjects(text) {
+  const out = [];
+  let depth = 0; let start = -1; let quote = null;
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i];
+    if (quote) {
+      if (c === '\\') i += 1;
+      else if (c === quote) quote = null;
+      continue;
+    }
+    // An apostrophe inside narration ("it's") is not a quote: only count quotes once inside an object.
+    if ((c === '"' || (c === "'" && depth > 0 && /[\s{[,:]/.test(text[i - 1] || ' '))) && depth > 0) { quote = c; continue; }
+    if (c === '{') { if (depth === 0) start = i; depth += 1; }
+    else if (c === '}' && depth > 0) { depth -= 1; if (depth === 0) out.push(text.slice(start, i + 1)); }
+  }
+  return out;
+}
+
+/**
+ * Loose JSON to strict JSON, outside strings only: drops // and /* *\/ comments and trailing commas, turns
+ * 'single-quoted' strings into "double-quoted" ones, quotes bare keys, and maps True/False/None.
+ */
+function normalizeLoose(text) {
+  let out = '';
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i];
+    if (c === '"' || c === '“' || c === '”') { // copy a double-quoted string as it is
+      let j = i + 1;
+      while (j < text.length && text[j] !== '"' && text[j] !== '”' && text[j] !== '“') j += text[j] === '\\' ? 2 : 1;
+      out += `"${text.slice(i + 1, j)}"`;
+      i = j;
+    } else if (c === "'") { // 'single' -> "double"
+      let j = i + 1; let s = '';
+      while (j < text.length && text[j] !== "'") {
+        if (text[j] === '\\' && text[j + 1] === "'") { s += "'"; j += 2; continue; }
+        if (text[j] === '"') s += '\\"'; else s += text[j];
+        j += 1;
+      }
+      out += `"${s}"`;
+      i = j;
+    } else if (c === '/' && text[i + 1] === '/') {
+      while (i < text.length && text[i] !== '\n') i += 1;
+      out += '\n';
+    } else if (c === '/' && text[i + 1] === '*') {
+      const end = text.indexOf('*/', i + 2);
+      i = end === -1 ? text.length : end + 1;
+    } else if (/[A-Za-z_\u00C0-\u024F]/.test(c) && /[{,]$/.test(out.trimEnd())) {
+      // a bare key: letters up to a colon
+      const m = text.slice(i).match(/^([A-Za-z_\u00C0-\u024F][\wÀ-ɏ -]*?)\s*:/);
+      if (m) { out += `"${m[1]}":`; i += m[0].length - 1; } else out += c;
+    } else if (/[A-Za-z]/.test(c)) { // a bare word in value position
+      const w = text.slice(i).match(/^[A-Za-z]+/)[0];
+      out += { True: 'true', False: 'false', None: 'null' }[w] ?? w;
+      i += w.length - 1;
+    } else out += c;
+  }
+  return out.replace(/,(\s*[}\]])/g, '$1');
+}
+return { parseJsonObject, balancedObjects, normalizeLoose };
 });
 
 __def("src/core/schedule.js", function () {
@@ -328,7 +418,7 @@ function normalizeSettings(raw) {
 /** One Kin's entry in status.json, complete and valid. */
 function normalizeEntry(e = {}) {
   const r = e.reading && typeof e.reading === 'object' ? e.reading : null;
-  const reading = r && sentence(r.outfit, 600) ? { location: sentence(r.location, 300) || '', doing: sentence(r.doing, 300) || '', outfit: sentence(r.outfit, 600), at: iso(r.at) } : null;
+  const reading = r && sentence(r.outfit, 600) ? { location: sentence(r.location, 300) || '', doing: sentence(r.doing, 300) || '', outfit: sentence(r.outfit, 600), hair: sentence(r.hair, 200), makeup: sentence(r.makeup, 200), at: iso(r.at) } : null;
   const s = e.sleep && typeof e.sleep === 'object' ? e.sleep : null;
   const sleep = s && iso(s.wakeAt) && iso(s.until) ? { wakeAt: iso(s.wakeAt), until: iso(s.until) } : null;
   const d = e.dream && typeof e.dream === 'object' ? e.dream : null;
@@ -392,25 +482,29 @@ return { SETTINGS_FILE, STATUS_FILE, RUN_STATES, THEMES, ACTION, OPS, DEFAULT_SE
 });
 
 __def("src/core/text.js", function () {
+// Invisible characters a model may leak (zero-width space, word joiner, byte-order mark, soft hyphen). The zero-width
+// joiner is kept: emoji sequences need it.
+const INVISIBLE = /[\u200B\u2060\uFEFF\u00AD]/g;
+/** Never ends in half of an emoji (a lone surrogate) after a cut. */
+const dropHalfChar = (s) => s.replace(/[\uD800-\uDBFF]$/, '');
+
 function capitalizeFirst(s) {
   const str = String(s ?? '');
   return str ? str.charAt(0).toUpperCase() + str.slice(1) : str;
 }
 
-/** Collapses whitespace, trims and caps the length. */
+/** Drops invisible characters, collapses whitespace, trims and caps the length (never half an emoji). */
 function cleanString(s, max = 200) {
-  return String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+  return dropHalfChar(String(s ?? '').replace(INVISIBLE, '').replace(/\s+/g, ' ').trim().slice(0, max));
 }
 
 /** One line, at most `max` characters, marked with "…" when cut (kin end keeps 500). */
 function oneLine(text, max = 500) {
-  const s = String(text ?? '').replace(/\s+/g, ' ').trim();
+  const s = String(text ?? '').replace(INVISIBLE, '').replace(/\s+/g, ' ').trim();
   if (s.length <= max) return s;
-  let cut = s.slice(0, max - 1);
-  if (/[\uD800-\uDBFF]$/.test(cut)) cut = cut.slice(0, -1); // never half an emoji
-  return `${cut}…`;
+  return `${dropHalfChar(s.slice(0, max - 1))}…`;
 }
-return { capitalizeFirst, cleanString, oneLine };
+return { dropHalfChar, capitalizeFirst, cleanString, oneLine };
 });
 
 __def("src/core/time.js", function () {
@@ -482,7 +576,7 @@ __def("src/screen/app.js", function () {
 // The screen: a view of status.json (written by the run) and the controls that write settings.json. The run does the
 // work, every 15 minutes or when Update status is pressed; the screen never asks the Kin anything itself.
 const { h, keepFocus } = __req("src/screen/dom.js");
-const { icon, spinner, poseIcon } = __req("src/screen/icons.js");
+const { icon, spinner, poseIcon, hairIcon } = __req("src/screen/icons.js");
 const { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, warningOf, SETTINGS_FILE, STATUS_FILE, ACTION, THEMES } = __req("src/core/state.js");
 const { INTERVAL_STEPS, formatInterval, snapInterval, startDueFor } = __req("src/core/schedule.js");
 const { describeDream, DREAM_TTL_HOURS } = __req("src/core/sleep.js");
@@ -580,7 +674,7 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
     if (!kin) return;
     const a = afterStop(before.kins[kin.id] || normalizeEntry(), S.settings);
     const b = afterStop(after.kins[kin.id] || normalizeEntry(), S.settings);
-    const text = (r) => (r ? `${r.location} ${r.doing} ${r.outfit}` : '');
+    const text = (r) => (r ? [r.location, r.doing, r.outfit, r.hair, r.makeup].filter(Boolean).join(' ') : '');
     const parts = [];
     if (b.reading && (asked ? b.reading.at !== (a.reading && a.reading.at) : text(b.reading) !== text(a.reading))) parts.push(text(b.reading));
     if (b.sleep && (!a.sleep || asked)) parts.push(`${kin.name} is asleep until ${formatWhen(b.sleep.wakeAt, { now: clock() })}.`);
@@ -707,6 +801,8 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
           fact('pin', 'Location', 'location', r && r.location, 'No location read yet.'),
           fact(r ? poseIcon(r.doing) : 'person', 'Pose and action', 'doing', r && r.doing, 'No pose or action read yet.'),
           fact('hanger', 'Outfit', 'outfit', r && r.outfit, 'No outfit read yet. Press Update status.'),
+          r && r.hair ? fact(hairIcon(r.hair), 'Hair', 'hair', r.hair, '') : null,
+          r && r.makeup ? fact('makeup', 'Makeup', 'makeup', r.makeup, '') : null,
           dream ? fact('moon', 'Last dream', 'dream', describeDream(dream), '') : null),
         h('button', { type: 'button', class: 'btn primary block', 'data-key': 'update', 'aria-busy': String(Boolean(busy)), onClick: () => update('read') },
           busy ? [spinner(), busy === 'wake' ? 'Asking about the dream…' : 'Reading…'] : [icon('refresh', { size: 18 }), 'Update status']),
@@ -775,7 +871,7 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
         h('select', { id: 'theme-pick', class: 'text-input', 'data-key': 'theme-pick', onChange: (ev) => { applyTheme(ev.target.value); saveSettings({ theme: ev.target.value }); } },
           ...Object.entries(THEMES).map(([id, text]) => h('option', { value: id, selected: s.theme === id ? '' : undefined }, text))),
         h('h3', { class: 'sub' }, 'How it works'),
-        h('p', { class: 'help' }, 'Your Kin looks at its recent chat with you and says where it is, how it is positioned, what it is doing and what it is wearing; Clotheskin shows that as three sentences. When it is asleep, Clotheskin asks when it will wake up, lets it sleep, and asks about its dream in the morning. Only the last reading and the night’s times are kept, never the chat.')));
+        h('p', { class: 'help' }, 'Your Kin looks at its recent chat with you and says where it is, how it is positioned, what it is doing, what it is wearing, and its hair and makeup; Clotheskin shows that as short sentences. When it is asleep, Clotheskin asks when it will wake up, lets it sleep, and asks about its dream in the morning. Only the last reading and the night’s times are kept, never the chat.')));
   }
 
   function applyTheme(id) {
@@ -981,6 +1077,9 @@ const P = {
   sitting: '<circle cx="8.5" cy="5" r="2"/><path d="M8.5 8.2v5h6.2l1.8 5.3M8.5 13.2l-1.3 5.3M5.5 18.5h4"/>',
   standing: '<circle cx="12" cy="4.8" r="2"/><path d="M12 8v6M8 10.4 12 8l4 2.4M12 14l-3 7M12 14l3 7"/>',
   person: '<circle cx="12" cy="8.2" r="3.8"/><path d="M4.5 20.5c0-3.8 3.4-6 7.5-6s7.5 2.2 7.5 6"/>',
+  'hair-down': '<circle cx="12" cy="8" r="3.6"/><path d="M8.4 8c-.4 5-1.4 8.4-3.4 11M15.6 8c.4 5 1.4 8.4 3.4 11M12 11.6V14"/>',
+  'hair-up': '<circle cx="12" cy="4.6" r="2.3"/><path d="M7.2 14.2a4.8 4.8 0 0 1 9.6 0v.8a4.8 4.8 0 0 1-9.6 0z"/><path d="M12 7v2.6"/>',
+  makeup: '<path d="M3 12.2c2.6-3.6 5.6-4 9-1.9 3.4-2.1 6.4-1.7 9 1.9-2.6 4.6-5.6 6.2-9 6.2s-6.4-1.6-9-6.2z"/><path d="M3 12.2h18"/>',
   pin: '<path d="M12 21s7-6 7-11.2a7 7 0 0 0-14 0C5 15 12 21 12 21z"/><circle cx="12" cy="9.8" r="2.4"/>',
   refresh: '<path d="M20 11a8 8 0 0 0-14.4-4.2L4 9"/><path d="M4 4v5h5"/><path d="M4 13a8 8 0 0 0 14.4 4.2L20 15"/><path d="M20 20v-5h-5"/>',
   users: '<circle cx="9" cy="8.5" r="3.2"/><path d="M3 20c0-3.3 2.7-5.2 6-5.2s6 1.9 6 5.2"/><path d="M16 5.6a3.2 3.2 0 0 1 0 5.8M18 14.8c1.8.7 3 2.2 3 4.7"/>',
@@ -1014,7 +1113,12 @@ function poseIcon(pose) {
   if (/\b(standing|walking|leaning|stretched)\b/i.test(v)) return 'standing';
   return 'person';
 }
-return { icon, spinner, poseIcon };
+
+/** Icon for the hair row: tied up (ponytail, bun, braid, updo) or down. */
+function hairIcon(hair) {
+  return /\b(ponytail|bun|braid|braided|updo|tied|pinned|up)\b/i.test(hair || '') ? 'hair-up' : 'hair-down';
+}
+return { icon, spinner, poseIcon, hairIcon };
 });
 
 __def("src/screen/main.js", function () {

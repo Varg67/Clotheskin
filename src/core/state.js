@@ -58,7 +58,7 @@ export function normalizeSettings(raw) {
 /** One Kin's entry in status.json, complete and valid. */
 export function normalizeEntry(e = {}) {
   const r = e.reading && typeof e.reading === 'object' ? e.reading : null;
-  const reading = r && sentence(r.outfit, 600) ? { location: sentence(r.location, 300) || '', doing: sentence(r.doing, 300) || '', outfit: sentence(r.outfit, 600), at: iso(r.at) } : null;
+  const reading = r && sentence(r.outfit, 600) ? { location: sentence(r.location, 300) || '', doing: sentence(r.doing, 300) || '', outfit: sentence(r.outfit, 600), hair: sentence(r.hair, 200), makeup: sentence(r.makeup, 200), at: iso(r.at) } : null;
   const s = e.sleep && typeof e.sleep === 'object' ? e.sleep : null;
   const sleep = s && iso(s.wakeAt) && iso(s.until) ? { wakeAt: iso(s.wakeAt), until: iso(s.until) } : null;
   const d = e.dream && typeof e.dream === 'object' ? e.dream : null;

@@ -45,7 +45,11 @@ test('an empty answer means nothing was said, not an error', () => {
 });
 
 test('every demo scene produces its three sentences (or the documented error)', () => {
-  const out = Object.fromEntries(DEMO_SCENES.map((sc) => { const p = parseReading(sc.response); return [sc.id, p.ok ? describeReading(p) : `ERROR ${p.error}`]; }));
+  const three = ({ location, doing, outfit }) => ({ location, doing, outfit });
+  const full = Object.fromEntries(DEMO_SCENES.map((sc) => { const p = parseReading(sc.response); return [sc.id, p.ok ? describeReading(p) : `ERROR ${p.error}`]; }));
+  const out = Object.fromEntries(Object.entries(full).map(([k, v]) => [k, typeof v === 'string' ? v : three(v)]));
+  assert.deepEqual([full['accessories-bag'].hair, full['accessories-bag'].makeup], ['Up in a messy bun.', 'Red lipstick.']);
+  assert.deepEqual([full.travelling.hair, full.travelling.makeup], ['No hair described in the recent chat.', 'No makeup described in the recent chat.']);
   assert.deepEqual(out['pt-jeans-jacket'], { location: 'In the living room.', doing: 'Standing, adjusting her collar.', outfit: 'Wearing a leather jacket, a perfumed white shirt and blue jeans.' });
   assert.deepEqual(out['accessories-bag'], { location: 'At a café in Alfenas.', doing: 'Sitting at a table, sipping a latte.', outfit: 'Wearing a black dress and ankle boots, with round glasses, a silver necklace and a brown backpack.' });
   assert.deepEqual(out['taken-off'], { location: 'In the living room.', doing: 'Standing, taking off a cardigan.', outfit: 'Wearing a T-shirt and jeans.' });
@@ -121,4 +125,21 @@ test('a curly apostrophe inside a value is kept', () => {
 
 test('placeholders like "no shoes" are dropped, but a piece that starts with "no-" is kept', () => {
   assert.equal(say({ footwear: ['no shoes'], footunderwear: ['no-show socks'], topwear: ['a no-iron shirt'] }), 'Wearing a no-iron shirt and no-show socks.');
+});
+
+// ---- hair and makeup
+test('hair and makeup: one short phrase each, lists joined, slips repaired, nothing guessed', () => {
+  const read = (o) => { const p = parseReading(JSON.stringify(o)); assert.ok(p.ok, p.error); return describeReading(p); };
+  assert.deepEqual([read({ hair: 'long black hair in a ponytail', makeup: 'red lipstick and eyeliner' }).hair, read({ makeup: 'red lipstick and eyeliner' }).makeup], ['Long black hair in a ponytail.', 'Red lipstick and eyeliner.']);
+  assert.equal(read({ makeup: ['mascara', 'pink lip gloss', 'blush'] }).makeup, 'Mascara, pink lip gloss and blush.');
+  assert.equal(read({ hair: 'My hair is wet and loose.' }).hair, 'Wet and loose.');
+  assert.equal(read({ Hairstyle: '*a messy bun*' }).hair, 'A messy bun.');
+  for (const v of ['bare face', 'no makeup', 'No make-up', 'makeup-free']) assert.equal(read({ makeup: v }).makeup, 'No makeup.', v);
+  for (const v of ['none', 'unknown', 'not mentioned', '']) assert.equal(read({ makeup: v }).makeup, 'No makeup described in the recent chat.', v);
+  assert.equal(read({ hair: 'n/a' }).hair, 'No hair described in the recent chat.');
+  assert.ok(read({ hair: 'x '.repeat(200) }).hair.length <= 102);
+  const p = parseReading(JSON.stringify({ hair: 'a bun', topwear: ['a shirt'] }));
+  assert.deepEqual(p.warnings, [], 'hair is not an unknown slot');
+  assert.deepEqual(Object.keys(p.outfit), ['topwear'], 'hair is not clothing');
+  assert.match(parseReading('{"hair":{"a":1}}').error, /"hair" must be a text/);
 });

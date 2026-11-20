@@ -1,10 +1,11 @@
 # Clotheskin
 
-A Kindroid app that follows your Kin in the current roleplay. It asks the Kin where it is, how it is positioned, what it is doing and what it is wearing, and shows **three sentences**:
+A Kindroid app that follows your Kin in the current roleplay. It asks the Kin where it is, how it is positioned, what it is doing, what it is wearing, and its hair and makeup, and shows **short sentences**:
 
 > **Location** In the living room.
 > **Pose and action** Standing, adjusting her collar.
 > **Outfit** Wearing a leather jacket, a perfumed white shirt and blue jeans.
+> **Hair** Up in a messy bun. *(and **Makeup**, when the Kin says)*
 
 It can do this by itself every 15 minutes to 4 hours, and it follows the Kin's nights. When the Kin falls asleep it asks when it will wake up and leaves it alone until then. In the morning it asks what it dreamt and how much it still remembers. With your permission, it also tells the Kin its dream, so the Kin can remember it during the day.
 
@@ -66,6 +67,8 @@ npm run build        # rebuilds screen/app.js and kin.json (tests fail if either
 - **Other controls.** You can attach and detach Kins, make Kindroid "fail" or be "under maintenance", and see every `kin` call.
 - **The browser tests** drive the same harness (`window.dev`) with Playwright's clock, so a whole night takes a second.
 
+**The plan for the first test with a real Kin** is `docs/real-kin-test-script.md` (in Portuguese): reading scenes, the night, the automation with the panel closed, and provoked failures. It is generated from the code (`npm run build`), so the sentences it expects are the ones the app shows.
+
 **Trying the run with Kindroid's own `kin` command.** The guide's mock mode records every call without touching anything real:
 
 ```bash
@@ -113,6 +116,7 @@ Everything above is tested against the guide and the dev harness, not yet inside
 
 ## Limits
 
-- **What it reads.** Only location, pose and action, clothing and accessories. Hair and makeup are not read.
-- **English answers.** The chat may be in any language the Kin understands (the demo scene is Portuguese); the answers and sentences are English.
+- **What it reads.** Location, pose and action, clothing and accessories, hair and makeup (the last two shown only when the Kin describes them).
+- **English answers.** The chat may be in any language the Kin understands (the demo scene is Portuguese); the question asks for English, and keys or values that come back in Portuguese are still read.
+- **Reading a roleplay model's answer.** A long-memory model (Kindroid's Polaris) often wraps the JSON in narration, echoes the example first, writes "almost JSON" (Python quotes, bare keys, comments), groups slots under "outfit", translates keys, or writes values in the first person ("I'm in the kitchen"). All of that is read (`src/core/json.js`, `outfit.js`; tests in `polaris-what-if.test.js` and `what-if.test.js`, with fuzzing). An answer that copies the format example is rejected.
 - **One Kin at a time.** Only the selected Kin is read; the others cost nothing.

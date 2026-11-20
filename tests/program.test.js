@@ -25,7 +25,7 @@ test('running: reads at once, then only when the interval has passed; moving the
   k.answers.reading.push(AWAKE);
   const first = await tick(k);
   assert.match(first.message, /^Isa: In the bedroom\. Sitting on the bed, reading a book\. Wearing pyjamas\.$/);
-  assert.deepEqual(k.entry().reading, { location: 'In the bedroom.', doing: 'Sitting on the bed, reading a book.', outfit: 'Wearing pyjamas.', at: k.clock().toISOString() });
+  assert.deepEqual(k.entry().reading, { location: 'In the bedroom.', doing: 'Sitting on the bed, reading a book.', outfit: 'Wearing pyjamas.', hair: null, makeup: null, at: k.clock().toISOString() });
   assert.equal(k.entry().name, 'Isa');
   for (const m of [15, 15, 15]) { k.advance(m); await tick(k); }
   assert.deepEqual(k.asks(), ['reading'], '45 minutes with a 1-hour interval: nothing more');
@@ -245,9 +245,10 @@ test('unknown triggers and actions end clearly, without asking', async () => {
 test('time budget: a slow Kin never pushes the run past its budget; the reading is kept and the sleep question waits', async () => {
   const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', intervalS: 900, tz: 'America/Sao_Paulo' } });
   const slow = (text, ms) => () => new Promise((r) => setTimeout(() => r(text), ms));
-  k.answers.reading.push(slow(ASLEEP, 120));
+  k.answers.reading.push(slow(ASLEEP, 1500));
   k.answers.sleep.push('{"sleeping":true,"wake_at":"07:30"}');
-  const r = await runProgram({ event: { trigger: 'schedule' }, kin: k.kin, clock: k.clock, retryAfterMs: 0, budgetMs: 25120 }); // the reading leaves < 15 s
+  // 16 s for the reading (enough), then 14.5 s left: under the 15 s a question needs, with half a second of margin
+  const r = await runProgram({ event: { trigger: 'schedule' }, kin: k.kin, clock: k.clock, retryAfterMs: 0, budgetMs: 26000 });
   assert.equal(r.ok, true);
   assert.match(r.message, /The sleep question waits for the next start\.$/);
   assert.deepEqual(k.asks(), ['reading']);

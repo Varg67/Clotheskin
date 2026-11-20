@@ -1,7 +1,7 @@
 // The screen: a view of status.json (written by the run) and the controls that write settings.json. The run does the
 // work, every 15 minutes or when Update status is pressed; the screen never asks the Kin anything itself.
 import { h, keepFocus } from './dom.js';
-import { icon, spinner, poseIcon } from './icons.js';
+import { icon, spinner, poseIcon, hairIcon } from './icons.js';
 import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, warningOf, SETTINGS_FILE, STATUS_FILE, ACTION, THEMES } from '../core/state.js';
 import { INTERVAL_STEPS, formatInterval, snapInterval, startDueFor } from '../core/schedule.js';
 import { describeDream, DREAM_TTL_HOURS } from '../core/sleep.js';
@@ -99,7 +99,7 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
     if (!kin) return;
     const a = afterStop(before.kins[kin.id] || normalizeEntry(), S.settings);
     const b = afterStop(after.kins[kin.id] || normalizeEntry(), S.settings);
-    const text = (r) => (r ? `${r.location} ${r.doing} ${r.outfit}` : '');
+    const text = (r) => (r ? [r.location, r.doing, r.outfit, r.hair, r.makeup].filter(Boolean).join(' ') : '');
     const parts = [];
     if (b.reading && (asked ? b.reading.at !== (a.reading && a.reading.at) : text(b.reading) !== text(a.reading))) parts.push(text(b.reading));
     if (b.sleep && (!a.sleep || asked)) parts.push(`${kin.name} is asleep until ${formatWhen(b.sleep.wakeAt, { now: clock() })}.`);
@@ -226,6 +226,8 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
           fact('pin', 'Location', 'location', r && r.location, 'No location read yet.'),
           fact(r ? poseIcon(r.doing) : 'person', 'Pose and action', 'doing', r && r.doing, 'No pose or action read yet.'),
           fact('hanger', 'Outfit', 'outfit', r && r.outfit, 'No outfit read yet. Press Update status.'),
+          r && r.hair ? fact(hairIcon(r.hair), 'Hair', 'hair', r.hair, '') : null,
+          r && r.makeup ? fact('makeup', 'Makeup', 'makeup', r.makeup, '') : null,
           dream ? fact('moon', 'Last dream', 'dream', describeDream(dream), '') : null),
         h('button', { type: 'button', class: 'btn primary block', 'data-key': 'update', 'aria-busy': String(Boolean(busy)), onClick: () => update('read') },
           busy ? [spinner(), busy === 'wake' ? 'Asking about the dream…' : 'Reading…'] : [icon('refresh', { size: 18 }), 'Update status']),
@@ -294,7 +296,7 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
         h('select', { id: 'theme-pick', class: 'text-input', 'data-key': 'theme-pick', onChange: (ev) => { applyTheme(ev.target.value); saveSettings({ theme: ev.target.value }); } },
           ...Object.entries(THEMES).map(([id, text]) => h('option', { value: id, selected: s.theme === id ? '' : undefined }, text))),
         h('h3', { class: 'sub' }, 'How it works'),
-        h('p', { class: 'help' }, 'Your Kin looks at its recent chat with you and says where it is, how it is positioned, what it is doing and what it is wearing; Clotheskin shows that as three sentences. When it is asleep, Clotheskin asks when it will wake up, lets it sleep, and asks about its dream in the morning. Only the last reading and the night’s times are kept, never the chat.')));
+        h('p', { class: 'help' }, 'Your Kin looks at its recent chat with you and says where it is, how it is positioned, what it is doing, what it is wearing, and its hair and makeup; Clotheskin shows that as short sentences. When it is asleep, Clotheskin asks when it will wake up, lets it sleep, and asks about its dream in the morning. Only the last reading and the night’s times are kept, never the chat.')));
   }
 
   function applyTheme(id) {

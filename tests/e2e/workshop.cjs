@@ -313,6 +313,31 @@ window.addEventListener('message', async (e) => {
     await p3.close();
   });
 
+  await step('inside a frame with no Workshop answering: a clear message and Try again, not a silent local mode', async () => {
+    files.clear(); kins = [{ id: 'k-isa', name: 'Isa' }];
+    const p4 = await ctx.newPage();
+    p4.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
+    let answering = false;
+    await p4.route('**/__parent.html', (route) => route.fulfill({ contentType: 'text/html', body: PARENT.replace("if (m.kin === 'kins') return window.pushKins();", "if (m.kin === 'kins') { if (!(await window.hostAnswering())) return; return window.pushKins(); }") }));
+    await p4.exposeFunction('hostAnswering', () => answering);
+    await p4.exposeFunction('hostKins', () => kins);
+    await p4.exposeFunction('hostRead', () => null);
+    await p4.exposeFunction('hostWrite', () => {});
+    await p4.exposeFunction('hostAction', async () => ({ ok: false, message: '{}' }));
+    await p4.goto(`${base}/__parent.html`);
+    const f4 = p4.frameLocator('#f');
+    await f4.locator('[data-testid="not-connected"]').waitFor({ timeout: 8000 });
+    const t = await f4.locator('body').innerText();
+    assert.match(t, /Could not reach the Kindroid Workshop/);
+    assert.ok(!/Scene reader|Paste a conversation/.test(t), 'local mode is not shown by itself');
+    await p4.screenshot({ path: path.join(SHOTS, '15-workshop-not-connected.png') });
+    answering = true;
+    await f4.locator('[data-key="connect-retry"]').click();
+    await f4.locator('[data-testid="auto-state"]').waitFor({ timeout: 8000 }); // the Workshop card with its automation panel
+    assert.match(await f4.locator('.card').first().innerText(), /Isa/);
+    await p4.close();
+  });
+
   await step('no page errors or console errors', async () => { assert.deepEqual(problems, []); });
 
   await browser.close(); server.close();

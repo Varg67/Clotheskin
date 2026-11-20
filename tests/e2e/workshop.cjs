@@ -122,7 +122,9 @@ window.addEventListener('message', async (e) => {
     kinAnswer = async () => '*giggles* Oh, a form? How cute. Not today!';
     await key('update').click(); await idle();
     const b = fr.locator('[data-testid="banner"]');
-    assert.equal(await b.getAttribute('role'), 'alert');
+    // read out once by the page's own alert region (a banner rebuilt on every render would repeat it)
+    await until(async () => /not valid JSON/.test(await fr.locator('[role=alert]').innerText()), 'alert region');
+    assert.equal(await b.getAttribute('role'), null);
     assert.match(await b.innerText(), /not valid JSON/);
     assert.ok((await b.innerText()).includes('Try again'));
     assert.equal(await outfit(), 'Wearing a leather jacket, a perfumed white shirt and blue jeans.');

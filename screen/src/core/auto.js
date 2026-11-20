@@ -48,18 +48,29 @@ export function errorKind(message, kind = 'server') {
 }
 
 // ---- sleep
-const ASLEEP = /\b(sleeping|asleep|napping|dozing|slumbering|snoozing)\b/i;
-const NOT_ASLEEP = /\b(not|never|no longer|unable to|can['’]?t|cannot|trying to|about to|going to|half)\s+(be\s+|fall\s+|get\s+)?(sleeping|asleep|napping|dozing)\b|\bawake\b/i;
+const ASLEEP = /\b(sleeping|asleep|napping|dozing|slumbering|snoozing)\b(?!\s+(bag|pill|pills|mask|pad|pod|car|quarters|area|beauty)\b)/i;
+const NOT_ASLEEP = /\b(not|never|no longer|unable to|can['’]?t|cannot|trying to|about to|going to|half)\s+(quite\s+|yet\s+|really\s+)?(be\s+|fall\s+|get\s+)?(sleeping|asleep|napping|dozing)\b|\bawake\b/i;
+/**
+ * A short fingerprint of a sentence (FNV-1a, hex). The sleep cycle remembers which "asleep" sentence it already asked
+ * about without writing the sentence itself (nothing about the scene is stored).
+ */
+export function sentenceMark(text) {
+  let h = 0x811c9dc5;
+  for (const ch of String(text ?? '')) { h ^= ch.codePointAt(0); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(16).padStart(8, '0');
+}
+
 /** Whether the pose and action sentence says the Kin is asleep ("Lying in bed, sleeping."). */
 export function looksAsleep(doing) {
   const s = String(doing ?? '');
   return ASLEEP.test(s) && !NOT_ASLEEP.test(s);
 }
 
-/** "07:30", "7:30", "7.30", "7h30", "7 am", "7:30 PM", "19:00" -> { h, m }; anything else -> null. */
+/** "07:30", "07:30:00", "0730", "7:30", "7.30", "7h30", "7 am", "7:30 PM", "19:00" -> { h, m }; anything else -> null. */
 export function parseClockTime(v) {
   const s = String(v ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
-  const m = s.match(/^(\d{1,2})(?:\s*[:.h]\s*(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?$/);
+  if (/^\d{4}$/.test(s)) return parseClockTime(`${s.slice(0, 2)}:${s.slice(2)}`); // "0730" (military style)
+  const m = s.match(/^(\d{1,2})(?:\s*[:.h]\s*(\d{2})(?::\d{2})?)?\s*(a\.?m\.?|p\.?m\.?)?$/);
   if (!m) return null;
   let h = Number(m[1]);
   const min = m[2] === undefined ? 0 : Number(m[2]);

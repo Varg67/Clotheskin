@@ -1,7 +1,7 @@
 {
   "name": "clotheskin",
   "version": "0.1.0",
-  "description": "Visual continuity panel for Kindroid companions: location, posture, clothing, accessories, hair and makeup.",
+  "description": "Kindroid Workshop app: where a Kin is, its pose and action and what it is wearing, read from its recent chat, with automatic updates and a sleep and dream cycle.",
   "type": "module",
   "private": true,
   "scripts": {

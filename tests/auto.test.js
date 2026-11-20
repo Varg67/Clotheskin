@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   INTERVAL_STEPS, formatInterval, snapInterval, retryDelay, errorKind, looksAsleep, parseClockTime, nextOccurrence,
-  planSleep, parseSleepAnswer, parseDreamAnswer, describeDream, MAX_RETRY_S, MAINTENANCE_RETRY_S, WAKE_LEAD_S,
+  planSleep, sentenceMark, parseSleepAnswer, parseDreamAnswer, describeDream, MAX_RETRY_S, MAINTENANCE_RETRY_S, WAKE_LEAD_S,
 } from '../screen/src/core/auto.js';
 import { createAutomation } from '../screen/src/ui/automation.js';
 import { Settings, MemoryStorage } from '../screen/src/core/store.js';
@@ -39,7 +39,7 @@ test('errors in a row slow the readings down, up to an hour; maintenance waits a
 test('asleep is read from the pose and action sentence; awake, trying to sleep and half asleep are not', () => {
   for (const s of ['Lying in bed, sleeping.', 'Asleep on the sofa.', 'Curled up on the sofa, napping.', 'Dozing in the armchair.'])
     assert.ok(looksAsleep(s), s);
-  for (const s of ['Lying in bed, reading a book.', 'Lying in bed, trying to sleep.', 'Lying awake in bed.', 'Half asleep on the sofa.', 'Sitting by the bed, watching her brother.', 'Not sleeping yet.', 'No pose or action described in the recent chat.', ''])
+  for (const s of ['Sitting on a sleeping bag, eating.', 'Lying in bed, not quite asleep.', 'Lying in bed, reading a book.', 'Lying in bed, trying to sleep.', 'Lying awake in bed.', 'Half asleep on the sofa.', 'Sitting by the bed, watching her brother.', 'Not sleeping yet.', 'No pose or action described in the recent chat.', ''])
     assert.ok(!looksAsleep(s), s);
 });
 
@@ -50,7 +50,9 @@ test('wake-up times: 24-hour and am/pm forms; the next such moment; too soon or 
   assert.deepEqual(parseClockTime('7 am'), { h: 7, m: 0 });
   assert.deepEqual(parseClockTime('12 AM'), { h: 0, m: 0 });
   assert.deepEqual(parseClockTime('7:15 p.m.'), { h: 19, m: 15 });
-  for (const bad of ['7', '25:00', '07:75', 'tomorrow morning', '13 pm', '', null]) assert.equal(parseClockTime(bad), null, String(bad));
+  assert.deepEqual(parseClockTime('07:30:00'), { h: 7, m: 30 });
+  assert.deepEqual(parseClockTime('0730'), { h: 7, m: 30 });
+  for (const bad of ['7', '25:00', '07:75', '2575', 'tomorrow morning', '13 pm', '', null]) assert.equal(parseClockTime(bad), null, String(bad));
   assert.equal(nextOccurrence({ h: 7, m: 30 }, at('23:10')).getTime(), at('07:30').getTime() + 864e5);
   assert.equal(nextOccurrence({ h: 23, m: 30 }, at('23:10')).getTime(), at('23:30').getTime());
   const plan = planSleep('07:30', at('23:10'));
@@ -217,7 +219,8 @@ test('automation: asleep -> sleep question -> hibernation until a little before 
   assert.equal(h.log[1][1], '22:00 on Friday', 'the Kin is told the person\'s time');
   const hib = h.auto.hibernation('k1');
   assert.equal(hib.until.getTime(), at('07:20').getTime() + 864e5);
-  assert.equal(h.settings.value.sleep.k1.sleptOn, ASLEEP, 'saved: reopening the screen keeps the hibernation');
+  assert.equal(h.settings.value.sleep.k1.sleptOn, sentenceMark(ASLEEP), 'saved: reopening the screen keeps the hibernation');
+  assert.ok(!JSON.stringify(h.settings.value).includes('bed'), 'only a fingerprint of the sentence, never the scene');
   await h.advance(9 * 3600 * 1000); // 07:00: still asleep, nobody is asked anything
   assert.equal(h.log.length, 2);
   await h.advance(20 * 60 * 1000); // 07:20: the dream question
@@ -285,4 +288,115 @@ test('automation: wake now asks the dream question at once; a Kin that cannot an
   assert.deepEqual(h.log.map(([a]) => a), ['read', 'ask_sleep', 'ask_dream']);
   assert.equal(h.auto.hibernation('k1'), null, 'awake even without a dream');
   assert.equal(h.auto.state.dreams.has('k1'), false);
+});
+
+// ---- races and failures found by the final QA
+function deferred() { let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise, resolve }; }
+function raceHarness() {
+  const now = at('22:00');
+  const settings = new Settings(new MemoryStorage());
+  Object.assign(settings.value, { autoIntervalS: 600, autoState: 'running' });
+  let kin = { id: 'isa', name: 'Isa' };
+  const calls = [];
+  const pending = [];
+  const timers = [];
+  const auto = createAutomation({
+    settings, clock: () => now, selectedKin: () => kin,
+    read: (k) => { calls.push(['read', k.id]); const d = deferred(); pending.push(d); return d.promise; },
+    ask: (k, action) => { calls.push([action, k.id]); const d = deferred(); pending.push(d); return d.promise; },
+    setTimer: (fn) => { timers.push(fn); return fn; }, clearTimer: (t) => { const i = timers.indexOf(t); if (i >= 0) timers.splice(i, 1); },
+  });
+  const flush = async () => { for (let i = 0; i < 10; i += 1) await new Promise((r) => setImmediate(r)); };
+  const fire = async () => { const t = timers.shift(); if (t) t(); await flush(); };
+  return { auto, settings, calls, pending, fire, flush, timers, setKin: (k) => { kin = k; } };
+}
+
+test('race: a sleep question still in flight after a Kin switch does not hibernate the new Kin, and the new Kin is read at once', async () => {
+  const r = raceHarness();
+  r.auto.reschedule();
+  await r.fire(); // Isa read…
+  r.pending.shift().resolve({ ok: true, doing: ASLEEP }); await r.flush(); // …asleep: the sleep question goes out
+  assert.deepEqual(r.calls.at(-1), ['ask_sleep', 'isa']);
+  r.setKin({ id: 'bea', name: 'Bea' }); r.auto.reschedule(); // the person picks Bea meanwhile
+  r.pending.shift().resolve({ ok: true, value: { sleeping: true, wake_at: '07:30' } }); await r.flush();
+  assert.deepEqual(r.settings.value.sleep, {}, 'Isa\'s answer came for an old step: nothing saved');
+  assert.equal(r.auto.hibernation('bea'), null);
+  await r.fire();
+  assert.deepEqual(r.calls.at(-1), ['read', 'bea'], 'Bea is read at once');
+});
+
+test('race: Stop during the sleep question saves no night; Stop during the dream question shows no dream; Pause asks nothing more', async () => {
+  let r = raceHarness();
+  r.auto.reschedule();
+  await r.fire();
+  r.pending.shift().resolve({ ok: true, doing: ASLEEP }); await r.flush();
+  r.auto.stop();
+  r.pending.shift().resolve({ ok: true, value: { sleeping: true, wake_at: '07:30' } }); await r.flush();
+  assert.deepEqual(r.settings.value.sleep, {});
+  assert.equal(r.timers.length, 0, 'nothing planned after Stop');
+
+  r = raceHarness();
+  r.settings.value.sleep = { isa: { wakeAt: at('07:30').toISOString(), until: at('21:00').toISOString(), sleptOn: 'x' } };
+  r.auto.reschedule();
+  await r.fire(); // dream question
+  assert.deepEqual(r.calls.at(-1), ['ask_dream', 'isa']);
+  r.auto.stop();
+  r.pending.shift().resolve({ ok: true, value: { dream: 'A storm', remembered: 'all' } }); await r.flush();
+  assert.equal(r.auto.state.dreams.size, 0, 'no dream after Stop');
+
+  r = raceHarness();
+  r.auto.reschedule();
+  await r.fire();
+  r.auto.pause();
+  r.pending.shift().resolve({ ok: true, doing: ASLEEP }); await r.flush();
+  assert.deepEqual(r.calls.map(([a]) => a), ['read'], 'paused while reading: the sleep question is not asked');
+  assert.equal(r.timers.length, 0);
+});
+
+test('a sleep question the Kin keeps answering badly slows the readings down and says so', async () => {
+  const bad = { ok: false, kind: 'answer', error: 'The answer does not give a wake-up time as HH:MM.' };
+  const h = harness({ interval: 60, answers: { read: Array(5).fill({ ok: true, doing: ASLEEP }), ask_sleep: Array(5).fill(bad) } });
+  h.auto.reschedule();
+  await h.advance(0);
+  const gaps = [];
+  for (let i = 0; i < 3; i += 1) { const before = h.now.getTime(); const next = h.auto.state.nextAt.getTime(); gaps.push((next - before) / 1000); await h.advance(next - before); }
+  assert.deepEqual(gaps, [60, 120, 240], 'x2 from the second failure in a row');
+  assert.match(h.auto.state.note, /sleep question did not get a clear answer/);
+  assert.equal(h.auto.warning(), null, 'the Kin answered: Kindroid is up, no server warning');
+});
+
+test('the server warning counts Kindroid errors only; a Kin saying "maintenance" is not Kindroid maintenance', async () => {
+  const answer = { ok: false, kind: 'answer', error: 'not valid JSON' };
+  const server = { ok: false, kind: 'server', error: 'The Kindroid Workshop did not answer (action read_outfit).' };
+  let h = harness({ interval: 60, answers: { read: [answer, answer, server] } });
+  h.auto.reschedule();
+  await h.advance(0); await h.advance(60e3); await h.advance(120e3);
+  assert.equal(h.auto.warning(), null, '2 answers + 1 server error is not "3 times in a row"');
+  h = harness({ interval: 60, answers: { read: [{ ok: false, kind: 'answer', error: 'The answer is not valid JSON (maintenance mode lol).' }] } });
+  h.auto.reschedule();
+  await h.advance(0);
+  assert.equal(h.auto.state.errorKind, 'answer');
+  assert.equal((h.auto.state.nextAt - h.now) / 1000, 60, 'no 30-minute maintenance wait');
+});
+
+test('moving the ruler while Kindroid is failing keeps the slowed-down next try', async () => {
+  const fail = { ok: false, kind: 'server', error: 'down' };
+  const h = harness({ interval: 60, answers: { read: [fail, fail, fail] } });
+  h.auto.reschedule();
+  await h.advance(0); await h.advance(60e3); await h.advance(120e3);
+  const next = h.auto.state.nextAt.getTime();
+  h.auto.setInterval(120);
+  assert.equal(h.auto.state.nextAt.getTime(), next);
+  assert.equal(h.settings.value.autoIntervalS, 120);
+});
+
+test('Start, Pause and Stop act at once and say whether anything changed', () => {
+  const settings = new Settings({ get: async () => null, set: () => new Promise(() => {}) }); // a save that never ends
+  const auto = createAutomation({ settings, clock: () => at('12:00'), selectedKin: () => ({ id: 'k' }), read: async () => ({ ok: true, doing: '' }), ask: async () => ({ ok: false }), setTimer: () => 1, clearTimer: () => {} });
+  assert.equal(auto.start(), true);
+  assert.equal(auto.runState(), 'running', 'without waiting for the save');
+  assert.equal(auto.start(), false, 'a second click changes nothing');
+  assert.equal(auto.pause(), true);
+  assert.equal(auto.stop(), true);
+  assert.equal(auto.stop(), false);
 });

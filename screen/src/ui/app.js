@@ -3,7 +3,7 @@ import { icon, spinner } from './icons.js';
 import { buildOutfitPrompt } from '../core/prompt.js';
 import { parseReading, describeReading, describeLocation, describeDoing, describeOutfit, poseIcon } from '../core/outfit.js';
 import { formatClock, formatRelative, formatWhen } from '../core/format.js';
-import { INTERVAL_STEPS, formatInterval, snapInterval, describeDream, errorKind } from '../core/auto.js';
+import { INTERVAL_STEPS, formatInterval, snapInterval, describeDream, errorKind, looksAsleep } from '../core/auto.js';
 import { createAutomation } from './automation.js';
 import { DEMO_SCENES } from '../demo/demo.js';
 
@@ -45,9 +45,13 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     readerOpen: !isWorkshop,
   };
 
+  // Two regions that stay in the page (a region rebuilt on every render would be read again and again):
+  // results and notes are polite, an error of the Kin on screen is assertive. Each message is sent once.
   const live = h('div', { class: 'sr-only', role: 'status', 'aria-live': 'polite' });
-  document.body.append(live);
-  const announce = (t) => { live.textContent = ''; setTimeout(() => { live.textContent = t; }, 30); };
+  const alertLive = h('div', { class: 'sr-only', role: 'alert' });
+  document.body.append(live, alertLive);
+  const say = (region, t) => { region.textContent = ''; setTimeout(() => { region.textContent = t; }, 30); };
+  const announce = (t) => say(live, t);
   /** A notice under the card. It replaces an older error of that Kin (the newer message wins) and is announced. */
   const setInfo = (kind, text, kinId = selectedKin()?.id) => { S.info = { kind, text }; S.errors.delete(kinId); announce(text); };
   /** Re-renders and puts focus on the element with this data-key (when the focused button was removed). */
@@ -62,7 +66,12 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
   }
 
   if (isWorkshop) {
-    host.channel.onKinsChange((kins) => { S.kins = kins; if (auto && selectedKin()?.id !== auto.state.kinId) auto.reschedule(); render(); });
+    host.channel.onKinsChange((kins) => {
+      S.kins = kins;
+      auto?.prune(kins.map((k) => k.id)); // a detached Kin's night is forgotten
+      if (auto && selectedKin()?.id !== auto.state.kinId) auto.reschedule();
+      render();
+    });
   }
 
   /** Where a Kin stands in this session, for the list: its last place, a reading in progress, or nothing yet. */
@@ -83,7 +92,7 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
           onClick: () => { S.info = null; settings.save({ selectedKinId: k.id }); auto?.reschedule(); afterPick(); renderAndFocus('update'); announce(`Selected ${k.name}`); } },
         avatar(36), h('span', { class: 'pp-text' }, h('strong', {}, k.name), h('span', { class: 'muted' }, kinState(k))),
         k.id === current ? h('span', { class: 'tag' }, 'Selected') : null)))),
-      h('p', { class: 'help' }, 'Only the selected Kin is read, and only when you press Update status. To attach or detach a Kin, open the app’s settings in Kindroid Apps and use Kins.'),
+      h('p', { class: 'help' }, 'Only the selected Kin is read: when you press Update status, or by the automatic update. To attach or detach a Kin, open the app’s settings in Kindroid Apps and use Kins.'),
     ];
   }
 
@@ -97,8 +106,10 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
 
   // ------------------------------------------------------------------ reading
   function show(kinId, outcome) {
-    if (outcome.ok) { S.results.set(kinId, { location: outcome.location, doing: outcome.doing, outfit: outcome.outfit, at: clock().toISOString() }); S.errors.delete(kinId); }
-    else S.errors.set(kinId, outcome.error);
+    if (outcome.ok) { S.results.set(kinId, { location: outcome.location, doing: outcome.doing, outfit: outcome.outfit, at: clock().toISOString() }); S.errors.delete(kinId); return; }
+    const repeated = S.errors.get(kinId) === outcome.error;
+    S.errors.set(kinId, outcome.error);
+    if (!repeated && kinId === selectedKin()?.id) say(alertLive, outcome.error); // the same error again is not read again
   }
 
   const SUMMARY_MAX = 500; // what `kin end` allows; anything longer did not come from this app's run
@@ -123,10 +134,11 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     return { ok: true, ...none, outfit: text || describeOutfit({}) };
   }
 
-  /** Results of the Kin on screen go to the status region; an error is already read out by its role="alert" banner. */
-  const announceResult = (id) => {
-    const r = S.results.get(id);
-    if (id === selectedKin()?.id && !S.errors.has(id) && r) announce(`${r.location} ${r.doing} ${r.outfit}`);
+  /** Results of the Kin on screen go to the status region (errors go to the alert region, see show). */
+  const resultText = (r) => (r ? `${r.location} ${r.doing} ${r.outfit}` : '');
+  const announceResult = (id, before) => {
+    const text = resultText(S.results.get(id));
+    if (id === selectedKin()?.id && !S.errors.has(id) && text && text !== before) announce(text);
   };
 
   // A reply naming another Kin is a late answer to an earlier run that timed out: not for this question.
@@ -134,8 +146,10 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
 
   /** Workshop: the run asks the Kin about its recent chat. Resolves { ok, doing } or { ok: false, error, kind }. */
   const inFlight = new Map(); // kin id -> the reading in progress (repeated clicks and the timer join it)
-  function readInWorkshop(kin) {
+  function readInWorkshop(kin, { auto: automatic = false } = {}) {
     if (inFlight.has(kin.id)) return inFlight.get(kin.id);
+    // An automatic reading that says the same as the last one is not read out again; a reading asked for always is.
+    const before = automatic ? resultText(S.results.get(kin.id)) : null;
     const p = (async () => {
       S.reading.add(kin.id); S.info = null; render();
       let outcome;
@@ -148,7 +162,7 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
       }
       show(kin.id, outcome);
       S.reading.delete(kin.id); inFlight.delete(kin.id);
-      announceResult(kin.id);
+      announceResult(kin.id, before);
       render();
       return outcome;
     })();
@@ -173,24 +187,27 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
   // Automatic readings (Workshop only): the ruler, the sleep cycle and the server warning.
   const auto = isWorkshop ? createAutomation({
     settings, clock, selectedKin,
-    read: readInWorkshop,
+    read: (kin) => readInWorkshop(kin, { auto: true }),
     ask: askInWorkshop,
     lastReadingAt: (id) => S.results.get(id)?.at ?? null,
     onChange: () => { announceAuto(); render(); },
   }) : null;
-  let lastAutoNote = '';
-  /** Falling asleep, waking up and the server warning are announced once each. */
+  let lastAutoKey = '';
+  /** Falling asleep, waking up, a follow-up question gone wrong and the server warning are announced once each. */
   function announceAuto() {
     const kin = selectedKin();
     if (!kin || !auto) return;
     const h = auto.hibernation(kin.id);
     const dream = auto.state.dreams.get(kin.id);
     const w = auto.warning();
-    const note = h ? `${kin.name} is asleep. Automatic updates pause until ${formatWhen(h.until.toISOString(), { now: clock() })}.`
-      : w ? warningText(w)
-        : dream ? `${kin.name} woke up. Dream: ${describeDream(dream)}` : '';
-    if (note && note !== lastAutoNote) announce(note);
-    lastAutoNote = note;
+    const note = auto.state.note;
+    // the key names the event, not its text: "until 7:20 AM tomorrow" becoming "until 7:20 AM" is the same night
+    const [key, text] = h ? [`asleep:${kin.id}:${h.until.toISOString()}`, `${kin.name} is asleep. Automatic updates pause until ${formatWhen(h.until.toISOString(), { now: clock() })}.`]
+      : w ? [`warning:${w.kind}`, warningText(w)]
+        : note ? [`note:${note}`, note]
+          : dream ? [`dream:${kin.id}:${dream.at}`, `${kin.name} woke up. Dream: ${describeDream(dream)}`] : ['', ''];
+    if (key && key !== lastAutoKey) announce(text);
+    lastAutoKey = key;
   }
 
   /** Local mode: build the prompt from the pasted chat, then wait for the pasted JSON answer. */
@@ -219,7 +236,9 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     if (!isWorkshop) { prepareLocal(); return; }
     // With automatic updates on (and the Kin awake), a manual update is the next automatic step, done now.
     if (auto.running() && !auto.hibernation(kin.id)) { auto.runNow(); return; }
-    await readInWorkshop(kin);
+    const r = await readInWorkshop(kin);
+    // Read by hand during its night and awake in the chat: the person woke it up, the hibernation ends.
+    if (r.ok && auto.hibernation(kin.id) && !looksAsleep(r.doing)) auto.endSleep(kin.id);
   }
 
   function warningText(w) {
@@ -238,21 +257,28 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     const value = snapInterval(settings.value.autoIntervalS);
     const index = Math.max(0, INTERVAL_STEPS.indexOf(value));
     const label = (s) => `Every ${formatInterval(s)}`;
-    const out = h('output', { for: 'auto-ruler', class: 'auto-value', 'data-testid': 'auto-value' }, label(value));
+    // a plain span: the range already speaks its value (aria-valuetext); an <output> would say it a second time
+    const out = h('span', { class: 'auto-value', 'data-testid': 'auto-value', 'aria-hidden': 'true' }, label(value));
     const run = auto.runState();
     const h8n = auto.hibernation(kin.id);
     const now = clock();
     const at = (d) => formatWhen(d.toISOString(), { now });
-    const asleep = h8n ? `Asleep until ${at(h8n.wakeAt)}. The dream question comes at ${at(h8n.until)}. ` : '';
+    let asleep = '';
+    if (h8n) asleep = now >= h8n.until ? 'Waking up: the dream question is due. ' : `Asleep until ${at(h8n.wakeAt)}. The dream question comes at ${at(h8n.until)}. `;
     let status;
     if (run === 'stopped') status = 'Stopped. Press Start to update automatically.';
     else if (run === 'paused') status = `${asleep}Paused: nothing is asked until you press Resume.`;
-    else if (h8n) status = [asleep, h('button', { type: 'button', class: 'link-btn', 'data-key': 'wake-now', onClick: () => auto.wakeNow() }, 'Wake now')];
-    else if (auto.state.busy) status = 'Updating…';
+    else if (auto.state.busy) status = h8n ? 'Asking about the dream…' : 'Updating…';
+    else if (h8n) status = [asleep, h('button', { type: 'button', class: 'link-btn', 'data-key': 'wake-now', onClick: () => { auto.wakeNow().then(() => renderAndFocus('update')); } }, 'Wake now')];
     else if (auto.state.nextAt) status = `Next update at ${at(auto.state.nextAt)}.`;
+    const note = run === 'running' && auto.state.note && !auto.warning() ? h('p', { class: 'meta auto-note', 'data-testid': 'auto-note' }, auto.state.note) : null;
     const control = (key, text, iconName, enabled, action, focusAfter) => h('button', {
       type: 'button', class: `btn small${key === 'auto-start' ? ' primary' : ''}`, 'data-key': key, disabled: !enabled,
-      onClick: async () => { await action(); renderAndFocus(focusAfter); announce(`Automatic update ${{ 'auto-start': 'started', 'auto-pause': 'paused', 'auto-stop': 'stopped' }[key]}.`); },
+      onClick: () => {
+        const changed = action(); // acts at once; the save goes on in the background
+        renderAndFocus(focusAfter);
+        if (changed) announce(`Automatic update ${{ 'auto-start': 'started', 'auto-pause': 'paused', 'auto-stop': 'stopped' }[key]}.`);
+      },
     }, icon(iconName, { size: 16 }), text);
     return h('div', { class: 'auto', role: 'group', 'aria-labelledby': 'auto-title' },
       h('div', { class: 'auto-head' },
@@ -265,16 +291,18 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
       h('div', { class: 'auto-head' }, h('label', { class: 'row-label', for: 'auto-ruler' }, 'How often'), out),
       h('input', { type: 'range', id: 'auto-ruler', class: 'ruler', 'data-key': 'auto-ruler', min: 0, max: INTERVAL_STEPS.length - 1, step: 1, value: index,
         'aria-valuetext': label(value),
+        onPointerdown: () => { dragging = true; },
         onInput: (e) => { const s = INTERVAL_STEPS[Number(e.target.value)]; out.textContent = label(s); e.target.setAttribute('aria-valuetext', label(s)); },
-        onChange: (e) => { settings.save({ autoIntervalS: INTERVAL_STEPS[Number(e.target.value)] }); auto.reschedule(); } }),
+        onChange: (e) => { dragging = false; auto.setInterval(INTERVAL_STEPS[Number(e.target.value)]); } }),
       h('div', { class: 'ruler-ends muted', 'aria-hidden': 'true' }, h('span', {}, '1 min'), h('span', {}, '2 h')),
-      status ? h('p', { class: 'meta auto-status', 'data-testid': 'auto-status' }, status) : null);
+      status ? h('p', { class: 'meta auto-status', 'data-testid': 'auto-status' }, status) : null,
+      note);
   }
 
   /** The warning about Kindroid itself takes the place of the error banner: it says more (why, and when the next try is). */
   function renderServerWarning(w) {
     return h('div', { class: 'banner warn', role: 'status', 'data-testid': 'server-warning' }, icon('alert', { size: 18 }), h('span', { class: 'banner-text' }, warningText(w)),
-      h('button', { type: 'button', class: 'btn small', 'data-key': 'auto-retry', onClick: () => auto.runNow() }, 'Try now'));
+      h('button', { type: 'button', class: 'btn small', 'data-key': 'auto-retry', onClick: () => { auto.runNow(); renderAndFocus('update'); } }, 'Try now'));
   }
 
   // ---------------------------------------------------------------- rendering
@@ -309,7 +337,8 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
         h('p', { class: 'muted' }, 'Which Kin is in your roleplay now?'),
         ...kinList(() => {}));
     }
-    const reading = S.reading.has(kin.id);
+    // a follow-up question (sleep, dream) of the automatic update is shown as activity too
+    const reading = S.reading.has(kin.id) || Boolean(auto?.state.busy && auto.state.kinId === kin.id);
     const result = S.results.get(kin.id);
     const error = S.errors.get(kin.id);
     const dream = auto?.state.dreams.get(kin.id);
@@ -317,7 +346,7 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     const now = clock();
     return h('section', { class: 'card', 'aria-label': `${kin.name} status` },
       h('div', { class: 'card-top' },
-        h('div', { class: 'toggle static' }, avatar(48), h('span', { class: 'who' }, h('span', { class: 'name' }, kin.name),
+        h('div', { class: 'who-row' }, avatar(48), h('span', { class: 'who' }, h('span', { class: 'name' }, kin.name),
           isWorkshop && S.kins.length > 1 ? h('span', { class: 'muted small', 'data-testid': 'only-this' }, `Only this Kin is read · ${S.kins.length - 1} other${S.kins.length > 2 ? 's' : ''} attached`) : null)),
         isWorkshop && S.kins.length > 1 ? h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Switch Kin', 'data-key': 'switch', onClick: (e) => chooseKin(e.currentTarget) }, icon('users', { size: 20 })) : null),
       h('div', { class: 'card-body' },
@@ -344,7 +373,7 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
         h('p', { class: 'meta', 'data-testid': 'last-checked' }, 'Last checked: ',
           result ? [h('time', { datetime: result.at }, formatClock(result.at, { now })), ' · ', h('span', { class: 'rel', 'data-iso': result.at }, formatRelative(result.at, now))] : 'never'),
         warning ? renderServerWarning(warning)
-          : error ? h('div', { class: 'banner error', role: 'alert', 'data-testid': 'banner' }, icon('alert', { size: 18 }), h('span', { class: 'banner-text' }, error),
+          : error ? h('div', { class: 'banner error', 'data-testid': 'banner' }, icon('alert', { size: 18 }), h('span', { class: 'banner-text' }, error),
           h('button', { type: 'button', class: 'btn small', 'data-key': 'retry', onClick: update }, 'Try again'))
           : S.info ? h('div', { class: `banner ${S.info.kind}`, role: 'status', 'data-testid': 'banner' }, icon('refresh', { size: 18 }), h('span', { class: 'banner-text' }, S.info.text)) : null,
         isWorkshop ? renderAutomation(kin) : null));
@@ -404,7 +433,23 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
           renderThemePicker())));
   }
 
+  // A render asked for while one is running, or while the person holds the ruler's thumb, waits: rebuilding the
+  // ruler under the pointer would drop the rest of the drag.
+  let rendering = false;
+  let dragging = false;
+  let renderPending = false;
+  const endDrag = () => { if (!dragging) return; dragging = false; if (renderPending) render(); };
+  window.addEventListener('pointerup', endDrag);
+  window.addEventListener('pointercancel', endDrag);
+
   function render() {
+    if (rendering || dragging) { renderPending = true; return; }
+    rendering = true; renderPending = false;
+    try { renderNow(); } finally { rendering = false; }
+    if (renderPending) render();
+  }
+
+  function renderNow() {
     keepFocus(root, () => {
       const work = isWorkshop ? renderWorkshopSettings() : renderReader();
       root.replaceChildren(

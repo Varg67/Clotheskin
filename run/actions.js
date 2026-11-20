@@ -21,7 +21,7 @@ export function packReading({ kin, location, doing, outfit }) {
 }
 
 /** A failure line for the screen: {"kin","error","kind"}. kind: server (Kindroid did not answer), answer (the Kin did). */
-export function packFailure({ kin, error, kind }) {
+function packFailure({ kin, error, kind }) {
   const pack = (e) => JSON.stringify({ kin, kind, error: e });
   let text = String(error);
   while (text.length > 1 && pack(text).length > KIN_END_LIMIT) text = `${text.slice(0, -2)}…`;

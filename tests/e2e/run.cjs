@@ -87,7 +87,9 @@ const step = async (name, fn) => {
     await page.locator('#response').fill('{ broken');
     await key('apply').click();
     const b = page.locator('[data-testid="banner"]');
-    assert.equal(await b.getAttribute('role'), 'alert');
+    // read out once by the page's own alert region (a banner rebuilt on every render would repeat it)
+    await page.waitForFunction(() => /not valid JSON/.test(document.querySelector('[role=alert]')?.textContent || ''));
+    assert.equal(await b.getAttribute('role'), null);
     assert.match(await b.innerText(), /not valid JSON/);
     assert.ok((await b.innerText()).includes('Try again'));
     assert.equal(await outfit(), 'Wearing a white shirt, blue jeans and sneakers.');

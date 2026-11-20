@@ -25,9 +25,12 @@ The example only shows the format; never copy its values.
 Example: {"location":"at a bookstore","pose":"standing by a shelf","action":"flipping through a book","topwear":["a grey hoodie"],"bottomwear":["black leggings"],"footwear":["white sneakers"]}
 {{recent_chat}}`;
 
+/** The Kin's name for a prompt: one line, at most 60 characters. */
+const kinName = (name) => String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, 60) || 'the character';
+
 /** Fills in the Kin's name (max 60 characters) and, in local mode, the pasted chat. */
 export function buildOutfitPrompt({ name, chat = '', template = OUTFIT_PROMPT }) {
-  const who = String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, 60) || 'the character';
+  const who = kinName(name);
   const recent = String(chat ?? '').trim();
   return template.replace(/\{\{(\w+)\}\}/g, (m, k) => ({
     name: who,
@@ -56,7 +59,7 @@ Nothing else.`;
 
 /** Fills a follow-up prompt (sleep or dream) with the Kin's name and the person's current time. */
 export function buildFollowUpPrompt(template, { name, now }) {
-  const who = String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, 60) || 'the character';
+  const who = kinName(name);
   const when = String(now ?? '').replace(/\s+/g, ' ').trim().slice(0, 40) || 'unknown';
   return template.replace(/\{\{(\w+)\}\}/g, (m, k) => ({ name: who, now: when }[k] ?? m));
 }

@@ -11,14 +11,16 @@ export class LocalStorageAdapter {
   async set(key, value) { this.ls.setItem(key, value); }
 }
 
+import { DEFAULT_INTERVAL_S } from './auto.js';
+
 export const SETTINGS_KEY = 'clotheskin:v2:settings';
 export const DEFAULT_SETTINGS = {
   theme: 'warm', // 'warm' (stock Kindroid) | 'sage' (green, sampled from a customised desktop window)
   selectedKinId: null,
   localName: 'Isa',
-  autoIntervalS: 600, // automatic readings in the Workshop, in seconds; shown as minutes and hours on the ruler
+  autoIntervalS: DEFAULT_INTERVAL_S, // automatic readings in the Workshop, in seconds; shown as minutes and hours on the ruler
   autoState: 'stopped', // 'running' | 'paused' | 'stopped' (Start, Pause, Stop)
-  sleep: {}, // kin id -> { wakeAt, until, sleptOn }: the hibernation of a sleeping Kin (times only, nothing about the scene)
+  sleep: {}, // kin id -> { wakeAt, until, sleptOn }: a sleeping Kin's hibernation (times, and a fingerprint of the sentence: nothing about the scene)
 };
 
 /** Preferences only (theme, selected Kin, local-mode name, automatic interval, wake-up times). No outfit, no place and no chat is ever stored. */

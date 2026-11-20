@@ -41,7 +41,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .card { border-radius: var(--radius-lg); box-shadow: var(--shadow-glass); overflow: hidden; }
 .card-top { display: flex; align-items: center; gap: 4px; padding-right: 10px; }
-.toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 12px 8px 12px 14px; background: none; border: 0; text-align: left; cursor: pointer; min-height: 60px; border-radius: var(--radius-md); }
+.who-row { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 12px 8px 12px 14px; min-height: 60px; }
 .who { display: flex; flex-direction: column; min-width: 0; flex: 1; }
 .name { font-weight: 700; font-size: 1.1rem; overflow-wrap: anywhere; }
 .avatar { display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; overflow: hidden; background: var(--accent-tint); border: 2px solid var(--glass-border); box-shadow: var(--shadow-glass); flex: none; }
@@ -133,15 +133,16 @@ dialog.sheet::backdrop { background: var(--scrim); -webkit-backdrop-filter: blur
 .fact-text { display: flex; flex-direction: column; min-width: 0; }
 .fact-value { font-size: 1.05rem; line-height: 1.4; overflow-wrap: anywhere; }
 .fact.empty .fact-value { color: var(--muted); font-style: italic; font-size: .98rem; }
-.toggle.static { cursor: default; }
 
-/* Automatic update: a compact ruler with uneven stops (Off, 1, 2, 5, 10 … min, 1 h, 1 h 30, 2 h) */
+/* Automatic update: Start / Pause / Stop and a compact ruler with uneven stops (1, 2, 5, 10 … min, 1 h, 1 h 30, 2 h) */
 .auto { margin-top: 14px; padding: 12px 14px 10px; border-radius: var(--radius-md); background: var(--glass); border: 1px solid var(--glass-border); }
 .auto-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 .auto-value { font-weight: 700; color: var(--accent-deep); }
-.auto-controls { display: flex; gap: 8px; margin: 10px 0 12px; }
-.auto-controls .btn { flex: 1; padding-inline: 10px; }
-.btn:disabled { opacity: .5; cursor: default; box-shadow: none; }
+.auto-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 12px; }
+.auto-controls .btn { flex: 1 1 auto; min-width: 0; padding-inline: 10px; }
+/* disabled: a quiet outline, still readable (a faded coral button looked broken) */
+.btn:disabled, .btn.primary:disabled { opacity: 1; cursor: default; box-shadow: none; background: transparent; border: 1px dashed var(--line); color: var(--muted); }
+.btn:disabled .icon, .btn.primary:disabled .icon { color: var(--muted); }
 .auto-state { font-size: .8rem; font-weight: 700; padding: 1px 10px; border-radius: var(--radius-pill); background: var(--line-soft); color: var(--text); }
 .auto-state.running { background: var(--ok-tint); color: var(--ok); }
 .auto-state.paused { background: var(--accent-tint); color: var(--accent-deep); }
@@ -150,3 +151,5 @@ dialog.sheet::backdrop { background: var(--scrim); -webkit-backdrop-filter: blur
 .auto-status { margin: 8px 0 0; }
 .link-btn { background: none; border: 0; padding: 0; color: var(--accent-deep); font-weight: 700; text-decoration: underline; cursor: pointer; min-height: 24px; }
 .banner.warn { border-color: var(--accent); background: var(--accent-tint); } .banner.warn .icon { color: var(--accent-deep); }
+.auto-note { margin: 6px 0 0; color: var(--accent-deep); }
+.not-connected-title { margin: 0; font-size: 1.3rem; line-height: 1.3; }

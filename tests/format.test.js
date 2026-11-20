@@ -23,3 +23,14 @@ test('formatWhen: a time tomorrow says so; today is just the time', async () => 
   assert.equal(formatWhen('2026-11-21T01:50:00Z', { timeZone: 'America/Sao_Paulo', now }), '10:50 PM');
   assert.equal(formatWhen('2026-11-23T10:30:00Z', { timeZone: 'America/Sao_Paulo', now }), 'Nov 23, 7:30 AM');
 });
+
+test('formatWhen: the nights of a daylight-saving change still say "tomorrow" only for the next calendar day', async () => {
+  const { formatWhen } = await import('../screen/src/core/format.js');
+  const tz = 'America/New_York';
+  // 00:30 on Nov 1 (the clocks go back that night): 07:30 the same day is not "tomorrow"
+  assert.equal(formatWhen('2026-11-01T12:30:00Z', { timeZone: tz, now: new Date('2026-11-01T04:30:00Z') }), '7:30 AM');
+  // 23:30 on Mar 7 (the clocks go forward that night): 07:30 on Mar 8 is "tomorrow"
+  assert.equal(formatWhen('2026-03-08T11:30:00Z', { timeZone: tz, now: new Date('2026-03-08T04:30:00Z') }), '7:30 AM tomorrow');
+  // the last day of a month
+  assert.equal(formatWhen('2026-12-01T10:30:00Z', { timeZone: 'America/Sao_Paulo', now: new Date('2026-12-01T01:00:00Z') }), '7:30 AM tomorrow');
+});

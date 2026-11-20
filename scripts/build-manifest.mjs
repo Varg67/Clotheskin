@@ -1,33 +1,49 @@
-// Generates kin.json. `node scripts/build-manifest.mjs` writes it; the tests check it is up to date.
+// Generates kin.json, the only file Kindroid reads (guide: "What a program is").
+//   node scripts/build-manifest.mjs          writes kin.json
+//   node scripts/build-manifest.mjs --check  fails if kin.json is not what this gives (a test runs this)
 import { readFileSync, writeFileSync } from 'node:fs';
-import { SCHEDULE_TICK_MINUTES } from '../screen/src/core/auto.js';
+import { fileURLToPath } from 'node:url';
+import { ACTION, OPS } from '../run/program.js';
+
+export const CHAT_DAYS = 2; // the Kin sees 2 days of its chat: an outfit described yesterday is still in view
 
 export function buildManifest() {
   return {
     kin: 1,
     name: 'Clotheskin',
-    purpose: 'Shows where a Kin is, what it is doing, what it is wearing and how its hair and makeup look, read from its recent chat, now or on a schedule.',
-    // The schedule beat is fixed here; the person's interval is applied by the run (see screen/src/core/auto.js).
-    triggers: [{ on: 'schedule', cron: `*/${SCHEDULE_TICK_MINUTES} * * * *`, tz: 'user' }],
-    run: { entry: 'node main.js', timeout: '4m' },
+    purpose: 'Shows where your Kin is, what it is doing and what it is wearing, from its recent chat. Follows its nights and tells it the dream it remembers, if you allow it.',
+    // Every 15 minutes, on the person's clock. Each start checks whether a reading is due (settings.json) and most
+    // end at once; the interval the person picks (15 min to 4 h) decides how often the Kin is actually asked.
+    triggers: [{ on: 'schedule', cron: '*/15 * * * *', tz: 'user' }],
+    run: { entry: 'node main.js', timeout: '2m' },
     screens: [{ slot: 'panel', entry: 'screen/index.html', title: 'Clotheskin' }],
+    // One action, so one input rule (a published program saw an action's input checked against another action's).
     actions: [
       {
-        name: 'read_outfit',
-        description: 'Reads the Kin’s recent chat and describes where it is, what it is doing, what it is wearing and its hair and makeup, one sentence each.',
-        input: { type: 'object', properties: { kin: { type: 'string' }, name: { type: 'string' } }, required: ['kin'] },
+        name: ACTION,
+        description: 'Reads the selected Kin now (where it is, its pose and action, its outfit), or asks about its dream when it is asleep.',
+        input: {
+          type: 'object',
+          properties: { kin: { type: 'string' }, op: { type: 'string', enum: OPS } },
+          required: ['kin'],
+        },
         by: ['user'],
       },
     ],
-    grants: ['kin:read', 'chat:read:1'],
+    grants: ['kin:read', `chat:read:${CHAT_DAYS}`],
   };
 }
 
-const target = new URL('../kin.json', import.meta.url);
-const text = `${JSON.stringify(buildManifest(), null, 2)}\n`;
-if (process.argv.includes('--check')) {
-  if (readFileSync(target, 'utf8') !== text) { console.error('kin.json is out of date: run node scripts/build-manifest.mjs'); process.exit(1); }
-} else if (process.argv[1] && process.argv[1].endsWith('build-manifest.mjs')) {
-  writeFileSync(target, text);
-  console.log('kin.json written');
+const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+if (isMain) {
+  const target = new URL('../kin.json', import.meta.url);
+  const text = `${JSON.stringify(buildManifest(), null, 2)}\n`;
+  if (process.argv.includes('--check')) {
+    let current = '';
+    try { current = readFileSync(target, 'utf8'); } catch { /* missing */ }
+    if (current !== text) { console.error('kin.json is out of date: run npm run build'); process.exit(1); }
+  } else {
+    writeFileSync(target, text);
+    console.log('kin.json written');
+  }
 }

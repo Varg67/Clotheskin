@@ -1,132 +1,122 @@
 # Clotheskin
 
-A small tracker for Kindroid companions. It asks a Kin where it is, how it is positioned, what it is doing, what it is wearing and how its hair and makeup look, reads the answer, puts the pieces in order, adds the commas and shows **five natural sentences**:
+A Kindroid app that follows your Kin in the current roleplay. It asks the Kin where it is, how it is positioned, what it is doing, what it is wearing, and its hair and makeup, and shows **short sentences**:
 
 > **Location** In the living room.
-> **Pose and action** Sitting on the sofa, drinking coffee.
-> **Outfit** Wearing a leather jacket, a perfumed white shirt and blue jeans, with glasses.
-> **Hair** Long black hair in a ponytail.
-> **Makeup** Red lipstick and eyeliner.
+> **Pose and action** Standing, adjusting her collar.
+> **Outfit** Wearing a leather jacket, a perfumed white shirt and blue jeans.
+> **Hair** Up in a messy bun. *(and **Makeup**, when the Kin says)*
 
-Everything comes from one question, so one `kin ask` per reading. In local mode nothing is saved. In the Workshop each Kin's **latest reading** is kept, so a reading made in the background can be shown later, plus a short **history** (the last 20 readings) and a **diagnostics log** (the last 15 attempts); it can run **automatically** at an interval you choose, and **waits longer while nothing changes**. Each reading stands on its own. (An earlier version kept a full wardrobe with item identity, layers, editors and six saved fields. It is in the git history at commit `17473e5`.)
+It can do this by itself every 15 minutes to 4 hours, and it follows the Kin's nights. When the Kin falls asleep it asks when it will wake up and leaves it alone until then. In the morning it asks what it dreamt and how much it still remembers. With your permission, it also tells the Kin its dream, so the Kin can remember it during the day.
 
-## Open it
+Built from Kindroid's guide for coding tools ("Making things for a Kin with your own coding tool") and from published programs (Dice Roller, Bunny & Fox BBS, Aurora Alert).
 
-Requires Node 20+. No dependencies.
+## How it works in Kindroid
 
-```bash
-npm start
+```
+ Kindroid, every 15 min ──> node main.js ──> run/program.js ──> kin ask / kin tell / kin files
+ (schedule trigger)               ^                 │
+                                  │                 └──> status.json  (the run writes)
+ screen ── update_status ─────────┘                          │
+   │                                                         v
+   └── settings.json (the screen writes) <───────── screen reads both
 ```
 
-Open <http://localhost:5173> in a desktop browser. This is local mode: it serves the `screen/` folder and needs no Kindroid.
+- **The run is the engine** (`main.js`, `run/program.js`). A schedule trigger (`*/15 * * * *`, on the person's clock) starts it every 15 minutes. Each start reads `settings.json` and checks whether a reading is due; most starts end there, without asking anything. When one is due, it asks the Kin (`kin ask`; the Kin sees 2 days of its chat through `chat:read:2`) and writes the result to `status.json`.
+- **The screen is a view and a remote control** (`screen/`). It shows `status.json`, which it re-reads every minute and after each action. It writes only `settings.json`: which Kin, Start/Pause/Stop, the interval, the person's time zone, the theme and the dream options. **Update status** and **Wake now** use the program's one action, `update_status`, which runs the same engine at once. Each file has one writer, so the screen and a run never overwrite each other.
+- **The sleep cycle.**
+  - **Falling asleep.** When the pose and action say the Kin is asleep ("Lying in bed, sleeping."), the run asks whether it is and when it plans to wake up. The question gives the person's clock ("It is now 23:10 on Friday"), and the answer is JSON: `{"sleeping":true,"wake_at":"07:30"}`.
+  - **The night.** Nothing is asked until about 10 minutes before the wake-up time.
+  - **The dream.** Then the run asks `{"dream":"…","remembered":"all|most|some|little|nothing"}`. The screen shows the answer as **Last dream**. Unless the person turned it off, the run also tells the Kin with `kin tell --key dream --ttl 24`; with "Let my Kin bring the dream up by itself" turned on, it adds `--reach-out soon`.
+  - **The next morning.** The chat usually stays still overnight, so the same "asleep" sentence does not start a new night. A wake-up time less than 15 minutes or more than 14 hours away is not believed, and the readings go on.
+  - **Waking up early.** Reading the Kin by hand during its night and finding it awake ends the night.
+- **Errors.**
+  - **Retries:** a fast Kindroid failure (a 502, a 503, a dropped connection) is tried once more within the run. Errors in a row slow the next try down: 2× from the second, up to 1 hour.
+  - **Server warning:** three Kindroid errors in a row show a warning with the time of the next try. A failure that says "maintenance", "scheduled downtime" or "outage" shows a maintenance warning and waits at least 30 minutes. A failing `kin kins` counts like any Kindroid error.
+  - **Kin answers:** a wrong answer from the Kin (in character, not JSON) is the Kin's error, not Kindroid's: it slows the readings down without the server warning. The error never quotes the answer.
+  - **Nothing lost:** a file that exists but cannot be read is never written over (only kin's own "404" means "no file yet"). A save that fails ends the run with `--failed`.
+- **Time.** A run has 2 minutes (`kin.json`). The program keeps to 100 s: each question gets only the time left, and a retry or sleep question that would not fit waits for the next start. The reading is saved before the sleep question, so it is never lost. If anything still hangs, `main.js` ends the run itself at 110 s with `kin end --failed`.
+- **Two runs at once** (a scheduled start and Update status): each save re-reads `status.json`. The night goes to the run that changed it (one that asked the dream question beats one that only read "still asleep"). The newest reading and dream are kept.
+- **Start / Pause / Stop.**
+  - **Pause:** nothing is asked; the night and its times are kept.
+  - **Stop:** nothing is asked, and the night, the dream and any slowing down are forgotten at once (Stop saves `stoppedAt`; the run and the screen both set aside what is older). The last reading stays.
+  - **The ruler:** moving it applies at once. The planned time is the last run plus the current interval, except when errors are slowing things down; then the later try is kept.
 
-## Test it
+### What is stored, and what it costs
+
+- **Stored**, in the program's folder in Kindroid: `settings.json` (your choices) and `status.json`.
+  - `status.json` holds, per Kin: the last reading (the three sentences), when it last ran, errors, the night's times, and the last dream summary.
+  - Never the chat. For the night, only a fingerprint (hash) of the "asleep" sentence, never the sentence.
+  - The screen keeps nothing in the browser.
+- **Credits.** Kindroid starts the program every 15 minutes, **even while it is stopped**, and running time uses the person's credits. Each start that has nothing due is a short run: it reads two files and ends. The Kin is asked only when an update is due: once per interval, plus the sleep and dream questions. The screen says this under the ruler.
+
+## Develop
+
+Requires Node 22+. No dependencies at run time.
 
 ```bash
-npm test            # unit tests (Node's built-in runner)
-npm run test:e2e    # browser tests: local mode at 960×690, and Workshop mode in a 390 px frame against a fake Workshop
+npm start            # the dev harness: http://localhost:5173
+npm test             # unit tests (node --test), ~110 checks, a few seconds
+npm run test:e2e     # browser tests on the dev harness (Playwright + Chromium)
+npm run build        # rebuilds screen/app.js and kin.json (tests fail if either is stale)
 ```
 
-`tests/what-if.test.js` holds **"what if…" scenarios**: futures in which the app could break, each stating what should happen instead. A Kin that answers with keys like `constructor`, wraps its JSON in a list, leaks invisible characters, emojis or HTML; corrupt files (dates that are not dates, settings that say `"false"` as text: automatic updates stay **off**); a clock that jumps back; a failure in the middle of a quiet stretch; clearing the history while a run writes; text full of characters JSON must escape at the 500-character limit; and **fuzzing**: thousands of random answers (fixed seed, so a failure repeats) through the parser, the end line and the whole run. The browser test also opens a Kin whose files are corrupt and checks that the screen keeps working.
+**The dev harness** (`dev/`) is a stand-in for Kindroid.
+- **The real pieces.** It shows the real screen in a 390-point frame and answers its messages (`kins`, `files.read`, `files.write`, `action`) as the guide describes. Actions and the "15-minute start" run the **real** `run/program.js`.
+- **The stand-in Kin.** Its answers come from a scene (`dev/scenes.js`), and you can edit them. One scene goes to sleep and dreams.
+- **Other controls.** You can attach and detach Kins, make Kindroid "fail" or be "under maintenance", and see every `kin` call.
+- **The browser tests** drive the same harness (`window.dev`) with Playwright's clock, so a whole night takes a second.
 
-`tests/polaris-what-if.test.js` does the same for **the question sent to the Kin**, as a roleplay model such as Kindroid's Polaris (flagship since September 2026, built for continuity over long chats with long-term memory) might interpret it: narration or an OOC note around the JSON, the format example echoed before the answer, "almost JSON" (Python quotes, bare keys, comments, `True`/`None`, an object sent as a string or under a wrapper key), slots grouped under `outfit`, keys translated to Portuguese, values written as first-person sentences ("I'm in the kitchen right now"), the example copied instead of answered (rejected), refusals and in-character replies (an error; the last reading stays), an answer cut off mid-way (an error, never completed by guessing), text that tries to give the app orders (only text), and an outfit from memory instead of the recent chat (the question now says to use the recent chat only, not memories, journal, backstory or earlier days). These are informed guesses: Kindroid's documentation could not be read from the build environment, and nothing was run against Polaris itself.
+**The plan for the first test with a real Kin** is `docs/real-kin-test-script.md` (in Portuguese): reading scenes, the night, the automation with the panel closed, and provoked failures. It is generated from the code (`npm run build`), so the sentences it expects are the ones the app shows.
 
-The browser tests need Playwright and Chromium. If they are not installed: `npm i --no-save playwright && npx playwright install chromium`. Screenshots go to `tests/e2e/shots/`.
-
-## How it works
-
-1. **Ask.** The Kin gets one short question (`screen/src/core/prompt.js`): say where you are, how you are positioned, what you are doing and what you are wearing, as of your last message, in English only, concisely, as one-line JSON. `location` is a short phrase starting with in, at or on (`in the kitchen`, `at the hospital`, `on the bus to college`): the place only, not posture; travelling is a place (`on the way to the hospital`), a plan to go somewhere is not. `pose` is the body position (`sitting on the sofa`, `standing by the window`; it may name the furniture, while `location` is the room or place) and `action` is what it is doing right now as a short -ing phrase (`drinking coffee`): not plans, not things already finished, not feelings. `hair` and `makeup` are one short phrase each (`a messy bun`, `red lipstick and eyeliner`); `no makeup` is written only when the chat says so (a bare `none` means nothing was said). The other keys are slots (`headwear`, `topwear`, `bottomwear`, `footwear`, `footunderwear`, `topunderwear`, `bottomunderwear`, the twelve `*-accessory` slots and `bags`); values are lists of pieces, innermost layer first. The prompt is about 2,400 characters (`kin ask` allows 8,000); it is sent with every reading, so it is kept short.
-2. **Read.** `parseReading` (`screen/src/core/outfit.js`) parses the answer. Common slips are handled: JSON inside a code fence or narration (the last complete object is read, so an echoed example before it is skipped), trailing commas, curly quotes, comments, single quotes, bare keys, keys in Portuguese, slots grouped under `outfit`, a single string instead of a list, slot words like `top` or `shoes`, `clothing`/`accessories` instead of slots, placeholders such as `unknown` or `n/a`. A wrong value type or text that is not JSON is an error, and nothing is guessed.
-3. **Show.** `describeOutfit`, `describeLocation` and `describeDoing` are the whole logic. The pose and action are one sentence, pose first, then the action after a comma (`Sitting on the sofa, drinking coffee.`); an action already written inside the pose is not repeated. For the action the Kin's slips are repaired (`I am reading a book` → `Reading a book.`) and plans, the past, future time words (`later`, `tomorrow`), feelings and `nothing` mean no action (`going to the store` is movement and stays). A pose that is really a place (`in the kitchen`) becomes the location when there is none, `position`/`posture`/`stance` and `activity`/`doing` are accepted as key names, and an object or number is an error. The location: The location is capitalised and given a full stop (the Kin is asked for the place only, so common slips are repaired: markdown or quotes around it, a posture or activity in front (`sitting on the sofa in the living room` → `On the sofa in the living room.`), a clause after it (`, cooking dinner`, `while reading`, `wearing a robe`), a list instead of a text, the keys `place`/`where`/`current_location`; a posture with no place, `somewhere`, `nowhere`, `unknown` and similar mean nothing was said; an object or number is an error. A bare noun phrase gets "in" only after an article or for a proper name (`Alfenas` → `In Alfenas.`), `home` gets "at", any other bare word and anything in Portuguese is shown as written). The outfit: branches in order (head, top, bottom, feet, then accessories and bags), the outermost piece first inside a branch, commas and "and". Underwear is only mentioned when there is nothing else to say about clothing. Hair and makeup (`describeHair`, `describeMakeup`) are the Kin's phrase with a capital and a full stop; a list is joined with commas and "and", `my hair is` is dropped, and `hairstyle`/`cosmetics` are accepted as key names. A missing key shows "No location described in the recent chat.", "No hair described in the recent chat." and so on.
-
-The text the Kin reads is the `OUTFIT_PROMPT` constant; change it there. Its example is deliberately not the brief's scenario and the prompt says to never copy it, so a Kin that does copy values is easy to spot. `tests/location-ambiguity.test.js` and `tests/pose-action-ambiguity.test.js` feed plausible wrong answers through the pipeline.
-
-## Two modes
-
-- **Local** (`npm start`): paste a conversation, press **Update status** (or **Prepare prompt**), copy the prompt into any model, paste its JSON, press **Show status**. Demo scenes (including the Portuguese chat from the brief) run in one click. The pasted chat is kept in memory only.
-- **Kindroid Workshop**: the app is a Workshop program (`kin.json`, `screen/`, `main.js`). The screen is shown in a ~390 pt locked frame. Kins are the ones attached to the app (id and name come from the host). **Update status** runs the action `read_outfit`: the run asks the Kin with `kin ask --kin <id>`, stores the reading, and ends with `kin end '{"at":"…","location":"…","doing":"…","outfit":"…","hair":"…","makeup":"…"}'`, which the screen shows. `kin end` allows 500 characters, so a long outfit, hair or makeup is shortened in that line (`"cut":true`; hair and makeup are left out when nothing was said); the screen then reads the stored copy, which has the same `at` and is never shortened, and shows it whole. Because the key cannot read chat, the grant `chat:read:1` lets the Kin itself see its recent chat, so the prompt carries no messages.
-
-Stored: small preferences (theme, selected Kin, local character name, the automatic-update settings) and, in the Workshop only, two files per Kin: the latest reading, and a journal with the last 20 readings (history) and the last 15 attempts (diagnostics). Locally that is `localStorage` (preferences only); in the Workshop it is the program's own folder through `files.read`/`files.write` (the screen) and `kin files` (the run). No chat text and no answer of the Kin is ever stored: only the sentences, times, and for diagnostics the duration, the size of the answer and the reason of a failure.
-
-## History and diagnostics (Workshop)
-
-- **History**, under the card: the last 20 readings of the selected Kin, newest first, each with its time and whether it was automatic. Each entry repeats only what changed since the one before it. Automatic checks that found nothing new are not added (they are in the diagnostics). **Clear history** (press twice: a locked frame may not allow dialogs) empties it and keeps the current status.
-- **English only.** The Kin is asked to answer in English, keys and values, translating from the chat (the rule is the second line of the question). English answers are shorter, so they cost fewer tokens, and the sentences are English. A Portuguese answer is still read (Portuguese keys are understood, values are shown as written), but it is noticed: `notEnglishKeys` in `screen/src/core/outfit.js` checks for Portuguese key names and common Portuguese words (a capitalised name like *São Paulo* is not counted), and Diagnostics says how many answers were not fully in English and which keys.
-- **Diagnostics**, in Settings: the last 15 attempts of the selected Kin, manual or automatic: when, ok or the kind of failure (`timeout`, `network`, `unavailable`, `rate-limit`, `permission`, `bad-answer`…), how long the question took, how many tries, how many characters the answer had (and the average, a measure of output tokens), which keys came back in Portuguese, whether the line back was shortened, and the error text. **Copy diagnostics** copies it as JSON. It is meant for the first real runs (see *Pending verification*): it shows how the real `kin ask` behaves and what its errors say.
-- Both are read only while open, so they cost nothing in the background. The run writes the journal after the reading (`JournalStore.record` in `screen/src/core/readings.js`): it reads it first and writes nothing if it cannot be read, so a passing storage problem never wipes the history; its `kin files` calls have a 15-second timeout, and a manual run that is already 110 s in skips it, so the screen (which waits 150 s) still gets the reading in time. A journal problem never fails a reading.
-
-## Automatic updates (Workshop)
-
-In **Settings → Automatic updates**: switch it on, set **Ask every (minutes)** (5 to 1,440; default 15) and tick the Kins to follow. Switching it on ticks the selected Kin.
-
-- The Workshop cannot change a schedule at run time (`kin.json` is fixed), so the program is woken on one fixed beat (every 5 minutes, `*/5 * * * *`, set in `scripts/build-manifest.mjs`). Each run reads your settings and asks only the Kins that are due, so any interval is possible, rounded up to a multiple of 5 (the screen says so: "7 minutes behaves like 10").
-- A Kin is due when the interval has passed since its last **attempt**. A failed attempt keeps the last good sentences and is retried after a short backoff (5, 10, 20… minutes, never more than the interval), not on every beat; a permission problem waits the whole interval. A manual **Update status** restarts the clock, so a Kin is not asked twice in a row.
-- **Wait longer when nothing changes** (on by default): each automatic check that finds the same sentences as the one before (compared ignoring case, punctuation and accents) doubles the wait, up to 4× the interval and never past 24 hours. With 15 minutes that is 15, 30, 60, 60… The first change, a failure (which uses the short retry below) or **Update status** goes back to your interval. The settings say when it is stretching ("Nothing changed in the last 2 checks, so the next one waits about 60 minutes instead of 15."). A different wording of the same scene counts as a change, so when unsure the app asks sooner, not later. Logic: `adaptiveWaitMinutes` in `screen/src/core/auto.js`; the count is `stableCount` in the stored reading.
-- At most 3 Kins are asked per beat (each is one question and a run has a time limit); the rest follow on the next beats, longest-waiting first. The attempt is marked **before** the question is sent, so a beat that starts while a previous one is still waiting for the Kin skips it. Two runs that start at the very same instant could still both ask; the platform may or may not serialise runs, which the guide does not say.
-- The screen shows the stored reading when you open it ("Last checked … · automatic") and notices a new one every 20 seconds and when it regains focus. A failed automatic check shows "The last automatic check failed: …" under the card without erasing the last good sentences.
-- Logic: `screen/src/core/auto.js` (interval, who is due), `screen/src/core/readings.js` (the stored reading), `run/actions.js` (the beat). Corrupt or missing settings mean **off**, never a burst of questions.
-- **Cost:** every check is a `kin ask` plus running time, which the guide says uses your credits; it does not say how much. The beat itself also wakes the app every 5 minutes even when automatic updates are off (a run that does nothing and ends at once). Nothing is asked unless the setting is on.
-- Local mode shows the section disabled with the reason: there is no Kin to ask on a schedule.
-
-## When something goes wrong
-
-The Kin or the connection can fail at any time: the model down or overloaded, a lag, a dropped connection, a rate limit, a missing permission. The app never loses the **last good reading** because of a failure, never hammers a failing Kin, and says what happened in plain English.
-
-| What happened | What the app does |
-|---|---|
-| The `kin ask` takes too long (70 s) | the process is stopped (SIGTERM, then SIGKILL two seconds later if it ignores it), reported as "The Kin did not answer in time"; not retried at once, because it already cost a minute |
-| Connection error, model unavailable or overloaded, rate limit | classified (`screen/src/core/errors.js`) and reported ("The Kin or its model is unavailable right now"); **Update status** retries once after 2 seconds, scheduled beats do not retry inside the run |
-| Missing permission (`403`, `grant`) | reported with what to do ("check Apps, Waiting for you"); **not** retried sooner than the interval, since asking again cannot help |
-| The `kin` command cannot start | reported as such; same as a permission problem |
-| The Kin answers in character or the answer is cut | "not valid JSON … Nothing was changed"; counts as a failure |
-| The Workshop itself does not answer the screen | "Kindroid did not answer in time. Check your connection and try again. Your last reading is still shown."; a reply that arrives late, after the screen gave up, is ignored |
-| The Kin is just slow | after 15 s the button says "Still waiting for the Kin…" and a note says it can take up to a minute |
-| A stored file cannot be **read** (not "missing") | that Kin is skipped, never overwritten: asking and saving could replace sentences that are fine. Unreadable **settings** end the beat as failed ("Could not read the settings"), they are not guessed as on or off |
-| A setting cannot be **saved** | it is taken back and the screen says "Could not save this setting…", so you never believe automatic updates are on when the scheduled run cannot see it |
-
-**Automatic checks after a failure** do not wait a whole interval, because a two-minute outage should not mean an hour without updates. The wait starts at one beat and doubles (5, 10, 20, 40 minutes…) up to your interval, then resets on the first success. A failure also shows under the card: the reason, how many checks in a row failed, and when it will try again. A beat stops starting new questions when there is not room left in the run's time limit; whoever is left goes first next time.
-
-`tests/failures.test.js` covers all of this, including a fake `kin` process that hangs and one that ignores the stop signal.
-
-## Look and feel
-
-All colours, radii and shadows live in `screen/theme.css`; `screen/styles.css` uses no raw colours. Two themes, chosen under **Settings**:
-
-- **Kindroid warm (default):** sampled from the Kindroid UI v2 login screen (warm off-white `#f5f0eb`, glass surfaces, coral `#c7503c`, pill controls).
-- **Sage green:** sampled from a customised Kindroid desktop window (`#f4f6f5`, text `#283e36`). Its accent is inferred from the same hue, not sampled.
-- "Match my Kindroid theme" is listed but disabled: it needs the Workshop to expose the host's colours, which is unverified.
-
-`tests/theme.test.js` checks WCAG AA contrast for both themes.
-
-## Pending verification in the Kindroid Workshop
-
-Built from the Workshop guide and tested against a fake Workshop page that speaks its `postMessage` protocol, with the real run code behind it. **Not run against the real Workshop** (`kin.mjs` and the host could not be reached from the build environment). To confirm on the first real run (each is isolated so a fix is local):
-
-1. `kin ask` prints the Kin's answer on stdout, and the Kin answers with JSON rather than in character. `run/kin-cli.js`
-2. The grant is spelled `chat:read:1` (the guide names it next to `kin ask`, not in the grants list). `scripts/build-manifest.mjs`
-3. The `kin end` line of an action started from the screen comes back to the screen as the action's `summary`, unchanged. `screen/src/host/channel.js`, `screen/src/ui/app.js` (plain text is still shown as the outfit)
-4. The locked frame loads ES modules from the screen folder and allows `<dialog>.showModal()`. If not, the screen needs a one-file bundle.
-5. `files.write` accepts a string body and `files.read` returns a string, and the screen's files and the run's `kin files` are the **same folder** (the schedule reads the settings the screen wrote, and the screen reads the readings the run wrote).
-   Also: `kin files get/put/ls` behave as `run/kin-cli.js` assumes, a `schedule` trigger with `"tz": "user"` is accepted (it may need an extra **Allow**), and a 4-minute run timeout is accepted.
-6. The `kin ask` exchange does not leak into the Kin's normal chat or memory.
-
-First real test:
+**Trying the run with Kindroid's own `kin` command.** The guide's mock mode records every call without touching anything real:
 
 ```bash
 curl -fsSO https://downloads.kinusercontent.com/workshop/kin.mjs
+npm run try              # a scheduled start, with KIN_MOCK and KIN_MOCK_ASK
+npm run try -- action    # the screen's Update status
+```
+
+### Layout
+
+| Path | What |
+| --- | --- |
+| `kin.json` | the manifest (generated by `scripts/build-manifest.mjs`): schedule trigger, run, screen, one action, `kin:read` + `chat:read:2` |
+| `main.js` | the run's entry: stdin → program → always exactly one `kin end` |
+| `run/kin.js` | the `kin` command as functions: UTF-8 output read whole, stdin closed, timeouts, a missing file (404) told apart from a failure |
+| `run/program.js` | the engine: schedule and action, reading, sleep, dream, errors (no Node imports: it also runs in the harness) |
+| `src/core/` | shared logic: reading the Kin's answers (`outfit.js`), prompts, sleep, schedule, time zones, the two files (`state.js`) |
+| `src/screen/` | the screen's sources: channel to the page, app, DOM helpers, icons |
+| `screen/` | what Kindroid serves: `index.html`, `app.js` (**generated**: one classic script from `src/`, no modules, checked for features newer than Safari 14.1), `styles.css`, `theme.css` |
+| `sample/` | sample `settings.json` and `status.json` for the App Library card's picture |
+| `dev/` | the dev harness |
+| `tests/` | unit tests, `run-main.test.js` (the real `node main.js` with a stand-in `kin`), `e2e/screen.cjs` |
+
+## Send it to Kindroid
+
+```bash
 export KIN_TOKEN=kk_...  KIN_PROGRAM=clotheskin
 git add -A && git commit -m "Clotheskin"
 node kin.mjs send .
 ```
 
-A step-by-step script for that first run, with the sentences the card should show for each line you say to the Kin and eight **provoked failures** (permission not yet allowed, closing the panel mid-reading, no network, a detached Kin, a chatty Kin, a slow answer…) whose purpose includes collecting the **real error text** of `kin ask`, is in `docs/real-kin-test-script.md` (generated by `node scripts/build-test-script.mjs`; a test fails if it is stale).
+Then, in Kindroid: Apps → **Waiting for you** → Allow. It reads your Kin's chat, so it always waits for you. To have it follow a Kin, open the app's settings → **Kins** and tick the Kin. Open the screen, pick the Kin of your roleplay, and press **Start**.
 
-Then, in Kindroid: Apps → **Waiting for you** → Allow (it reads the chat, so it always waits), open the app's settings → **Kins** and tick a Kin, open the screen, select the Kin and press **Update status**. Regenerate `kin.json` with `npm run build:manifest` after changing it (a test fails if it is stale).
+## Still to confirm on the first real run
+
+Everything above is tested against the guide and the dev harness, not yet inside Kindroid.
+
+1. **`kin ask` output.** It prints the Kin's answer on stdout, as plain text: Aurora Alert reads it that way. The Kin answers with JSON rather than in character.
+2. **`kin files get` for a missing file.** It fails with a "404" or "not found" message (Bunny & Fox BBS checks for `404`). Any other failure is treated as "could not read", and nothing is written over.
+3. **`kin kins` format.** It prints `id<TAB>name`, one per line.
+4. **The screen's single `app.js`.** It loads in the frame (also on phones and older Safari, 14.1+), and the screen re-sends its handshake until the page answers.
+5. **The App Library picture.** The picture is taken with the `sample/` files answered and no Kin list. The screen shows the sample after 1.5 s and saves nothing.
+6. **Questions stay out of the chat.** The `kin ask` questions do not show up in the Kin's chat or memory.
+7. **The run's container clock.** The run does not rely on its clock zone: wake-up times use the time zone the screen saved.
 
 ## Limits
 
-- Location, pose and action, clothing and accessories, hair and makeup. No objects in hand, no other people in the scene.
-- History keeps the sentences, not the pieces, so it cannot say which garment changed; it shows which sentence changed.
-- The reference image **Painel de estado da Isa.png** was never attached; the look follows the Kindroid UI screenshots.
-- Automatic updates need the Workshop; there is no scheduler in local mode.
-- English only, by design. The chat may be in any language the Kin understands; the answer and the sentence are English.
+- **What it reads.** Location, pose and action, clothing and accessories, hair and makeup (the last two shown only when the Kin describes them).
+- **English answers.** The chat may be in any language the Kin understands (the demo scene is Portuguese); the question asks for English, and keys or values that come back in Portuguese are still read.
+- **Reading a roleplay model's answer.** A long-memory model (Kindroid's Polaris) often wraps the JSON in narration, echoes the example first, writes "almost JSON" (Python quotes, bare keys, comments), groups slots under "outfit", translates keys, or writes values in the first person ("I'm in the kitchen"). All of that is read (`src/core/json.js`, `outfit.js`; tests in `polaris-what-if.test.js` and `what-if.test.js`, with fuzzing). An answer that copies the format example is rejected.
+- **One Kin at a time.** Only the selected Kin is read; the others cost nothing.

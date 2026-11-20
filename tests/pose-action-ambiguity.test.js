@@ -1,13 +1,12 @@
 // Ambiguity tests for pose + action: plausible WRONG answers from the Kin go through the real pipeline.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseReading, describeReading, describeDoing, cleanPose, cleanAction, poseIcon } from '../screen/src/core/outfit.js';
-import { OUTFIT_PROMPT, buildOutfitPrompt } from '../screen/src/core/prompt.js';
-import { handleRun } from '../run/actions.js';
-import { DEMO_SCENES } from '../screen/src/demo/demo.js';
-
-// The run also says when it stored the reading; that is checked in prompt-run.test.js.
-const noAt = ({ at, ...rest }) => { assert.match(at, /^\d{4}-\d\d-\d\dT/); return rest; };
+import { parseReading, describeReading, describeDoing, cleanPose, cleanAction } from '../src/core/outfit.js';
+import { poseIcon } from '../src/screen/icons.js';
+import { OUTFIT_PROMPT, buildOutfitPrompt } from '../src/core/prompt.js';
+import { runProgram, ACTION } from '../run/program.js';
+import { fakeKindroid } from './support/fake-kindroid.js';
+import { DEMO_SCENES } from '../dev/scenes.js';
 
 const NOD = 'No pose or action described in the recent chat.';
 const doing = (o) => { const p = parseReading(JSON.stringify(o)); assert.ok(p.ok, p.error); return describeReading(p).doing; };
@@ -126,20 +125,24 @@ test('the pose row icon follows the pose', () => {
   assert.equal(poseIcon('Chopping onions.'), 'person');
 });
 
-// ---- 9. The whole run, within the kin end limit even in the worst case
-test('a messy answer with everything gives three clean sentences; the worst case still fits 500 characters', async () => {
+// ---- 9. The whole run, and the worst case: still three sentences, and a kin end line within 500 characters
+test('a messy answer with everything gives three clean sentences; the worst case still fits kin end', async () => {
+  const read = async (answer) => {
+    const k = fakeKindroid();
+    k.answers.reading.push(answer);
+    const out = await runProgram({ event: { trigger: 'action', action: ACTION, input: { kin: 'k1' } }, kin: k.kin, clock: k.clock });
+    return { out, reading: k.entry().reading };
+  };
   const messy = '*smiles* ```json\n{“location”: “in the kitchen”, “pose”: “*standing at the counter*”, “action”: “I am chopping onions”, “topwear”: [“a white shirt”,],}\n```';
-  const ev = { trigger: 'action', action: 'read_outfit', input: { kin: 'k', name: 'Isa' } };
-  const out = await handleRun({ event: ev, provider: { extract: async () => messy } });
-  assert.deepEqual(noAt(JSON.parse(out.message)), { location: 'In the kitchen.', doing: 'Standing at the counter, chopping onions.', outfit: 'Wearing a white shirt.' });
+  const { reading } = await read(messy);
+  assert.deepEqual([reading.location, reading.doing, reading.outfit], ['In the kitchen.', 'Standing at the counter, chopping onions.', 'Wearing a white shirt.']);
 
   const w = (n) => Array.from({ length: n }, (_, i) => `word${i}`).join(' ');
   const worst = JSON.stringify({ location: `in ${w(60)}`, pose: `standing ${w(40)}`, action: `reading ${w(40)}`, topwear: Array.from({ length: 8 }, (_, i) => `a very long descriptive jacket number ${i} with details`), 'neck-accessory': Array.from({ length: 8 }, (_, i) => `a very long necklace number ${i}`) });
-  const big = await handleRun({ event: ev, provider: { extract: async () => worst } });
-  assert.ok(big.message.length <= 500, `${big.message.length}`);
-  const o = JSON.parse(big.message);
-  assert.ok(o.location.length > 20 && o.doing.length > 20, 'location and doing are kept');
-  assert.match(o.outfit, /^Wearing/);
+  const big = await read(worst);
+  assert.ok(big.out.message.length <= 500, `${big.out.message.length}`);
+  assert.ok(big.reading.location.length > 20 && big.reading.doing.length > 20, 'location and doing are kept');
+  assert.match(big.reading.outfit, /^Wearing/);
 });
 
 // ---- 10. The wording

@@ -1,17 +1,17 @@
 {
   "kin": 1,
   "name": "Clotheskin",
-  "purpose": "Shows where a Kin is, what it is doing, what it is wearing and how its hair and makeup look, read from its recent chat, now or on a schedule.",
+  "purpose": "Shows where your Kin is, what it is doing and what it is wearing, from its recent chat. Follows its nights and tells it the dream it remembers, if you allow it.",
   "triggers": [
     {
       "on": "schedule",
-      "cron": "*/5 * * * *",
+      "cron": "*/15 * * * *",
       "tz": "user"
     }
   ],
   "run": {
     "entry": "node main.js",
-    "timeout": "4m"
+    "timeout": "2m"
   },
   "screens": [
     {
@@ -22,16 +22,20 @@
   ],
   "actions": [
     {
-      "name": "read_outfit",
-      "description": "Reads the Kin’s recent chat and describes where it is, what it is doing, what it is wearing and its hair and makeup, one sentence each.",
+      "name": "update_status",
+      "description": "Reads the selected Kin now (where it is, its pose and action, its outfit), or asks about its dream when it is asleep.",
       "input": {
         "type": "object",
         "properties": {
           "kin": {
             "type": "string"
           },
-          "name": {
-            "type": "string"
+          "op": {
+            "type": "string",
+            "enum": [
+              "read",
+              "wake"
+            ]
           }
         },
         "required": [
@@ -45,6 +49,6 @@
   ],
   "grants": [
     "kin:read",
-    "chat:read:1"
+    "chat:read:2"
   ]
 }

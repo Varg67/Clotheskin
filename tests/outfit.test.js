@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseOutfit, describeOutfit, joinNatural, normalizeSlot, parseReading, describeReading, describeLocation, cleanLocation } from '../screen/src/core/outfit.js';
-import { DEMO_SCENES } from '../screen/src/demo/demo.js';
+import { parseOutfit, describeOutfit, joinNatural, normalizeSlot, parseReading, describeReading, describeLocation, cleanLocation } from '../src/core/outfit.js';
+import { DEMO_SCENES } from '../dev/scenes.js';
 
 const say = (json) => { const p = parseOutfit(typeof json === 'string' ? json : JSON.stringify(json)); assert.ok(p.ok, p.error); return describeOutfit(p.outfit); };
 
@@ -59,6 +59,7 @@ test('every demo scene produces its three sentences (or the documented error)', 
   assert.deepEqual(out['loose-keys'], { location: 'At the park.', doing: 'Walking around the park.', outfit: 'Wearing a striped sweater, sneakers and a cap, with a watch.' });
   assert.deepEqual(out['nothing-said'], { location: 'No location described in the recent chat.', doing: 'No pose or action described in the recent chat.', outfit: 'No outfit described in the recent chat.' });
   assert.match(out['in-character'], /^ERROR The answer is not valid JSON/);
+  assert.deepEqual(out.night, { location: 'In the bedroom.', doing: 'Lying in bed, sleeping.', outfit: 'Wearing an oversized T-shirt, with small silver studs.' });
 });
 
 // ---- ambiguity: plausible wrong answers from the Kin
@@ -120,6 +121,10 @@ test('long or numerous pieces are capped, so a runaway answer cannot flood the c
 
 test('a curly apostrophe inside a value is kept', () => {
   assert.equal(say('{"topwear":["Isa’s old band T-shirt"]}'), 'Wearing Isa’s old band T-shirt.');
+});
+
+test('placeholders like "no shoes" are dropped, but a piece that starts with "no-" is kept', () => {
+  assert.equal(say({ footwear: ['no shoes'], footunderwear: ['no-show socks'], topwear: ['a no-iron shirt'] }), 'Wearing a no-iron shirt and no-show socks.');
 });
 
 // ---- hair and makeup

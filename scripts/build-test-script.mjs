@@ -1,28 +1,34 @@
-// Generates docs/real-kin-test-script.md. `node scripts/build-test-script.mjs` writes it; `--check` compares.
+// Generates docs/real-kin-test-script.md, the plan for the first test with a real Kin (in Portuguese, for the person
+// running it). `node scripts/build-test-script.mjs` writes it; `--check` compares (a test runs it).
 import { readFileSync, writeFileSync } from 'node:fs';
-import { SCENARIOS, expected, FAILURES, expectedFailure } from './real-kin-scenarios.mjs';
+import { fileURLToPath } from 'node:url';
+import { SCENARIOS, expected, STEPS, SHORTEST_INTERVAL } from './real-kin-scenarios.mjs';
+import { CHAT_DAYS } from './build-manifest.mjs';
 
 export function renderScript() {
   const out = [];
   out.push(`# Roteiro do primeiro teste com um Kin de verdade
 
-Este arquivo é gerado por \`node scripts/build-test-script.mjs\`. As frases "O cartão deve mostrar" são calculadas pelo código do app a partir da resposta que um Kin bem-comportado daria, então elas acompanham o app.
+Este arquivo é gerado por \`node scripts/build-test-script.mjs\`. As frases "O cartão deve mostrar" são calculadas pelo código do app a partir da resposta que um Kin bem-comportado daria, então acompanham o app.
 
 ## Antes de começar
 
-1. Envie o app: \`node kin.mjs send .\` (passos completos no README). No Kindroid, em **Apps → Waiting for you**, clique em **Allow**.
-2. Nas configurações do app, em **Kins**, marque o Kin do teste (de preferência um que você já conheça bem).
-3. Abra o app e selecione o Kin. Em cada passo abaixo: escreva a fala no chat, deixe o Kin responder, aperte **Update status** e compare.
-4. Anote tudo na tabela de resultados no final. Cole a resposta do Kin e as três frases do cartão.
+1. **Ensaio sem tocar em nada real** (opcional, 1 minuto): \`curl -fsSO https://downloads.kinusercontent.com/workshop/kin.mjs\` e \`npm run try\`. Isso roda a execução de verdade com o \`kin\` oficial em modo simulação (\`KIN_MOCK\`) e lista cada chamada.
+2. Envie o app: \`node kin.mjs send .\` (passos no README). No Kindroid, em **Apps → Waiting for you**, clique em **Allow**.
+3. Nas configurações do app, em **Kins**, marque o Kin do teste (de preferência um que você conheça bem).
+4. Abra o app e escolha o Kin. Em cada passo: escreva a fala no chat, deixe o Kin responder, aperte **Update status** e compare.
+5. Anote tudo na tabela do final: cole a resposta do Kin (se aparecer) e as frases do cartão.
 
-## Duas coisas que valem para todos os passos
+## Três coisas que valem para todos os passos
 
-- **O Kin vê o chat do último dia** (\`chat:read:1\`). O cartão descreve o estado *no fim do chat recente*, então ele **não zera** entre um passo e outro: cada passo parte do que os anteriores deixaram. Só um chat novo começa em branco (passo S13).
-- Se o cartão mostrar um **erro em vermelho**, o Kin não respondeu no formato esperado. Aperte **Try again** uma vez. Anote o texto do erro: ele diz se o problema foi JSON inválido, tipo errado ou falha ao chamar o Kin.
+- **O Kin vê o chat dos últimos ${CHAT_DAYS} dias** (\`chat:read:${CHAT_DAYS}\`). O cartão descreve o estado *no fim do chat recente*, então **não zera** entre um passo e outro: cada passo parte do que os anteriores deixaram. Só um chat novo começa em branco (passo S13).
+- **Erro em vermelho** no cartão: aperte **Try again** uma vez e anote o texto. Se houver algo entre parênteses, é o texto do próprio Kindroid: **copie exatamente**.
+- **A automação roda na nuvem do Kindroid**, não no seu PC: o Kindroid inicia o app a cada 15 minutos. Fechar o painel ou desligar o PC não para as leituras; só impede você de vê-las até reabrir.
 
-## Passos`);
+## Passos de leitura`);
   for (const s of SCENARIOS) {
     const e = expected(s);
+    const rows = [['Location', e.location], ['Pose and action', e.doing], ['Outfit', e.outfit], ...(e.hair ? [['Hair', e.hair]] : []), ...(e.makeup ? [['Makeup', e.makeup]] : [])];
     out.push(`
 ### ${s.id}. ${s.title}
 
@@ -34,9 +40,7 @@ Este arquivo é gerado por \`node scripts/build-test-script.mjs\`. As frases "O 
 
 | Linha | Texto |
 |---|---|
-| Location | ${e.location} |
-| Pose and action | ${e.doing} |
-| Outfit | ${e.outfit} |
+${rows.map(([k, v]) => `| ${k} | ${v} |`).join('\n')}
 
 **Confira:**
 ${s.checks.map((c) => `- ${c}`).join('\n')}
@@ -44,70 +48,60 @@ ${s.checks.map((c) => `- ${c}`).join('\n')}
 **Se falhar:** ${s.ifWrong}`);
   }
   out.push(`
-## Falhas provocadas (a parte que mais ensina)
+## A noite, a automação e as falhas
 
-Os passos acima verificam se o cartão entende o chat. Estes verificam o que acontece **quando algo dá errado**, e servem a um segundo objetivo: **coletar o texto real dos erros** do \`kin ask\`. O app reconhece o tipo de erro por esse texto (\`screen/src/core/errors.js\`), mas eu só consegui *supor* como ele aparece. Em cada erro o cartão mostra o texto real entre parênteses: **copie-o exatamente** na tabela. Com ele eu ajusto o reconhecimento.
+Estes passos verificam o que roda sozinho e o que acontece **quando algo dá errado**. Também servem para **coletar o texto real dos erros** do \`kin\`: o app só reconhece "arquivo ainda não existe" por um "404" e "manutenção" pelas palavras maintenance/downtime/outage, e esses textos foram supostos. Vale em todas as falhas: **as últimas frases boas continuam no cartão** e nenhum botão fica travado.
 
-Vale em todas as falhas: as **últimas frases boas continuam no cartão**, e o botão **Try again** não pode ficar travado.
-
-Regra de ouro para a automação: ela roda **na nuvem do Kindroid**, não no seu PC. Desligar a internet do PC não pára as verificações; só impede você de ver o resultado até voltar.`);
-  for (const f of FAILURES) {
-    const lines = [`
+Para a automação, use a régua em **${SHORTEST_INTERVAL}** durante o teste e volte para um intervalo maior depois: cada leitura é uma pergunta ao Kin.`);
+  for (const f of STEPS) {
+    out.push(`
 ### ${f.id}. ${f.title}
 
-**Como provocar:** ${f.provoke}`];
-    for (const e of expectedFailure(f)) {
-      lines.push(`
-**${e.label}:**`);
-      if (!f.autoOnly) lines.push(`
-**Update status** mostraria${f.badAnswer ? '' : ' (o texto real do erro viria entre parênteses no fim)'}:
+**Como provocar:** ${f.provoke}
 
-> ${e.manual}`);
-      if (e.auto.length) {
-        lines.push('\nE a verificação automática explicaria, sob o cartão (intervalo de 15 min como exemplo):');
-        for (const a of e.auto) lines.push(`\nDepois de ${a.failures} falha${a.failures > 1 ? 's' : ''}:\n${a.lines.map((l) => `> ${l}`).join('\n')}`);
-      }
-    }
-    if (f.expectText) lines.push(`
-**O que esperar:** ${f.expectText}${f.expectNote ? ` ${f.expectNote}` : ''}`);
-    lines.push(`
+**O que esperar:** ${f.expectText}
+
 **Confira:**
 ${f.checks.map((c) => `- ${c}`).join('\n')}
 
 **Anote:** ${f.record}`);
-    out.push(lines.join('\n'));
   }
   out.push(`
 ## Medidas a anotar (uma vez)
 
-- **Tempo** entre apertar **Update status** e a frase aparecer. Anote 3 leituras.
-- **Custo** em créditos de uma leitura, se o Kindroid mostrar. O guia não diz quanto custa um \`kin ask\`.
-- **Cliques repetidos:** aperte **Update status** duas vezes seguidas. Deve haver **uma** leitura só (o botão fica em "Reading…").
-- **Vazamento:** depois de 5 ou 6 leituras, olhe o chat e a memória do Kin. Não deve haver JSON, pergunta do rastreador nem respostas em inglês que você não pediu. Pergunte ao Kin: "Você lembra de ter me descrito em formato de dados?". A resposta deve ser que não.
-- **Dois Kins com o mesmo nome** (se tiver): selecione um, aperte **Update status**, troque para o outro no meio da leitura. O resultado deve aparecer só no primeiro.
+- **Tempo** entre apertar **Update status** e as frases aparecerem. Anote 3 leituras.
+- **Custo** em créditos de uma leitura e de um início "sem nada a fazer", se o Kindroid mostrar.
+- **Cliques repetidos:** aperte **Update status** duas vezes seguidas. Deve haver **uma** leitura só.
+- **Vazamento:** depois de 5 ou 6 leituras, olhe o chat e a memória do Kin. Não deve haver JSON nem as perguntas do app. Pergunte ao Kin: "Você lembra de ter me descrito em formato de dados?". A resposta deve ser que não.
+- **Celular:** abra o app também no celular, se o Kindroid mostrar o painel lá.
 
 ## Como classificar uma falha
 
 | Tipo | Sinal | Onde corrigir |
 |---|---|---|
-| **A. Formato** | erro vermelho no cartão ("not valid JSON", "must be a text") | prompt (exemplo, instruções de formato) |
-| **B. Interpretação** | o Kin respondeu JSON válido mas com o fato errado (plano virou fato, lugar antigo ficou, roupa de outra pessoa) | prompt (\`screen/src/core/prompt.js\`) |
-| **C. App** | o JSON do Kin estava certo e o cartão mostrou outra coisa | código (\`screen/src/core/outfit.js\`) |
-| **D. Plataforma** | nada acontece, erro de permissão, \`kin ask\` falha, o cartão não recebe a frase | suposições do README (\`run/kin-cli.js\`, grants) |
+| **A. Formato** | erro vermelho ("not valid JSON", "must be a text") | a pergunta (\`src/core/prompt.js\`) |
+| **B. Interpretação** | o Kin respondeu certo no formato, mas com o fato errado (plano virou fato, lugar antigo ficou, roupa de outra pessoa) | a pergunta (\`src/core/prompt.js\`) |
+| **C. App** | o Kin respondeu certo e o cartão mostrou outra coisa | a leitura da resposta (\`src/core/outfit.js\`) |
+| **D. Plataforma** | nada acontece, erro de permissão, \`kin\` falha, a tela não carrega | \`run/kin.js\`, \`kin.json\`, \`src/screen/\` |
 
 ## Tabela de resultados
 
-| Passo | Resultado (OK / parcial / falhou) | Tipo | Resposta do Kin ou **texto real do erro** (cole) | Cartão (cole as 3 frases ou o aviso) |
+| Passo | Resultado (OK / parcial / falhou) | Tipo | Resposta do Kin ou **texto real do erro** (cole) | Cartão (cole as frases ou o aviso) |
 |---|---|---|---|---|
-${[...SCENARIOS, ...FAILURES].map((s) => `| ${s.id} |  |  |  |  |`).join('\n')}
+${[...SCENARIOS, ...STEPS].map((s) => `| ${s.id} |  |  |  |  |`).join('\n')}
 `);
   return `${out.join('\n')}\n`;
 }
 
-const target = new URL('../docs/real-kin-test-script.md', import.meta.url);
-if (process.argv.includes('--check')) {
-  if (readFileSync(target, 'utf8') !== renderScript()) { console.error('docs/real-kin-test-script.md is out of date: run node scripts/build-test-script.mjs'); process.exit(1); }
-} else if (process.argv[1] && process.argv[1].endsWith('build-test-script.mjs')) {
-  writeFileSync(target, renderScript());
-  console.log('docs/real-kin-test-script.md written');
+const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+if (isMain) {
+  const target = new URL('../docs/real-kin-test-script.md', import.meta.url);
+  if (process.argv.includes('--check')) {
+    let current = '';
+    try { current = readFileSync(target, 'utf8'); } catch { /* missing */ }
+    if (current !== renderScript()) { console.error('docs/real-kin-test-script.md is out of date: run npm run build'); process.exit(1); }
+  } else {
+    writeFileSync(target, renderScript());
+    console.log('docs/real-kin-test-script.md written');
+  }
 }

@@ -126,16 +126,16 @@ test('a messy realistic answer through the whole run gives clean sentences', asy
 test('the prompt pins down the location ideas', () => {
   const p = buildOutfitPrompt({ name: 'Isa' });
   const must = [
-    [/"location": where you are right now/, 'what location means'],
+    [/"location": the place only/, 'what location means'],
     [/starting with in, at or on/, 'shape'],
-    [/The place only, not your posture or what you are doing/, 'no posture or activity'],
-    [/If you are travelling, say so/, 'travelling is a place'],
-    [/planning to go somewhere is not being there/, 'a plan is not a move'],
+    [/not your posture or activity/, 'no posture or activity'],
+    [/Travelling is a place/, 'travelling is a place'],
+    [/planning to go is not/, 'a plan is not a move'],
     [/a place you have left is no longer where you are/, 'old places expire'],
     [/never guess/, 'no guessing'],
     [/Describe only yourself/, 'not the person'],
-    [/only shows the format; never copy its values/, 'do not copy the example'],
-    [/If the chat says nothing about any of this, answer \{\}/, 'empty answer allowed'],
+    [/shows the format only; never copy its values/, 'do not copy the example'],
+    [/if the chat says nothing about any of this, reply \{\}/, 'empty answer allowed'],
   ];
   for (const [re, why] of must) assert.match(p, re, why);
 });

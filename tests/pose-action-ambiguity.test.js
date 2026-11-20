@@ -146,12 +146,12 @@ test('a messy answer with everything gives three clean sentences; the worst case
 test('the prompt pins down pose and action and how they differ from the location', () => {
   const p = buildOutfitPrompt({ name: 'Isa' });
   const must = [
-    [/how you are positioned, what you are doing, what you are wearing and how your hair and makeup look/, 'the four things asked'],
-    [/"pose": your body position right now/, 'what pose means'],
-    [/It may name the furniture or spot you are on; "location" is the room or place/, 'pose vs location'],
-    [/"action": what you are doing right now, as a short -ing phrase/, 'what action means'],
-    [/Not plans, not things already finished, not feelings/, 'what action is not'],
-    [/an action you have finished is no longer what you are doing/, 'old actions expire'],
+    [/your pose, what you are doing, what you are wearing, and your hair and makeup/, 'the four things asked'],
+    [/"pose": your body position/, 'what pose means'],
+    [/it may name the furniture, "location" is the room or place/, 'pose vs location'],
+    [/"action": what you are doing now, a short -ing phrase/, 'what action means'],
+    [/not plans, finished things or feelings/, 'what action is not'],
+    [/a finished action is no longer what you are doing/, 'old actions expire'],
     [/never copy its values/, 'do not copy the example'],
   ];
   for (const [re, why] of must) assert.match(p, re, why);

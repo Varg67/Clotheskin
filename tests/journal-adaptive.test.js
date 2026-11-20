@@ -59,7 +59,7 @@ test('a manual reading adds to the history and to the diagnostics log; nothing o
   assert.equal(j.history.length, 1);
   assert.deepEqual(j.history[0], { at: T0.toISOString(), source: 'manual', location: 'In the kitchen.', doing: 'Standing, cooking.', outfit: 'Wearing a shirt.', hair: 'A messy bun.', makeup: 'Red lipstick.' });
   assert.equal(j.log.length, 1);
-  assert.deepEqual({ ...j.log[0], ms: 0 }, { at: T0.toISOString(), source: 'manual', ok: true, kind: null, ms: 0, tries: 1, chars: ANSWER.length, cut: false, unchanged: false, error: null });
+  assert.deepEqual({ ...j.log[0], ms: 0 }, { at: T0.toISOString(), source: 'manual', ok: true, kind: null, ms: 0, tries: 1, chars: ANSWER.length, cut: false, unchanged: false, error: null, notEnglish: [] });
   assert.ok(!(await storage.get(journalKey('k-isa'))).includes('"pose"'), 'the raw answer is not stored');
 });
 

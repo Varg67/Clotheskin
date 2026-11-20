@@ -346,14 +346,20 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     const now = clock();
     const ok = log.filter((l) => l.ok);
     const avg = ok.length ? ok.reduce((n, l) => n + (l.ms || 0), 0) / ok.length : null;
+    const sized = ok.filter((l) => typeof l.chars === 'number');
+    const avgChars = sized.length ? Math.round(sized.reduce((n, l) => n + l.chars, 0) / sized.length) : null;
+    const notEn = ok.filter((l) => l.notEnglish?.length).length;
     const describe = (l) => (l.ok ? (l.unchanged ? 'ok · nothing new' : 'ok') : `failed · ${l.kind || 'unknown'}`);
     return h('details', { class: 'sub-details diagnostics', open: S.diagOpen ? '' : undefined, onToggle: toggleJournal('diagOpen') },
       h('summary', { 'data-key': 'diag-summary' }, icon('pulse', { size: 18 }), ' Diagnostics'),
       !j ? h('p', { class: 'help' }, 'Loading…') : !log.length ? h('p', { class: 'help', 'data-testid': 'diag-empty' }, `No attempts recorded for ${displayName(kin)} yet.`) : [
-        h('p', { class: 'help', 'data-testid': 'diag-summary-line' }, `Last ${log.length} attempts: ${ok.length} succeeded${avg !== null ? `, answered in ${secs(avg)} on average` : ''}.`),
+        h('p', { class: 'help', 'data-testid': 'diag-summary-line' }, `Last ${log.length} attempts: ${ok.length} succeeded${avg !== null ? `, answered in ${secs(avg)} on average` : ''}${avgChars !== null ? `, ${avgChars} characters per answer` : ''}.`),
+        h('p', { class: `help${notEn ? ' warn' : ''}`, 'data-testid': 'diag-english' }, notEn
+          ? `${notEn} of ${ok.length} answers were not fully in English. English answers are shorter and cost fewer tokens.`
+          : ok.length ? 'Every answer was in English.' : null),
         h('ol', { class: 'diag-list', role: 'list' }, ...log.map((l) => h('li', { class: `diag-item${l.ok ? '' : ' failed'}`, 'data-testid': 'diag-item' },
           h('span', { class: 'diag-head' }, h('time', { datetime: l.at }, formatClock(l.at, { now })), ` · ${l.source === 'auto' ? 'automatic' : 'manual'} · `, h('strong', {}, describe(l))),
-          h('span', { class: 'diag-meta' }, [`${secs(l.ms)}`, l.tries > 1 ? `${l.tries} tries` : null, l.chars !== null ? `answer ${l.chars} characters` : null, l.cut ? 'shortened on the way back (full copy stored)' : null].filter(Boolean).join(' · ')),
+          h('span', { class: 'diag-meta' }, [`${secs(l.ms)}`, l.tries > 1 ? `${l.tries} tries` : null, l.chars !== null ? `answer ${l.chars} characters` : null, l.cut ? 'shortened on the way back (full copy stored)' : null, l.notEnglish?.length ? `not in English: ${l.notEnglish.join(', ')}` : null].filter(Boolean).join(' · ')),
           l.error ? h('span', { class: 'diag-error' }, l.error) : null))),
         h('button', { type: 'button', class: 'btn small', 'data-key': 'diag-copy', onClick: async () => {
           const text = JSON.stringify({ kin: kin.name, log }, null, 1);

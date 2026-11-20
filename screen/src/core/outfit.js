@@ -283,6 +283,25 @@ export const describeHair = (value) => (value ? sentence(value) : NO_HAIR);
 /** "Red lipstick and eyeliner." / "No makeup." */
 export const describeMakeup = (value) => (value ? sentence(value) : NO_MAKEUP);
 
+// ---- English only: the Kin is asked to answer in English (fewer tokens, and the sentences are English). Portuguese
+// keys and values are still read, but they are reported so the diagnostics show whether the Kin follows the rule.
+const PT_KEYS = new Set(['localizacao', 'local', 'lugar', 'onde', 'postura', 'posicao', 'acao', 'atividade', 'fazendo', 'cabelo', 'penteado', 'maquiagem', 'maquilhagem',
+  'roupa', 'roupas', 'vestindo', 'traje', 'vestuario', 'acessorios', 'acessorio', 'joias', 'sapatos', 'calcados', 'tenis', 'chapeu', 'bone', 'meias', 'oculos', 'colar',
+  'brincos', 'pulseira', 'relogio', 'anel', 'cinto', 'bolsa', 'bolsas', 'mochila']);
+const PT_WORDS = 'uma|um|umas|uns|com|na|nas|nos|da|das|dos|em|sem|meu|minha|seu|sua|estou|está|esta|sentada|sentado|deitada|deitado|vestindo|usando|calça|calca|camisa|camiseta|vestido|saia|jaqueta|casaco|tênis|sapato|sapatos|bota|botas|meia|meias|bolsa|mochila|óculos|colar|brinco|brincos|cabelo|preso|presa|solto|solta|batom|maquiagem|rímel|sala|quarto|cozinha|banheiro|casa|cama|sofá|tomando|lendo|bebendo|olhando|conversando|cozinhando';
+const PT_WORD = new RegExp(`(?<![\\p{L}.])(${PT_WORDS})(?![\\p{L}])`, 'iu');
+// ã or õ inside a lowercase word ("algodão", "botões"); a capitalised name ("São Paulo") is a place, not a slip.
+// ç alone is not enough: English has "façade". Portuguese words with ç ("calça") are in the list above.
+const PT_ACCENT = /(?<!\p{L})[a-zà-ÿ]*[ãõ][a-zà-ÿ]*(?!\p{L})/u;
+const PT_TEXT = { test: (t) => PT_WORD.test(t) || PT_ACCENT.test(t) };
+const textsOf = (v) => (typeof v === 'string' ? [v] : Array.isArray(v) ? v.flatMap(textsOf) : isPlainObject(v) ? Object.entries(v).flatMap(([k, x]) => [k, ...textsOf(x)]) : []);
+
+/** The keys of an answer that were written (key or value) in Portuguese instead of English. At most 8. */
+export function notEnglishKeys(doc) {
+  if (!isPlainObject(doc)) return [];
+  return Object.entries(doc).filter(([k, v]) => PT_KEYS.has(keyName(k)) || textsOf(v).some((t) => PT_TEXT.test(t))).map(([k]) => String(k).slice(0, 30)).slice(0, 8);
+}
+
 /** One parse for the whole answer: where the Kin is, how it is positioned, what it is doing and what it wears. */
 export function parseReading(text) {
   const p = parseObject(text);
@@ -309,7 +328,7 @@ export function parseReading(text) {
   if (errors.length) return { ok: false, error: errors.join(' ') };
   // A model may copy the format example instead of describing itself. That is not a reading.
   if (looksCopiedFromExample(p.doc)) return { ok: false, error: 'The Kin copied the example from the question instead of describing itself.' };
-  return { ok: true, outfit, location, pose, action, hair, makeup, warnings };
+  return { ok: true, outfit, location, pose, action, hair, makeup, warnings, notEnglish: notEnglishKeys(p.doc) };
 }
 
 /** The sentences shown on the card. */

@@ -443,7 +443,8 @@ window.addEventListener('message', async (e) => {
     await openSettings();
     await key('diag-summary').click();
     await until(async () => (await fr.locator('[data-testid="diag-item"]').count()) >= 2, 'diagnostics entries');
-    assert.match(await fr.locator('[data-testid="diag-summary-line"]').innerText(), /succeeded/);
+    assert.match(await fr.locator('[data-testid="diag-summary-line"]').innerText(), /succeeded.*characters per answer/);
+    assert.match(await fr.locator('[data-testid="diag-english"]').innerText(), /Every answer was in English/);
     assert.match(await fr.locator('[data-testid="diag-item"]').first().innerText(), /manual · ok[\s\S]*shortened on the way back/);
     assert.ok(await fr.locator('.diag-item.failed').count() >= 1, 'earlier failures are listed');
     await fr.locator('[data-key="diag-summary"]').scrollIntoViewIfNeeded();

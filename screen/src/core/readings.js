@@ -89,6 +89,8 @@ function cleanLogEntry(e) {
     kind: typeof e.kind === 'string' ? e.kind.slice(0, 30) : null,
     ms: num(e.ms, 3_600_000), tries: num(e.tries, 9), chars: num(e.chars, 1_000_000),
     cut: e.cut === true, unchanged: e.unchanged === true, error: S(e.error, 200),
+    // keys the Kin answered in Portuguese instead of English; null = not checked (a failure, or an older entry)
+    notEnglish: Array.isArray(e.notEnglish) ? e.notEnglish.filter((k) => typeof k === 'string').map((k) => k.slice(0, 30)).slice(0, 8) : null,
   };
 }
 

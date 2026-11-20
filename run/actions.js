@@ -74,7 +74,7 @@ async function readOnce({ kinId, name, provider }) {
   const chars = String(answer ?? '').length;
   const parsed = parseReading(answer);
   if (!parsed.ok) return { ok: false, kind: KINDS.BAD_ANSWER, chars, error: clip(`${parsed.error} Nothing was changed. Try again.`) };
-  return { ok: true, chars, sentences: describeReading(parsed) };
+  return { ok: true, chars, notEnglish: parsed.notEnglish, sentences: describeReading(parsed) };
 }
 
 /**
@@ -97,6 +97,7 @@ async function readOne({ kinId, name, provider, retries = 0, sleep = defaultSlee
 /** One line of the diagnostics log: what happened, how long it took, how big the answer was. No answer text. */
 const logEntry = (r, { at, source, cut = false, unchanged = false }) => ({
   at, source, ok: !!r.ok, kind: r.ok ? null : (r.kind || KINDS.UNKNOWN), ms: r.ms, tries: r.tries, chars: r.chars ?? null, cut, unchanged, error: r.ok ? null : r.error,
+  notEnglish: r.ok ? (r.notEnglish || []) : null,
 });
 
 /** Saving the latest reading is a convenience: if it fails, the reading itself still counts. */

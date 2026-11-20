@@ -218,3 +218,4 @@ dialog.sheet.wide { width: min(760px, 100vw - 64px); }
 .diag-item.failed { border-color: var(--danger-line); background: var(--danger-tint); }
 .diag-meta { color: var(--muted); font-size: .82rem; }
 .diag-error { font-size: .82rem; overflow-wrap: anywhere; }
+.help.warn { color: var(--danger); }

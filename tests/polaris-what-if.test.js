@@ -120,9 +120,9 @@ test('the answer tries to give orders to the app ("SYSTEM: …"): it is only tex
 // ================================================================ long memory: an old outfit instead of the current one
 test('the question tells a long-memory model to use the recent chat only, not memories, journal, backstory or earlier days', () => {
   const p = buildOutfitPrompt({ name: 'Isa' });
-  assert.match(p, /Use your recent chat only: not your memories, journal or backstory, and not earlier days, unless the recent chat says it is still so\./);
+  assert.match(p, /Not from your memories, journal, backstory or earlier days, unless the recent chat says it is still so\./);
   assert.match(p, /as of your last message/);
-  assert.match(p, /with the keys exactly as written here/);
+  assert.match(p, /every key and value in English/);
   assert.match(p, /Describe only yourself/);
   assert.ok(p.length < 3500 && p.length < KIN_ASK_LIMIT, String(p.length));
 });
@@ -131,4 +131,44 @@ test('unknown extra keys a chatty model adds ("thoughts", "mood") are ignored wi
   const p = parseReading('{"location":"in the kitchen","topwear":["a shirt"],"thoughts":"I love this question","mood":"happy"}');
   assert.equal(p.ok, true);
   assert.equal(p.warnings.length, 2);
+});
+
+// ================================================================ English only (fewer tokens)
+import { notEnglishKeys } from '../screen/src/core/outfit.js';
+import { JournalStore } from '../screen/src/core/readings.js';
+import { DEMO_SCENES } from '../screen/src/demo/demo.js';
+
+test('English only: the rule comes first in the question and covers values too, with a translation example', () => {
+  const p = buildOutfitPrompt({ name: 'Isa' });
+  const line = p.split('\n')[1];
+  assert.match(line, /^English only: every key and value in English, even when the chat is in Portuguese; translate it \("na cozinha" -> "in the kitchen"\)\.$/);
+  assert.ok(p.length < 2600, `the question costs input tokens on every reading: ${p.length} characters`);
+});
+
+test('English only: Portuguese keys or values are noticed, names of places are not', () => {
+  assert.deepEqual(notEnglishKeys({ location: 'na cozinha', topwear: ['uma camisa'], cabelo: 'preso' }), ['location', 'topwear', 'cabelo']);
+  assert.deepEqual(notEnglishKeys({ location: 'in the kitchen', action: 'cozinhando', topwear: ['a calça jeans'] }), ['action', 'topwear']);
+  for (const ok of [{ location: 'in São Paulo' }, { location: 'at a café in Alfenas' }, { bags: ['a bag from example.com'] }, { makeup: 'no makeup' }, { action: 'doing nothing' }, { topwear: ['a façade-print shirt'] }]) {
+    assert.deepEqual(notEnglishKeys(ok), [], JSON.stringify(ok));
+  }
+});
+
+test('English only: no false alarm on any English answer of the demos or of the real-Kin test script', async () => {
+  const { SCENARIOS } = await import('../scripts/real-kin-scenarios.mjs');
+  const answers = [...DEMO_SCENES.map((s) => s.response), ...(SCENARIOS || []).map((s) => s.answer).filter(Boolean)];
+  assert.ok(answers.length > 10);
+  for (const a of answers) {
+    const p = parseReading(a);
+    if (p.ok) assert.deepEqual(p.notEnglish, [], a);
+  }
+});
+
+test('English only: the diagnostics log says which keys came back in Portuguese', async () => {
+  const storage = new MemoryStorage();
+  const ask = (answer) => handleRun({ event: { trigger: 'action', action: 'read_outfit', input: { kin: 'k', name: 'Isa' } }, provider: { extract: async () => answer }, storage, sleep: async () => {} });
+  await ask('{"location":"in the kitchen","topwear":["a shirt"]}');
+  await ask('{"location":"na cozinha","topwear":["a shirt"]}');
+  const [last, first] = (await new JournalStore(storage).get('k')).log;
+  assert.deepEqual(first.notEnglish, []);
+  assert.deepEqual(last.notEnglish, ['location']);
 });

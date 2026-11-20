@@ -27,6 +27,8 @@ npm test            # unit tests (Node's built-in runner)
 npm run test:e2e    # browser tests: local mode at 960×690, and Workshop mode in a 390 px frame against a fake Workshop
 ```
 
+`tests/what-if.test.js` holds **"what if…" scenarios**: futures in which the app could break, each stating what should happen instead. A Kin that answers with keys like `constructor`, wraps its JSON in a list, leaks invisible characters, emojis or HTML; corrupt files (dates that are not dates, settings that say `"false"` as text: automatic updates stay **off**); a clock that jumps back; a failure in the middle of a quiet stretch; clearing the history while a run writes; text full of characters JSON must escape at the 500-character limit; and **fuzzing**: thousands of random answers (fixed seed, so a failure repeats) through the parser, the end line and the whole run. The browser test also opens a Kin whose files are corrupt and checks that the screen keeps working.
+
 The browser tests need Playwright and Chromium. If they are not installed: `npm i --no-save playwright && npx playwright install chromium`. Screenshots go to `tests/e2e/shots/`.
 
 ## How it works

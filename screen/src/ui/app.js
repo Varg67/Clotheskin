@@ -4,9 +4,10 @@ import { buildOutfitPrompt } from '../core/prompt.js';
 import { parseReading, describeReading, poseIcon, NO_HAIR, NO_MAKEUP } from '../core/outfit.js';
 import { formatClock, formatRelative } from '../core/format.js';
 import { DEMO_SCENES } from '../demo/demo.js';
-import { ReadingStore, JournalStore, SENTENCE_KEYS, HISTORY_MAX } from '../core/readings.js';
+import { ReadingStore, JournalStore, SENTENCE_KEYS, HISTORY_MAX, clearHistory } from '../core/readings.js';
 import { normalizeInterval, effectiveMinutes, autoFailureLines, adaptiveLine, SCHEDULE_TICK_MINUTES, AUTO_MIN_MINUTES, AUTO_MAX_MINUTES, ADAPTIVE_MAX_FACTOR } from '../core/auto.js';
 import { HOST_NO_ANSWER } from '../core/errors.js';
+import { flag } from '../core/store.js';
 
 export const THEMES = [
   { id: 'warm', label: 'Kindroid warm (default)' },
@@ -92,7 +93,8 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     S.cached.set(kin.id, stored);
     const mine = S.results.get(kin.id);
     // Same time as what is shown = the stored copy of that very reading, which is never shortened: take it.
-    const newer = stored.at && stored.location !== null && (!mine || Date.parse(stored.at) >= Date.parse(mine.at));
+    // A reading whose date was lost (corrupt file) is still shown when there is nothing else, as "unknown time".
+    const newer = stored.location !== null && (!mine || (stored.at !== null && Date.parse(stored.at) >= Date.parse(mine.at)));
     const next = newer ? { ...sentencesOf(stored), at: stored.at, source: stored.source } : null;
     if (newer) S.results.set(kin.id, next);
     return (newer && JSON.stringify(next) !== JSON.stringify(mine)) || JSON.stringify(stored) !== before;
@@ -330,7 +332,7 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
           j?.history.length ? h('button', { type: 'button', class: 'btn small ghost', 'data-key': 'history-clear', onClick: async () => {
             if (S.confirmClear !== kin.id) { S.confirmClear = kin.id; render(); return; }
             S.confirmClear = null;
-            try { await journals.put(kin.id, { ...j, history: [] }); S.journals.set(kin.id, { ...j, history: [] }); announce('History cleared'); } catch { S.info = { kind: 'info', text: 'Could not clear the history: the Workshop did not respond.' }; }
+            try { S.journals.set(kin.id, await clearHistory(journals, kin.id)); announce('History cleared'); } catch { S.info = { kind: 'info', text: 'Could not clear the history: the Workshop did not respond.' }; }
             render();
           } }, icon('trash', { size: 16 }), S.confirmClear === kin.id ? 'Press again to clear (the current status stays)' : 'Clear history') : null)));
   }
@@ -400,7 +402,7 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
   }
 
   function renderAutoSettings() {
-    const on = !!settings.value.autoUpdate;
+    const on = flag(settings.value.autoUpdate, false);
     const minutes = normalizeInterval(settings.value.autoIntervalMinutes);
     const eff = effectiveMinutes(minutes);
     const ticked = new Set((settings.value.autoKins || []).map((k) => k.id));
@@ -436,12 +438,12 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
             onChange: async (e) => { if (e.target.checked) ticked.add(k.id); else ticked.delete(k.id); noteSave(await saveKins(ticked)); render(); } }),
           displayName(k)))) : null,
       h('label', { class: 'check' },
-        h('input', { type: 'checkbox', id: 'auto-adaptive', 'data-key': 'auto-adaptive', disabled: !isWorkshop, checked: settings.value.autoAdaptive !== false,
+        h('input', { type: 'checkbox', id: 'auto-adaptive', 'data-key': 'auto-adaptive', disabled: !isWorkshop, checked: flag(settings.value.autoAdaptive, true),
           onChange: async (e) => { noteSave(await settings.save({ autoAdaptive: e.target.checked })); render(); } }),
         'Wait longer when nothing changes'),
       h('p', { class: 'help' }, `Each check that finds the same status doubles the wait, up to ${ADAPTIVE_MAX_FACTOR}× your interval. The first change, a failure or Update status goes back to your interval. Saves credits when the scene is quiet.`),
       isWorkshop && kin && stored?.attemptedAt ? h('p', { class: 'help', 'data-testid': 'auto-status' }, `Last check for ${displayName(kin)}: `, h('span', { class: 'rel', 'data-iso': stored.attemptedAt }, formatRelative(stored.attemptedAt, clock())), stored.error ? ' (failed)' : '') : null,
-      isWorkshop && on && kin && stored && !stored.error && settings.value.autoAdaptive !== false && ticked.has(kin.id) && adaptiveLine(stored, minutes) ? h('p', { class: 'help', 'data-testid': 'adaptive-status' }, adaptiveLine(stored, minutes)) : null,
+      isWorkshop && on && kin && stored && !stored.error && flag(settings.value.autoAdaptive, true) && ticked.has(kin.id) && adaptiveLine(stored, minutes) ? h('p', { class: 'help', 'data-testid': 'adaptive-status' }, adaptiveLine(stored, minutes)) : null,
       S.autoNote ? h('p', { class: 'form-error', role: 'alert', 'data-testid': 'auto-note' }, S.autoNote) : null,
       h('p', { class: 'help' }, 'Each check asks the Kin one question and uses running time from your credits. The latest reading and a short history of each Kin are kept, so they can be shown when you open the app.'));
   }

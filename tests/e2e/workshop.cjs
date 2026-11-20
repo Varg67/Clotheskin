@@ -474,6 +474,21 @@ window.addEventListener('message', async (e) => {
     await page.screenshot({ path: path.join(SHOTS, '10-workshop-settings-sage.png') });
   });
 
+  await step('what if: corrupt files (broken dates, junk entries) for a Kin never crash the screen', async () => {
+    kins = [...kins, { id: 'k-nova', name: 'Nova' }];
+    await page.evaluate(() => window.pushKins());
+    files.set(keyToPath('clotheskin:v2:reading:k-nova'), JSON.stringify({ at: 'yesterday', attemptedAt: 'soon', location: 'In the void.', doing: 5, outfit: null, stableCount: -3 }));
+    files.set(keyToPath('clotheskin:v2:journal:k-nova'), JSON.stringify({ history: [{ at: 'x', location: 'In A.' }, { at: '2026-11-20T10:00:00Z', location: 'In the void.', doing: 'Floating.' }, 7, null], log: [{ at: 'never' }, { at: '2026-11-20T10:00:00Z', ok: 'yes', ms: -5, tries: 1e9 }] }));
+    await pick('k-nova');
+    await until(async () => (await where()) === 'In the void.', 'the readable part is shown');
+    if (!(await fr.locator('[data-testid="history-item"]').first().isVisible().catch(() => false))) await key('history-summary').click();
+    await until(async () => (await fr.locator('[data-testid="history-item"]').count()) === 1, 'only the valid history entry');
+    await openSettings();
+    if (!(await fr.locator('[data-testid="diag-item"]').first().isVisible().catch(() => false))) await key('diag-summary').click();
+    await until(async () => (await fr.locator('[data-testid="diag-item"]').count()) === 1, 'only the valid log entry');
+    assert.equal(await key('update').isEnabled(), true, 'the app still works');
+  });
+
   await step('no page errors or console errors', async () => { assert.deepEqual(problems, []); });
 
   await browser.close(); server.close();

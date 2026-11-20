@@ -5,7 +5,11 @@ export function userTimeZone() {
   try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; }
 }
 
+const valid = (iso) => typeof iso === 'string' && Number.isFinite(Date.parse(iso));
+
+/** A broken date (corrupt file) shows as "unknown time": the screen never crashes on it. */
 export function formatClock(iso, { timeZone = userTimeZone(), now = new Date() } = {}) {
+  if (!valid(iso)) return 'unknown time';
   const d = new Date(iso);
   const time = new Intl.DateTimeFormat(LOCALE, { hour: 'numeric', minute: '2-digit', timeZone }).format(d);
   const dayKey = (x) => new Intl.DateTimeFormat(LOCALE, { year: 'numeric', month: 'numeric', day: 'numeric', timeZone }).format(x);
@@ -15,6 +19,7 @@ export function formatClock(iso, { timeZone = userTimeZone(), now = new Date() }
 }
 
 export function formatRelative(iso, now = new Date()) {
+  if (!valid(iso)) return 'at an unknown time';
   const diff = (new Date(iso).getTime() - now.getTime()) / 1000;
   const abs = Math.abs(diff);
   if (abs < 45) return 'just now';

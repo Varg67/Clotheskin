@@ -11,6 +11,8 @@ export const HISTORY_MAX = 20;
 export const LOG_MAX = 15;
 export const SENTENCE_KEYS = ['location', 'doing', 'outfit', 'hair', 'makeup'];
 const S = (v, n = 600) => (typeof v === 'string' ? v.slice(0, n) : null);
+/** A date as stored: valid ISO text, or null. A broken date must never reach the screen's formatting. */
+const D = (v) => (typeof v === 'string' && v.length <= 40 && Number.isFinite(Date.parse(v)) ? v : null);
 const count = (v, max = 99) => (Number.isInteger(v) && v > 0 ? Math.min(v, max) : 0);
 
 export class ReadingStore {
@@ -28,7 +30,7 @@ export class ReadingStore {
     try { raw = JSON.parse(text); } catch { return null; }
     if (!raw || typeof raw !== 'object') return null;
     return {
-      at: S(raw.at), attemptedAt: S(raw.attemptedAt), source: raw.source === 'auto' ? 'auto' : 'manual',
+      at: D(raw.at), attemptedAt: D(raw.attemptedAt), source: raw.source === 'auto' ? 'auto' : 'manual',
       location: S(raw.location), doing: S(raw.doing), outfit: S(raw.outfit), hair: S(raw.hair), makeup: S(raw.makeup), error: S(raw.error),
       failures: count(raw.failures),
       errorKind: typeof raw.errorKind === 'string' ? raw.errorKind.slice(0, 30) : null,
@@ -58,30 +60,32 @@ export function sameSentences(a, b) {
 export function afterAttempt(prev, { now, source, sentences, error, kind = null, claim = false }) {
   const stamp = now.toISOString();
   if (sentences) {
-    const stableCount = source === 'auto' && sameSentences(prev, sentences) ? Math.min((prev?.stableCount ?? 0) + 1, 99) : 0;
+    // after a failure the next success starts a new count: "a failure goes back to your interval"
+    const stableCount = source === 'auto' && !prev?.error && sameSentences(prev, sentences) ? Math.min((prev?.stableCount ?? 0) + 1, 99) : 0;
     return { at: stamp, attemptedAt: stamp, source, location: sentences.location, doing: sentences.doing, outfit: sentences.outfit, hair: sentences.hair ?? null, makeup: sentences.makeup ?? null, error: null, failures: 0, errorKind: null, stableCount };
   }
   // A claim only marks the attempt; it keeps whatever error was there. A real failure records its message.
   return { at: prev?.at ?? null, attemptedAt: stamp, source: prev?.source ?? source, location: prev?.location ?? null, doing: prev?.doing ?? null, outfit: prev?.outfit ?? null, hair: prev?.hair ?? null, makeup: prev?.makeup ?? null, error: claim ? (error ?? null) : String(error || 'The reading failed.').slice(0, 300),
     // consecutive failures drive the retry backoff; a claim (an attempt marker) changes neither the count nor the kind
     failures: claim ? (prev?.failures ?? 0) : (prev?.failures ?? 0) + 1, errorKind: claim ? (prev?.errorKind ?? null) : kind,
-    stableCount: prev?.stableCount ?? 0 };
+    // a real failure ends a quiet stretch: after it, the wait starts over from the interval
+    stableCount: claim ? (prev?.stableCount ?? 0) : 0 };
 }
 
 // ---------------------------------------------------------------- journal: history and diagnostics
 const num = (v, max) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.min(Math.round(v), max) : null);
 
 function cleanHistoryEntry(e) {
-  if (!e || typeof e !== 'object' || typeof e.at !== 'string' || typeof e.location !== 'string') return null;
-  const out = { at: S(e.at, 40), source: e.source === 'auto' ? 'auto' : 'manual' };
+  if (!e || typeof e !== 'object' || !D(e.at) || typeof e.location !== 'string') return null;
+  const out = { at: D(e.at), source: e.source === 'auto' ? 'auto' : 'manual' };
   for (const k of SENTENCE_KEYS) out[k] = S(e[k]);
   return out;
 }
 
 function cleanLogEntry(e) {
-  if (!e || typeof e !== 'object' || typeof e.at !== 'string') return null;
+  if (!e || typeof e !== 'object' || !D(e.at)) return null;
   return {
-    at: S(e.at, 40), source: e.source === 'auto' ? 'auto' : 'manual', ok: e.ok === true,
+    at: D(e.at), source: e.source === 'auto' ? 'auto' : 'manual', ok: e.ok === true,
     kind: typeof e.kind === 'string' ? e.kind.slice(0, 30) : null,
     ms: num(e.ms, 3_600_000), tries: num(e.tries, 9), chars: num(e.chars, 1_000_000),
     cut: e.cut === true, unchanged: e.unchanged === true, error: S(e.error, 200),
@@ -100,6 +104,17 @@ export function withHistory(journal, entry) {
 export function withLog(journal, entry) {
   const e = cleanLogEntry(entry);
   return e ? { ...journal, log: [e, ...journal.log].slice(0, LOG_MAX) } : journal;
+}
+
+/**
+ * Clear history: re-read the journal and write it back without its history. Never writes a copy loaded earlier, which
+ * would drop log entries a run added since. Throws if the journal cannot be read or saved.
+ */
+export async function clearHistory(store, kinId) {
+  const j = await store.get(kinId, { strict: true });
+  const next = { ...j, history: [] };
+  await store.put(kinId, next);
+  return next;
 }
 
 export class JournalStore {

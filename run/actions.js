@@ -1,9 +1,10 @@
 import { buildOutfitPrompt, KIN_ASK_LIMIT } from '../screen/src/core/prompt.js';
 import { parseReading, describeReading, NO_HAIR, NO_MAKEUP } from '../screen/src/core/outfit.js';
-import { Settings, MemoryStorage } from '../screen/src/core/store.js';
+import { Settings, MemoryStorage, flag } from '../screen/src/core/store.js';
 import { ReadingStore, JournalStore, afterAttempt } from '../screen/src/core/readings.js';
 import { normalizeInterval, pickDue, AUTO_MAX_KINS_PER_RUN } from '../screen/src/core/auto.js';
 import { classifyFailure, KINDS } from '../screen/src/core/errors.js';
+import { dropHalfChar } from '../screen/src/core/text.js';
 
 const clip = (s, n = 480) => (s.length <= n ? s : `${s.slice(0, n - 1)}…`);
 const KIN_END_LIMIT = 500;
@@ -22,7 +23,7 @@ const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * `at` is the time the run stored the reading under, so the screen can pick up the stored (never shortened) copy.
  * Hair and makeup are left out when nothing was said about them (the screen knows the default). If the line is too
  * long, the longest of outfit, hair and makeup is shortened at a word, with "…", until it fits, and `cut` says so.
- * Location and pose/action are short by nature and never cut.
+ * Location and pose/action are cut only if nothing else is left to cut (see below).
  */
 export function packReading({ location, doing, outfit, hair, makeup }, { at } = {}) {
   const o = {};
@@ -33,16 +34,22 @@ export function packReading({ location, doing, outfit, hair, makeup }, { at } = 
   const len = () => JSON.stringify(o).length;
   if (len() <= KIN_END_LIMIT) return JSON.stringify(o);
   o.cut = true;
-  const cuttable = ['outfit', 'hair', 'makeup'].filter((k) => typeof o[k] === 'string');
-  for (let guard = 0; len() > KIN_END_LIMIT && guard < 2000; guard += 1) {
-    const k = cuttable.reduce((a, b) => (o[b].length > o[a].length ? b : a));
-    const was = o[k];
-    if (was.length <= 2) break;
-    const base = was.replace(/…$/, '');
-    let t = base.slice(0, Math.max(1, base.length - Math.max(1, len() - KIN_END_LIMIT)));
-    if (t.length < base.length) t = t.replace(/[\s,]+\S*$/, '') || t; // end at a word
-    t = `${t.replace(/[\s,.…]+$/, '')}…`;
-    o[k] = t.length < was.length ? t : `${was.slice(0, -2)}…`;
+  // Outfit, hair and makeup are shortened first. Location and pose/action are short by nature; only text full of
+  // characters JSON must escape (quotes, backslashes, control codes) can make them too long, and only then are they cut.
+  // Lengths are measured as JSON (escaped), which is what has to fit.
+  const size = (k) => JSON.stringify(o[k]).length;
+  for (const group of [['outfit', 'hair', 'makeup'], ['location', 'doing']]) {
+    for (let guard = 0; len() > KIN_END_LIMIT && guard < 5000; guard += 1) {
+      const open = group.filter((k) => typeof o[k] === 'string' && o[k].length > 2);
+      if (!open.length) break;
+      const k = open.reduce((x, y) => (size(y) > size(x) ? y : x));
+      const was = o[k];
+      const base = was.replace(/…$/, '');
+      let t = base.slice(0, Math.max(1, base.length - Math.max(1, Math.ceil((len() - KIN_END_LIMIT) / Math.max(1, size(k) / was.length)))));
+      if (t.length < base.length) t = t.replace(/[\s,]+\S*$/, '') || t; // end at a word
+      t = `${dropHalfChar(t.replace(/[\s,.…]+$/, ''))}…`;
+      o[k] = t.length < was.length ? t : `${dropHalfChar(was.slice(0, -2))}…`;
+    }
   }
   return JSON.stringify(o);
 }
@@ -110,7 +117,7 @@ async function runScheduled({ provider, storage, journalStorage, clock, sleep })
     // Do not guess: unreadable settings are not "off" and not "on". Say so, and the next beat tries again.
     return { ok: false, message: clip(`Could not read the settings: ${e.message}`) };
   }
-  if (!settings.autoUpdate) return { ok: true, message: 'Automatic updates are off.' };
+  if (!flag(settings.autoUpdate, false)) return { ok: true, message: 'Automatic updates are off.' };
   const interval = normalizeInterval(settings.autoIntervalMinutes);
   const kins = Array.isArray(settings.autoKins) ? settings.autoKins : [];
   if (!kins.length) return { ok: true, message: 'Automatic updates are on, but no Kin is ticked.' };
@@ -124,7 +131,7 @@ async function runScheduled({ provider, storage, journalStorage, clock, sleep })
   }
   // A Kin whose stored reading cannot be read is skipped: asking and saving would overwrite sentences that may be fine.
   const readable = kins.filter((k) => k && typeof k.id === 'string' && !unreadable.includes(k.id));
-  const due = pickDue({ now: clock(), kins: readable, readings: known, intervalMinutes: interval, max: AUTO_MAX_KINS_PER_RUN, adaptive: settings.autoAdaptive !== false });
+  const due = pickDue({ now: clock(), kins: readable, readings: known, intervalMinutes: interval, max: AUTO_MAX_KINS_PER_RUN, adaptive: flag(settings.autoAdaptive, true) });
   const journals = new JournalStore(journalStorage);
   if (!due.length) {
     return { ok: !unreadable.length, message: unreadable.length ? `Could not read the stored reading of ${unreadable.length} Kin(s); they were skipped.` : 'No Kin is due yet.' };

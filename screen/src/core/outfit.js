@@ -19,7 +19,8 @@ const SLOT_ALIASES = (() => {
   });
   return m;
 })();
-export const normalizeSlot = (v) => (typeof v === 'string' ? SLOT_ALIASES[slotKey(v)] : undefined);
+// Own keys only: "constructor" or "toString" from the Kin must not find Object's built-ins.
+export const normalizeSlot = (v) => (typeof v === 'string' && Object.hasOwn(SLOT_ALIASES, slotKey(v)) ? SLOT_ALIASES[slotKey(v)] : undefined);
 
 // A Kin that ignores the slot names and answers {"clothing":[...],"accessories":[...]} is still understood.
 const LOOSE_CLOTHING = new Set(['clothing', 'clothes', 'outfit', 'wearing', 'garments']);
@@ -81,7 +82,9 @@ function outfitFromObject(doc) {
 function parseObject(text) {
   const parsed = parseJsonObject(text);
   if (!parsed.ok) return parsed;
-  const doc = parsed.value;
+  let doc = parsed.value;
+  // A Kin that wraps its one object in a list ([{...}]) is understood.
+  if (Array.isArray(doc) && doc.length === 1 && doc[0] && typeof doc[0] === 'object' && !Array.isArray(doc[0])) doc = doc[0];
   if (doc === null || typeof doc !== 'object' || Array.isArray(doc)) return { ok: false, error: 'The answer must be a JSON object.' };
   return { ok: true, doc };
 }

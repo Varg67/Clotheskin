@@ -134,3 +134,13 @@ dialog.sheet::backdrop { background: var(--scrim); -webkit-backdrop-filter: blur
 .fact-value { font-size: 1.05rem; line-height: 1.4; overflow-wrap: anywhere; }
 .fact.empty .fact-value { color: var(--muted); font-style: italic; font-size: .98rem; }
 .toggle.static { cursor: default; }
+
+/* Automatic update: a compact ruler with uneven stops (Off, 1, 2, 5, 10 … min, 1 h, 1 h 30, 2 h) */
+.auto { margin-top: 14px; padding: 12px 14px 10px; border-radius: var(--radius-md); background: var(--glass); border: 1px solid var(--glass-border); }
+.auto-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.auto-value { font-weight: 700; color: var(--accent-deep); }
+.ruler { width: 100%; margin: 10px 0 2px; accent-color: var(--accent); min-height: 24px; cursor: pointer; }
+.ruler-ends { display: flex; justify-content: space-between; font-size: .75rem; }
+.auto-status { margin: 8px 0 0; }
+.link-btn { background: none; border: 0; padding: 0; color: var(--accent-deep); font-weight: 700; text-decoration: underline; cursor: pointer; min-height: 24px; }
+.banner.warn { border-color: var(--accent); background: var(--accent-tint); } .banner.warn .icon { color: var(--accent-deep); }

@@ -16,9 +16,11 @@ export const DEFAULT_SETTINGS = {
   theme: 'warm', // 'warm' (stock Kindroid) | 'sage' (green, sampled from a customised desktop window)
   selectedKinId: null,
   localName: 'Isa',
+  autoIntervalS: 0, // automatic readings in the Workshop, in seconds (0 = off); shown as minutes on the ruler
+  sleep: {}, // kin id -> { wakeAt, until, sleptOn }: the hibernation of a sleeping Kin (times only, nothing about the scene)
 };
 
-/** Preferences only (theme, which Kin is selected, the local-mode name). No outfit and no chat is ever stored. */
+/** Preferences only (theme, selected Kin, local-mode name, automatic interval, wake-up times). No outfit, no place and no chat is ever stored. */
 export class Settings {
   constructor(storage) { this.storage = storage; this.value = { ...DEFAULT_SETTINGS }; this.queue = Promise.resolve(); }
   async load() {

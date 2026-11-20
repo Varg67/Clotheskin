@@ -15,6 +15,18 @@ export function buildManifest() {
         input: { type: 'object', properties: { kin: { type: 'string' }, name: { type: 'string' } }, required: ['kin'] },
         by: ['user'],
       },
+      {
+        name: 'ask_sleep',
+        description: 'Asks a Kin that seems asleep whether it is, and at what time it plans to wake up.',
+        input: { type: 'object', properties: { kin: { type: 'string' }, name: { type: 'string' }, now: { type: 'string' } }, required: ['kin'] },
+        by: ['user'],
+      },
+      {
+        name: 'ask_dream',
+        description: 'Asks a Kin that is waking up what it dreamt and how much of the dream it remembers.',
+        input: { type: 'object', properties: { kin: { type: 'string' }, name: { type: 'string' }, now: { type: 'string' } }, required: ['kin'] },
+        by: ['user'],
+      },
     ],
     grants: ['kin:read', 'chat:read:1'],
   };

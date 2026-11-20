@@ -2,7 +2,9 @@ import { h, keepFocus, openSheet } from './dom.js';
 import { icon, spinner } from './icons.js';
 import { buildOutfitPrompt } from '../core/prompt.js';
 import { parseReading, describeReading, describeLocation, describeDoing, describeOutfit, poseIcon } from '../core/outfit.js';
-import { formatClock, formatRelative } from '../core/format.js';
+import { formatClock, formatRelative, formatWhen } from '../core/format.js';
+import { INTERVAL_STEPS, formatInterval, snapInterval, describeDream, errorKind } from '../core/auto.js';
+import { createAutomation } from './automation.js';
 import { DEMO_SCENES } from '../demo/demo.js';
 
 export const THEMES = [
@@ -60,12 +62,14 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
   }
 
   if (isWorkshop) {
-    host.channel.onKinsChange((kins) => { S.kins = kins; render(); });
+    host.channel.onKinsChange((kins) => { S.kins = kins; if (auto && selectedKin()?.id !== auto.state.kinId) auto.reschedule(); render(); });
   }
 
   /** Where a Kin stands in this session, for the list: its last place, a reading in progress, or nothing yet. */
   function kinState(k) {
     if (S.reading.has(k.id)) return 'Reading…';
+    const asleep = auto?.hibernation(k.id);
+    if (asleep) return `Asleep until ${formatWhen(asleep.wakeAt.toISOString(), { now: clock() })}`;
     const r = S.results.get(k.id);
     return r ? `${r.location.replace(/\.$/, '')} · ${formatRelative(r.at, clock())}` : 'Not read yet';
   }
@@ -76,7 +80,7 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     return [
       h('ul', { class: 'profile-list', role: 'list' }, ...S.kins.map((k) => h('li', {},
         h('button', { type: 'button', class: `profile-pick${k.id === current ? ' selected' : ''}`, 'aria-pressed': String(k.id === current), 'data-key': `pick-${k.id}`,
-          onClick: () => { S.info = null; settings.save({ selectedKinId: k.id }); afterPick(); renderAndFocus('update'); announce(`Selected ${k.name}`); } },
+          onClick: () => { S.info = null; settings.save({ selectedKinId: k.id }); auto?.reschedule(); afterPick(); renderAndFocus('update'); announce(`Selected ${k.name}`); } },
         avatar(36), h('span', { class: 'pp-text' }, h('strong', {}, k.name), h('span', { class: 'muted' }, kinState(k))),
         k.id === current ? h('span', { class: 'tag' }, 'Selected') : null)))),
       h('p', { class: 'help' }, 'Only the selected Kin is read, and only when you press Update status. To attach or detach a Kin, open the app’s settings in Kindroid Apps and use Kins.'),
@@ -111,6 +115,7 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     const none = { location: describeLocation(null), doing: describeDoing({}) };
     const o = parseJson(text);
     const str = (v) => typeof v === 'string' && v.length <= SUMMARY_MAX;
+    if (o && typeof o === 'object' && str(o.error)) return { ok: false, error: o.error, kind: o.kind };
     if (o && typeof o === 'object' && str(o.outfit)) {
       return { ok: true, location: str(o.location) ? o.location : none.location, doing: str(o.doing) ? o.doing : none.doing, outfit: o.outfit };
     }
@@ -124,21 +129,68 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     if (id === selectedKin()?.id && !S.errors.has(id) && r) announce(`${r.location} ${r.doing} ${r.outfit}`);
   };
 
-  /** Workshop: the run asks the Kin about its recent chat. The reading belongs to the Kin it started for. */
-  async function readInWorkshop(kin) {
-    if (S.reading.has(kin.id)) return; // repeated clicks join the reading in progress
-    S.reading.add(kin.id); S.info = null; render();
+  // A reply naming another Kin is a late answer to an earlier run that timed out: not for this question.
+  const acceptFor = (kin) => (reply) => { const k = summaryKin(reply.summary); return k === undefined || k === kin.id; };
+
+  /** Workshop: the run asks the Kin about its recent chat. Resolves { ok, doing } or { ok: false, error, kind }. */
+  const inFlight = new Map(); // kin id -> the reading in progress (repeated clicks and the timer join it)
+  function readInWorkshop(kin) {
+    if (inFlight.has(kin.id)) return inFlight.get(kin.id);
+    const p = (async () => {
+      S.reading.add(kin.id); S.info = null; render();
+      let outcome;
+      try {
+        const r = await host.channel.runAction('read_outfit', { kin: kin.id, name: kin.name }, { accept: acceptFor(kin) });
+        outcome = readSummary(r.summary);
+        if (!r.ok && outcome.ok) outcome = { ok: false, error: r.summary || 'The reading could not be completed.', kind: errorKind(r.summary) };
+      } catch (e) {
+        outcome = { ok: false, error: e.message, kind: errorKind(e.message, 'server') };
+      }
+      show(kin.id, outcome);
+      S.reading.delete(kin.id); inFlight.delete(kin.id);
+      announceResult(kin.id);
+      render();
+      return outcome;
+    })();
+    inFlight.set(kin.id, p);
+    return p;
+  }
+
+  /** Workshop: a follow-up question (ask_sleep, ask_dream). Resolves { ok, value } or { ok: false, error, kind }. */
+  async function askInWorkshop(kin, action, extra) {
     try {
-      // A reply naming another Kin is a late answer to an earlier run that timed out: not this reading.
-      const accept = (reply) => { const k = summaryKin(reply.summary); return k === undefined || k === kin.id; };
-      const r = await host.channel.runAction('read_outfit', { kin: kin.id, name: kin.name }, { accept });
-      show(kin.id, r.ok ? readSummary(r.summary) : { ok: false, error: r.summary || 'The reading could not be completed.' });
+      const r = await host.channel.runAction(action, { kin: kin.id, name: kin.name, ...extra }, { accept: acceptFor(kin) });
+      const o = parseJson(r.summary);
+      const isObj = o && typeof o === 'object' && !Array.isArray(o);
+      if (isObj && typeof o.error === 'string') return { ok: false, error: o.error, kind: o.kind || 'server' };
+      if (!r.ok) return { ok: false, error: r.summary || 'The question could not be completed.', kind: errorKind(r.summary) };
+      return isObj ? { ok: true, value: o } : { ok: false, error: 'The answer came back in an unexpected format.', kind: 'answer' };
     } catch (e) {
-      show(kin.id, { ok: false, error: e.message });
+      return { ok: false, error: e.message, kind: errorKind(e.message, 'server') };
     }
-    S.reading.delete(kin.id);
-    announceResult(kin.id);
-    render();
+  }
+
+  // Automatic readings (Workshop only): the ruler, the sleep cycle and the server warning.
+  const auto = isWorkshop ? createAutomation({
+    settings, clock, selectedKin,
+    read: readInWorkshop,
+    ask: askInWorkshop,
+    lastReadingAt: (id) => S.results.get(id)?.at ?? null,
+    onChange: () => { announceAuto(); render(); },
+  }) : null;
+  let lastAutoNote = '';
+  /** Falling asleep, waking up and the server warning are announced once each. */
+  function announceAuto() {
+    const kin = selectedKin();
+    if (!kin || !auto) return;
+    const h = auto.hibernation(kin.id);
+    const dream = auto.state.dreams.get(kin.id);
+    const w = auto.warning();
+    const note = h ? `${kin.name} is asleep. Automatic updates pause until ${formatWhen(h.until.toISOString(), { now: clock() })}.`
+      : w ? warningText(w)
+        : dream ? `${kin.name} woke up. Dream: ${describeDream(dream)}` : '';
+    if (note && note !== lastAutoNote) announce(note);
+    lastAutoNote = note;
   }
 
   /** Local mode: build the prompt from the pasted chat, then wait for the pasted JSON answer. */
@@ -164,7 +216,49 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
   async function update() {
     const kin = selectedKin();
     if (!kin) { chooseKin(); return; }
-    if (isWorkshop) await readInWorkshop(kin); else prepareLocal();
+    if (!isWorkshop) { prepareLocal(); return; }
+    // With automatic updates on (and the Kin awake), a manual update is the next automatic step, done now.
+    if (auto.interval() && !auto.hibernation(kin.id)) { auto.runNow(); return; }
+    await readInWorkshop(kin);
+  }
+
+  function warningText(w) {
+    const next = w.nextAt ? formatWhen(w.nextAt.toISOString(), { now: clock() }) : null;
+    const when = next ? ` Automatic updates will try again at ${next}.` : '';
+    return w.kind === 'maintenance'
+      ? `Kindroid seems to be under maintenance.${when}`
+      : `Kindroid has not answered ${w.failures} times in a row. It may be down.${when.replace('will try', 'are slowed down and will try')}`;
+  }
+
+  /** The ruler: stops from Off to 2 h. The label follows the thumb while dragging; the choice applies on release. */
+  function renderAutomation(kin) {
+    const value = snapInterval(settings.value.autoIntervalS);
+    const index = Math.max(0, INTERVAL_STEPS.indexOf(value));
+    const label = (s) => (s ? `Every ${formatInterval(s)}` : 'Off');
+    const out = h('output', { for: 'auto-ruler', class: 'auto-value', 'data-testid': 'auto-value' }, label(value));
+    const h8n = auto.hibernation(kin.id);
+    const now = clock();
+    const at = (d) => formatWhen(d.toISOString(), { now });
+    let status = null;
+    if (h8n) {
+      status = [`Asleep until ${at(h8n.wakeAt)}. The dream question comes at ${at(h8n.until)}. `,
+        h('button', { type: 'button', class: 'link-btn', 'data-key': 'wake-now', onClick: () => auto.wakeNow() }, 'Wake now')];
+    } else if (value && auto.state.busy) status = 'Updating…';
+    else if (value && auto.state.nextAt) status = `Next update at ${at(auto.state.nextAt)}.`;
+    return h('div', { class: 'auto' },
+      h('div', { class: 'auto-head' }, h('label', { class: 'row-label', for: 'auto-ruler' }, 'Automatic update'), out),
+      h('input', { type: 'range', id: 'auto-ruler', class: 'ruler', 'data-key': 'auto-ruler', min: 0, max: INTERVAL_STEPS.length - 1, step: 1, value: index,
+        'aria-valuetext': label(value),
+        onInput: (e) => { const s = INTERVAL_STEPS[Number(e.target.value)]; out.textContent = label(s); e.target.setAttribute('aria-valuetext', label(s)); },
+        onChange: (e) => { settings.save({ autoIntervalS: INTERVAL_STEPS[Number(e.target.value)] }); auto.reschedule(); } }),
+      h('div', { class: 'ruler-ends muted', 'aria-hidden': 'true' }, h('span', {}, 'Off'), h('span', {}, '2 h')),
+      status ? h('p', { class: 'meta auto-status', 'data-testid': 'auto-status' }, status) : null);
+  }
+
+  /** The warning about Kindroid itself takes the place of the error banner: it says more (why, and when the next try is). */
+  function renderServerWarning(w) {
+    return h('div', { class: 'banner warn', role: 'status', 'data-testid': 'server-warning' }, icon('alert', { size: 18 }), h('span', { class: 'banner-text' }, warningText(w)),
+      h('button', { type: 'button', class: 'btn small', 'data-key': 'auto-retry', onClick: () => auto.runNow() }, 'Try now'));
   }
 
   // ---------------------------------------------------------------- rendering
@@ -202,6 +296,8 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     const reading = S.reading.has(kin.id);
     const result = S.results.get(kin.id);
     const error = S.errors.get(kin.id);
+    const dream = auto?.state.dreams.get(kin.id);
+    const warning = auto?.interval() ? auto.warning() : null;
     const now = clock();
     return h('section', { class: 'card', 'aria-label': `${kin.name} status` },
       h('div', { class: 'card-top' },
@@ -222,14 +318,20 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
           h('div', { class: `fact${result ? '' : ' empty'}` },
             h('span', { class: 'row-icon' }, icon('hanger', { size: 24 })),
             h('span', { class: 'fact-text' }, h('span', { class: 'row-label' }, 'Outfit'),
-              h('span', { class: 'fact-value', 'data-testid': 'outfit' }, result ? result.outfit : 'No outfit read yet. Press Update status.')))),
+              h('span', { class: 'fact-value', 'data-testid': 'outfit' }, result ? result.outfit : 'No outfit read yet. Press Update status.'))),
+          dream ? h('div', { class: 'fact' },
+            h('span', { class: 'row-icon' }, icon('moon', { size: 24 })),
+            h('span', { class: 'fact-text' }, h('span', { class: 'row-label' }, 'Last dream'),
+              h('span', { class: 'fact-value', 'data-testid': 'dream' }, describeDream(dream)))) : null),
         h('button', { type: 'button', class: 'btn primary block', 'data-key': 'update', 'aria-busy': String(reading), onClick: update },
           reading ? [spinner(), isWorkshop ? 'Reading…' : 'Waiting for the answer…'] : [icon('refresh', { size: 18 }), 'Update status']),
         h('p', { class: 'meta', 'data-testid': 'last-checked' }, 'Last checked: ',
           result ? [h('time', { datetime: result.at }, formatClock(result.at, { now })), ' · ', h('span', { class: 'rel', 'data-iso': result.at }, formatRelative(result.at, now))] : 'never'),
-        error ? h('div', { class: 'banner error', role: 'alert', 'data-testid': 'banner' }, icon('alert', { size: 18 }), h('span', { class: 'banner-text' }, error),
+        warning ? renderServerWarning(warning)
+          : error ? h('div', { class: 'banner error', role: 'alert', 'data-testid': 'banner' }, icon('alert', { size: 18 }), h('span', { class: 'banner-text' }, error),
           h('button', { type: 'button', class: 'btn small', 'data-key': 'retry', onClick: update }, 'Try again'))
-          : S.info ? h('div', { class: `banner ${S.info.kind}`, role: 'status', 'data-testid': 'banner' }, icon('refresh', { size: 18 }), h('span', { class: 'banner-text' }, S.info.text)) : null));
+          : S.info ? h('div', { class: `banner ${S.info.kind}`, role: 'status', 'data-testid': 'banner' }, icon('refresh', { size: 18 }), h('span', { class: 'banner-text' }, S.info.text)) : null,
+        isWorkshop ? renderAutomation(kin) : null));
   }
 
   const scene = () => DEMO_SCENES.find((x) => x.id === S.sceneId) || DEMO_SCENES[0];
@@ -302,6 +404,7 @@ export async function startApp({ root, settings, host, clock = () => new Date() 
     for (const el of root.querySelectorAll('.rel[data-iso]')) el.textContent = formatRelative(el.dataset.iso, clock());
   }, 30000);
 
+  auto?.reschedule();
   render();
-  return { S, render, selectedKin };
+  return { S, render, selectedKin, auto };
 }

@@ -23,3 +23,11 @@ export function formatRelative(iso, now = new Date()) {
   if (abs < 86400) return rtf.format(Math.round(diff / 3600), 'hour');
   return rtf.format(Math.round(diff / 86400), 'day');
 }
+
+/** Like formatClock, but a time tomorrow reads "7:30 AM tomorrow" (wake-up times are usually the next morning). */
+export function formatWhen(iso, { timeZone = userTimeZone(), now = new Date() } = {}) {
+  const tomorrow = new Date(now.getTime() + 864e5);
+  const dayKey = (x) => new Intl.DateTimeFormat(LOCALE, { year: 'numeric', month: 'numeric', day: 'numeric', timeZone }).format(x);
+  if (dayKey(new Date(iso)) === dayKey(tomorrow)) return `${formatClock(iso, { timeZone, now: new Date(iso) })} tomorrow`;
+  return formatClock(iso, { timeZone, now });
+}

@@ -125,13 +125,13 @@ test('key to path never collides for ids with odd characters', () => {
   assert.match(a, /^cs\/clotheskin~3av1~3arecord~3aa~3ab~3a~3a-\.json$/);
 });
 
-test('kin.json is generated, within the guide limits, with one user action and the grants the Kin question needs', () => {
+test('kin.json is generated, within the guide limits, with the user actions and the grants the Kin question needs', () => {
   const m = buildManifest();
   assert.equal(readFileSync(new URL('../kin.json', import.meta.url), 'utf8'), `${JSON.stringify(m, null, 2)}\n`);
   assert.ok(m.name.length <= 40);
   assert.ok(m.purpose.length <= 200);
   assert.equal(m.run.entry, 'node main.js');
   assert.deepEqual(m.screens, [{ slot: 'panel', entry: 'screen/index.html', title: 'Clotheskin' }]);
-  assert.deepEqual(m.actions.map((a) => [a.name, a.by]), [['read_outfit', ['user']]]);
+  assert.deepEqual(m.actions.map((a) => [a.name, a.by]), [['read_outfit', ['user']], ['ask_sleep', ['user']], ['ask_dream', ['user']]]);
   assert.deepEqual(m.grants, ['kin:read', 'chat:read:1']);
 });

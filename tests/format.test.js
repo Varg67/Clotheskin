@@ -15,3 +15,11 @@ test('relative times are English', () => {
   assert.equal(formatRelative('2026-11-19T12:00:00Z', now), '3 hours ago');
   assert.equal(formatRelative('2026-11-18T12:00:00Z', now), 'yesterday');
 });
+
+test('formatWhen: a time tomorrow says so; today is just the time', async () => {
+  const { formatWhen } = await import('../screen/src/core/format.js');
+  const now = new Date('2026-11-20T22:00:00-03:00');
+  assert.equal(formatWhen('2026-11-21T10:30:00Z', { timeZone: 'America/Sao_Paulo', now }), '7:30 AM tomorrow');
+  assert.equal(formatWhen('2026-11-21T01:50:00Z', { timeZone: 'America/Sao_Paulo', now }), '10:50 PM');
+  assert.equal(formatWhen('2026-11-23T10:30:00Z', { timeZone: 'America/Sao_Paulo', now }), 'Nov 23, 7:30 AM');
+});

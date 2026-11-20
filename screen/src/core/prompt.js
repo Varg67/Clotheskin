@@ -34,3 +34,29 @@ export function buildOutfitPrompt({ name, chat = '', template = OUTFIT_PROMPT })
     recent_chat: recent ? `\nRECENT CHAT:\n${recent}\n` : '',
   }[k] ?? m));
 }
+
+/**
+ * Asked when a reading says the Kin is asleep. {{now}} is the person's clock ("23:10 on Friday"): the wake-up time
+ * is read against it, so the Kin must answer on that clock.
+ */
+export const SLEEP_PROMPT = `You are {{name}}. It is now {{now}} for the person. Look at your recent chat with the person, as of your last message.
+Question: are you asleep right now, and if so, at what time do you plan to wake up?
+Answer in English only, with minified JSON only, on one line: no code fence, no narration, no roleplay, no commentary.
+If you are asleep (sleeping, napping, dozing): {"sleeping":true,"wake_at":"HH:MM"}. wake_at is a 24-hour clock time on the person's clock, for example "07:30". If the chat does not say when you will wake up, give the time you would normally wake up.
+If you are not asleep (awake, only resting, lying in bed awake, or going to sleep later): {"sleeping":false}
+Nothing else.`;
+
+/** Asked a little before the wake-up time the Kin gave. */
+export const DREAM_PROMPT = `You are {{name}}. It is now {{now}} for the person. You fell asleep in your recent chat with the person and you are waking up now.
+Question: what did you dream, and how much of that dream do you still remember now that the day starts?
+Answer in English only, with minified JSON only, on one line: no code fence, no narration, no roleplay, no commentary.
+Format: {"dream":"<a short summary of the dream, at most 25 words, in the first person, past tense>","remembered":"<all|most|some|little|nothing>"}
+If you remember no dream at all: {"dream":"","remembered":"nothing"}
+Nothing else.`;
+
+/** Fills a follow-up prompt (sleep or dream) with the Kin's name and the person's current time. */
+export function buildFollowUpPrompt(template, { name, now }) {
+  const who = String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, 60) || 'the character';
+  const when = String(now ?? '').replace(/\s+/g, ' ').trim().slice(0, 40) || 'unknown';
+  return template.replace(/\{\{(\w+)\}\}/g, (m, k) => ({ name: who, now: when }[k] ?? m));
+}

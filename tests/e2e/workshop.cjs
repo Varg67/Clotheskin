@@ -207,6 +207,90 @@ window.addEventListener('message', async (e) => {
     await page.screenshot({ path: path.join(SHOTS, '10-workshop-switch-list.png') });
   });
 
+  await step('automatic update: the ruler; asleep -> wake-up time -> hibernation overnight -> dream -> readings again', async () => {
+    // A fresh screen with a controllable clock: 22:00 in São Paulo, one Kin.
+    files.clear(); kins = [{ id: 'k-isa', name: 'Isa' }]; delay = 50;
+    const p2 = await ctx.newPage();
+    p2.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
+    p2.on('console', (m) => { if (m.type() === 'error') problems.push(`console: ${m.text()}`); });
+    await p2.clock.install({ time: new Date('2026-11-20T22:00:00-03:00') });
+    await p2.route('**/__parent.html', (route) => route.fulfill({ contentType: 'text/html', body: PARENT }));
+    await p2.exposeFunction('hostKins', () => kins);
+    await p2.exposeFunction('hostRead', (p) => (files.has(p) && files.get(p) !== '' ? files.get(p) : null));
+    await p2.exposeFunction('hostWrite', (p, body) => { files.set(p, body); });
+    await p2.exposeFunction('hostAction', async (name, input) => { await new Promise((r) => setTimeout(r, delay)); const r = await handleRun({ event: { trigger: 'action', action: name, input }, provider }); return r; });
+    let night = true;
+    const questions = [];
+    kinAnswer = async ({ prompt }) => {
+      if (/are you asleep right now/.test(prompt)) { questions.push(['sleep', prompt.match(/It is now ([^.]+) for/)[1]]); return '{"sleeping":true,"wake_at":"07:30"}'; }
+      if (/what did you dream/.test(prompt)) { questions.push(['dream']); night = false; return '{"dream":"I was flying over the sea with my sister","remembered":"most"}'; }
+      questions.push(['reading']);
+      return night ? '{"location":"in the bedroom","pose":"lying in bed","action":"sleeping","topwear":["pyjamas"]}'
+        : '{"location":"in the kitchen","pose":"standing at the counter","action":"making coffee","topwear":["a robe"]}';
+    };
+    await p2.goto(`${base}/__parent.html`);
+    const f2 = p2.frameLocator('#f');
+    const k2 = (k) => f2.locator(`[data-key="${k}"]`);
+    const status = () => f2.locator('[data-testid="auto-status"]').innerText();
+    const wait = async (fn, what) => { const end = Date.now() + 6000; let last; while (Date.now() < end) { try { last = await fn(); if (last) return last; } catch (e) { last = e.message; } await p2.waitForTimeout(50); } throw new Error(`timed out waiting for: ${what} (${last})`); };
+
+    await f2.locator('[data-testid="auto-value"]').waitFor();
+    assert.equal(await f2.locator('[data-testid="auto-value"]').innerText(), 'Off');
+    assert.equal(await f2.locator('[data-testid="auto-status"]').count(), 0, 'off: no schedule');
+    await k2('auto-ruler').fill('4'); // the fifth stop: 10 min
+    assert.equal(await f2.locator('[data-testid="auto-value"]').innerText(), 'Every 10 min');
+    assert.equal(JSON.parse([...files.values()][0]).autoIntervalS, 600, 'stored in seconds');
+
+    await wait(async () => /Asleep until 7:30 AM tomorrow\./.test(await status()), 'hibernation');
+    assert.deepEqual(questions, [['reading'], ['sleep', '22:00 on Friday']], 'a reading at once, then the sleep question with the person\'s time');
+    assert.match(await status(), /The dream question comes at 7:20 AM tomorrow\./);
+    assert.equal(JSON.parse([...files.values()][0]).sleep['k-isa'].wakeAt, new Date('2026-11-21T07:30:00-03:00').toISOString(), 'the wake-up time survives a reload');
+    await p2.screenshot({ path: path.join(SHOTS, '11-workshop-asleep.png') });
+
+    await p2.clock.fastForward('08:00:00'); // 06:00: still asleep, nothing asked
+    await p2.waitForTimeout(300);
+    assert.equal(questions.length, 2);
+    await p2.clock.fastForward('01:21:00'); // 07:21: the dream question
+    await wait(async () => /flying over the sea/.test(await f2.locator('[data-testid="dream"]').innerText()), 'dream shown');
+    assert.equal(await f2.locator('[data-testid="dream"]').innerText(), 'I was flying over the sea with my sister. Remembers most of it.');
+    await wait(async () => /Next update at 7:31/.test(await status()), 'readings again');
+    await p2.clock.fastForward('00:10:30');
+    await wait(async () => (await f2.locator('[data-testid="location"]').innerText()) === 'In the kitchen.', 'the morning reading');
+    assert.deepEqual(questions.map(([q]) => q), ['reading', 'sleep', 'dream', 'reading']);
+    assert.equal(JSON.parse([...files.values()][0]).sleep['k-isa'], undefined, 'awake and the chat moved on: no sleep kept');
+    await p2.screenshot({ path: path.join(SHOTS, '12-workshop-dream.png') });
+    await p2.close();
+  });
+
+  await step('automatic update: when Kindroid does not answer, readings slow down and a server warning appears', async () => {
+    files.clear(); kins = [{ id: 'k-isa', name: 'Isa' }]; delay = 20;
+    files.set('cs/clotheskin~3av2~3asettings.json', JSON.stringify({ autoIntervalS: 60 }));
+    const p3 = await ctx.newPage();
+    p3.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
+    await p3.clock.install({ time: new Date('2026-11-20T15:00:00-03:00') });
+    await p3.route('**/__parent.html', (route) => route.fulfill({ contentType: 'text/html', body: PARENT }));
+    await p3.exposeFunction('hostKins', () => kins);
+    await p3.exposeFunction('hostRead', (p) => (files.has(p) ? files.get(p) : null));
+    await p3.exposeFunction('hostWrite', (p, body) => { files.set(p, body); });
+    let down = true;
+    await p3.exposeFunction('hostAction', async (name, input) => { await new Promise((r) => setTimeout(r, delay)); const prov = { extract: async () => { if (down) throw new Error('The Kin could not be asked: connection refused'); return '{"location":"at the park"}'; } }; return handleRun({ event: { trigger: 'action', action: name, input }, provider: prov }); });
+    await p3.goto(`${base}/__parent.html`);
+    const f3 = p3.frameLocator('#f');
+    const wait = async (fn, what) => { const end = Date.now() + 6000; let last; while (Date.now() < end) { try { last = await fn(); if (last) return last; } catch (e) { last = e.message; } await p3.waitForTimeout(50); } throw new Error(`timed out waiting for: ${what} (${last})`); };
+    await wait(async () => /connection refused/.test(await f3.locator('[data-testid="banner"]').innerText()), 'first error');
+    await p3.clock.fastForward('01:01'); // 2nd error
+    await p3.waitForTimeout(200);
+    await p3.clock.fastForward('02:01'); // 3rd error: warning
+    await wait(async () => (await f3.locator('[data-testid="server-warning"]').count()) === 1, 'server warning');
+    assert.match(await f3.locator('[data-testid="server-warning"]').innerText(), /Kindroid has not answered 3 times in a row\. It may be down\. Automatic updates are slowed down and will try again at 3:07/);
+    await p3.screenshot({ path: path.join(SHOTS, '13-workshop-server-warning.png') });
+    down = false;
+    await f3.locator('[data-key="auto-retry"]').click();
+    await wait(async () => (await f3.locator('[data-testid="location"]').innerText()) === 'At the park.', 'back');
+    assert.equal(await f3.locator('[data-testid="server-warning"]').count(), 0);
+    await p3.close();
+  });
+
   await step('no page errors or console errors', async () => { assert.deepEqual(problems, []); });
 
   await browser.close(); server.close();

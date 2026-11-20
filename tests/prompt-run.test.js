@@ -74,14 +74,14 @@ test('a Kin that has not said anything gives two calm sentences, not an error', 
 test('a bad location type fails the whole reading clearly; nothing is invented', async () => {
   const out = await handleRun({ event: ev(), provider: answering('{"location":42,"topwear":["a shirt"]}') });
   assert.equal(out.ok, false);
-  assert.match(out.message, /"location" must be a text/);
+  assert.match(JSON.parse(out.message).error, /"location" must be a text/);
 });
 
 test('the Kin answering in character fails clearly and nothing is invented', async () => {
   const out = await handleRun({ event: ev(), provider: answering('*laughs* Oh, a form? Silly!') });
   assert.equal(out.ok, false);
-  assert.match(out.message, /not valid JSON/);
-  assert.match(out.message, /Nothing was changed/);
+  assert.match(JSON.parse(out.message).error, /not valid JSON/);
+  assert.match(JSON.parse(out.message).error, /Nothing was changed/);
 });
 
 test('the Kin id may come from the platform (a Kin used the action) or from the input', async () => {
@@ -89,16 +89,16 @@ test('the Kin id may come from the platform (a Kin used the action) or from the 
   const p = { extract: async ({ kinId }) => { id = kinId; return '{}'; } };
   await handleRun({ event: { trigger: 'action', action: 'read_outfit', kin: 'from-platform', input: {} }, provider: p });
   assert.equal(id, 'from-platform');
-  assert.match((await handleRun({ event: { trigger: 'action', action: 'read_outfit', input: {} }, provider: p })).message, /No Kin/);
+  assert.match(JSON.parse((await handleRun({ event: { trigger: 'action', action: 'read_outfit', input: {} }, provider: p })).message).error, /No Kin/);
 });
 
 test('unknown action, unsupported trigger and provider failure are reported in one clear line', async () => {
-  assert.match((await handleRun({ event: { trigger: 'action', action: 'nope', input: { kin: 'k' } }, provider: answering('{}') })).message, /Unknown action/);
-  assert.match((await handleRun({ event: { trigger: 'schedule' }, provider: answering('{}') })).message, /Unsupported trigger/);
+  assert.match(JSON.parse((await handleRun({ event: { trigger: 'action', action: 'nope', input: { kin: 'k' } }, provider: answering('{}') })).message).error, /Unknown action/);
+  assert.match(JSON.parse((await handleRun({ event: { trigger: 'schedule' }, provider: answering('{}') })).message).error, /Unsupported trigger/);
   const failing = { extract: async () => { throw new Error('The Kin could not be asked: grant missing'); } };
   const out = await handleRun({ event: ev(), provider: failing });
   assert.equal(out.ok, false);
-  assert.match(out.message, /grant missing/);
+  assert.match(JSON.parse(out.message).error, /grant missing/);
 });
 
 test('the line given back is JSON with both sentences and never exceeds the 500 characters kin end allows', async () => {

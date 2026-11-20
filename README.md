@@ -40,7 +40,16 @@ The text the Kin reads is the `OUTFIT_PROMPT` constant; change it there. Its exa
 - **Local** (`npm start`): paste a conversation, press **Update status** (or **Prepare prompt**), copy the prompt into any model, paste its JSON, press **Show status**. Demo scenes (including the Portuguese chat from the brief) run in one click. The pasted chat is kept in memory only.
 - **Kindroid Workshop**: the app is a Workshop program (`kin.json`, `screen/`, `main.js`). The screen is shown in a ~390 pt locked frame. Kins are the ones attached to the app (id and name come from the host). With several attached, the screen opens on the list ("Which Kin is in your roleplay now?") until one is picked; the choice is remembered and the switch button lists each Kin with its last place. Only the selected Kin is read, and only when **Update status** is pressed: attaching 3 or 4 Kins costs nothing until then. **Update status** runs the action `read_outfit`: the run asks the Kin with `kin ask --kin <id>` and ends with `kin end '{"kin":"<id>","location":"…","doing":"…","outfit":"…"}'` (the three sentences, kept within the 500 characters `kin end` allows by shortening only the outfit), which the screen shows. Runs are posted one at a time, and the `kin` id lets the screen drop a late reply to an earlier run that timed out, so a reading never lands on the wrong Kin. Because the key cannot read chat, the grant `chat:read:1` lets the Kin itself see its recent chat, so the prompt carries no messages.
 
-Only small preferences are stored (theme, selected Kin, local character name): in `localStorage` locally, in the program's own folder through `files.read`/`files.write` in the Workshop. No outfit, no place and no chat is ever stored.
+Only small preferences are stored (theme, selected Kin, local character name, the automatic interval and, while a Kin sleeps, its wake-up time): in `localStorage` locally, in the program's own folder through `files.read`/`files.write` in the Workshop. No outfit, no place, no dream and no chat is ever stored.
+
+## Automatic update (Workshop)
+
+The card has a ruler under **Update status**: Off, 1, 2, 5, 10, 15, 20, 30, 45 min, 1 h, 1 h 30, 2 h. The stops are uneven so it stays short; the person sees minutes and hours, the app counts seconds (`autoIntervalS`, `screen/src/core/auto.js`). It reads the selected Kin only, at once when switched on and then every interval, and only **while the screen is open** (see Pending verification). Each reading is one `kin ask`.
+
+- **Errors.** One error is retried at the normal interval. From the second error in a row the wait doubles each time, up to one hour (a 1-minute ruler retries after 2, 4, 8, 16, 32, 60 min). After three server errors in a row a warning says Kindroid may be down and when the next try is. An error that says maintenance (maintenance, 503, service unavailable, outage) shows a maintenance warning and waits at least 30 minutes. **Try now** retries at once; one success clears it all. An answer the Kin gets wrong (in character, not JSON) slows down too but is not called a server problem.
+- **Sleep.** When the pose and action sentence says the Kin is asleep (sleeping, asleep, napping, dozing; not "trying to sleep", "half asleep", "awake"), the action `ask_sleep` asks: are you asleep, and until when? The answer is JSON: `{"sleeping":true,"wake_at":"07:30"}` or `{"sleeping":false}`. The question gives the person's clock (`It is now 23:10 on Friday`), and `wake_at` is read on that clock. Asleep: the readings stop (hibernation) until 10 minutes before the wake-up time. A wake-up time less than 15 minutes or more than 14 hours away is not believed and the readings go on. Not asleep: the readings go on, and the same "asleep" sentence does not bring the question back.
+- **Dream.** At the end of the hibernation the action `ask_dream` asks what the Kin dreamt and how much it still remembers: `{"dream":"<at most 25 words>","remembered":"all|most|some|little|nothing"}`. The card shows it as **Last dream** (memory only), then the normal readings start again. Overnight the chat usually stays still, so the old "asleep" sentence does not start a new night; a new one does. **Wake now** asks the dream question at once.
+- The hibernation (wake-up time) is saved, so closing and reopening the screen keeps it; if the screen was closed past that time, the dream question is asked when it opens.
 
 ## Look and feel
 
@@ -62,6 +71,8 @@ Built from the Workshop guide and tested against a fake Workshop page that speak
 4. The locked frame loads ES modules from the screen folder and allows `<dialog>.showModal()`. If not, the screen needs a one-file bundle.
 5. `files.write` accepts a string body and `files.read` returns a string (only the settings use them).
 6. The `kin ask` exchange does not leak into the Kin's normal chat or memory.
+7. Automatic updates run in the screen, so they only happen while the Clotheskin screen is open. A Workshop schedule trigger could run them in the background, but its format is not in the guide this was built from. `handleRun` answers any trigger other than `action` with an error.
+8. Kindroid's own maintenance notice: the warning relies on the error text of `kin ask` or on the Workshop not answering. No status page or API is used.
 
 First real test:
 

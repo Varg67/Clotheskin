@@ -3,7 +3,8 @@
 //   node scripts/build-agent-pack.mjs
 // Only the files the app needs inside Kindroid are included (what main.js imports, the screen, the manifest, sample/).
 // Each file has its line count, character count and SHA-256, so a copy changed by the agent can be found.
-import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { dirname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -61,8 +62,7 @@ Rules (important):
 ${table}
 `;
 
-rmSync(OUT, { recursive: true, force: true });
-mkdirSync(OUT, { recursive: true });
+mkdirSync(OUT, { recursive: true }); // files are overwritten in place (their names do not change)
 writeFileSync(join(OUT, `mensagem-01-de-${String(total).padStart(2, '0')}-instrucoes.txt`), instructions);
 parts.forEach((p, i) => {
   const n = i + 2;
@@ -71,13 +71,46 @@ parts.forEach((p, i) => {
   writeFileSync(join(OUT, `mensagem-${String(n).padStart(2, '0')}-de-${String(total).padStart(2, '0')}.txt`), body);
 });
 
+// The better message: download the files from the public repository, at this exact commit, and check them. No code
+// travels through the chat, so nothing can be cut (about 8,000 characters per message) or reformatted (the chat
+// turns asterisks into bold or italic, which broke the cron and the code). The commit must be on GitHub first.
+const commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
+let pushed = false;
+try { pushed = execFileSync('git', ['branch', '-r', '--contains', commit], { cwd: ROOT, encoding: 'utf8' }).trim() !== ''; } catch { /* no remote */ }
+const paths = info.map((f) => f.path);
+const download = `Please create a Kindroid program named "clotheskin" by DOWNLOADING its files from its public GitHub repository, exactly as they are. Do not retype or rewrite any file: download them (for example with the commands below), so every character stays the same.
+
+Files (${info.length}), from commit ${commit}:
+${paths.join('\n')}
+
+Commands (bash), run in the program's folder:
+
+base=https://raw.githubusercontent.com/Varg67/Clotheskin/${commit}
+for f in ${paths.join(' ')}; do mkdir -p "$(dirname "$f")"; curl -fsSL "$base/$f" -o "$f"; done
+sha256sum -c <<'EOF'
+${info.map((f) => `${f.sha}  ${f.path}`).join('\n')}
+EOF
+
+Every line must end with OK. kin.json is the manifest: use it as it is (a schedule trigger every 15 minutes, one action "update_status", grants kin:read and chat:read:2). The run entry is "node main.js"; the screen is screen/index.html. There are no packages to install. Then build the program and tell me the result of the sha256sum check.
+`;
+if (download.length > 8000) throw new Error(`the download message is ${download.length} characters: over the chat's 8,000`);
+if (download.includes('*')) throw new Error('the download message has an asterisk: the chat would turn it into formatting');
+writeFileSync(join(OUT, 'mensagem-unica-baixar-do-github.txt'), download);
+if (!pushed) console.warn(`warning: commit ${commit} is not on GitHub yet: push before sending mensagem-unica-baixar-do-github.txt`);
+
 writeFileSync(join(OUT, 'LEIA-ME.md'), `# Clotheskin para o agente do Kindroid Workshop
 
 Gerado por \`node scripts/build-agent-pack.mjs\` a partir do código atual. Gere de novo sempre que o código mudar.
 
 **Caminho mais seguro:** \`node kin.mjs send .\` (README, "Send it to Kindroid"): ele envia os arquivos exatos, sem ninguém copiar texto. Use este pacote só se for colar o código no agente.
 
-## Como usar
+## Use a mensagem única (recomendado)
+
+Mande ao agente só o arquivo \`mensagem-unica-baixar-do-github.txt\` (${download.length.toLocaleString('pt-BR')} caracteres, sem asteriscos). Ele pede ao agente para **baixar** os ${info.length} arquivos do GitHub, no commit exato, e conferir cada um pelo SHA-256. Nenhum código passa pelo chat. Peça para o agente mostrar o resultado da conferência: todas as linhas devem terminar em OK.
+
+## Colar o código (não recomendado)
+
+O chat do agente corta cada mensagem em cerca de 8.000 caracteres e transforma asteriscos em negrito ou itálico, o que quebra o código (o cron, multiplicações, comentários). Só use as mensagens abaixo se o agente não puder baixar arquivos.
 
 1. Mande ao agente, **na ordem**, o conteúdo de cada arquivo \`mensagem-NN-de-${String(total).padStart(2, '0')}…\` (${total} mensagens). Copie o arquivo inteiro, do começo ao fim.
 2. A mensagem 1 explica as regras. As outras levam os ${info.length} arquivos do app (${info.reduce((a, f) => a + f.chars, 0).toLocaleString('pt-BR')} caracteres). O \`screen/app.js\` é grande (${info.find((f) => f.path === 'screen/app.js').chars.toLocaleString('pt-BR')} caracteres) e vai sozinho numa mensagem; se o agente recusar uma mensagem desse tamanho, avise.

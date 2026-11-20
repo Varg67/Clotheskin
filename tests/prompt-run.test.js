@@ -7,6 +7,9 @@ import { KinAskProvider } from '../run/kin-cli.js';
 import { parseReading } from '../screen/src/core/outfit.js';
 import { packReading } from '../run/actions.js';
 
+// The run also says when it stored the reading; that is checked in prompt-run.test.js.
+const noAt = ({ at, ...rest }) => { assert.match(at, /^\d{4}-\d\d-\d\dT/); return rest; };
+
 const answering = (x) => ({ extract: async () => x });
 const ev = (extra = {}) => ({ trigger: 'action', action: 'read_outfit', input: { kin: 'k1', name: 'Isa' }, ...extra });
 
@@ -19,8 +22,8 @@ test('the prompt demands English-only, concise, one-line JSON and pins down the 
   assert.match(p, /Apply later changes: something taken off is no longer worn/);
   assert.match(p, /Ignore plans, wishes and hypothetical outfits/);
   assert.match(p, /never guess/);
-  assert.match(p, /If the chat says nothing about either, answer \{\}/);
-  assert.match(p, /where you are, how you are positioned, what you are doing and what you are wearing/);
+  assert.match(p, /If the chat says nothing about any of this, answer \{\}/);
+  assert.match(p, /where you are, how you are positioned, what you are doing, what you are wearing and how your hair and makeup look/);
   assert.match(p, /"location": where you are right now, as a short phrase starting with in, at or on/);
   assert.match(p, /The place only, not your posture/);
   assert.match(p, /planning to go somewhere is not being there/);
@@ -60,7 +63,7 @@ test('read_outfit: the Kin is asked by id; the outfit comes back as one sentence
   const provider = { extract: async (a) => { asked = a; return '{"location":"in the living room","topwear":["a perfumed white shirt","a leather jacket"],"bottomwear":["blue jeans"]}'; } };
   const out = await handleRun({ event: ev(), provider });
   assert.equal(out.ok, true);
-  assert.deepEqual(JSON.parse(out.message), { location: 'In the living room.', doing: 'No pose or action described in the recent chat.', outfit: 'Wearing a leather jacket, a perfumed white shirt and blue jeans.' });
+  assert.deepEqual(noAt(JSON.parse(out.message)), { location: 'In the living room.', doing: 'No pose or action described in the recent chat.', outfit: 'Wearing a leather jacket, a perfumed white shirt and blue jeans.' });
   assert.equal(asked.kinId, 'k1');
   assert.match(asked.prompt, /^You are Isa\./);
 });
@@ -68,7 +71,7 @@ test('read_outfit: the Kin is asked by id; the outfit comes back as one sentence
 test('a Kin that has not said anything gives two calm sentences, not an error', async () => {
   const out = await handleRun({ event: ev(), provider: answering('{}') });
   assert.equal(out.ok, true);
-  assert.deepEqual(JSON.parse(out.message), { location: 'No location described in the recent chat.', doing: 'No pose or action described in the recent chat.', outfit: 'No outfit described in the recent chat.' });
+  assert.deepEqual(noAt(JSON.parse(out.message)), { location: 'No location described in the recent chat.', doing: 'No pose or action described in the recent chat.', outfit: 'No outfit described in the recent chat.' });
 });
 
 test('a bad location type fails the whole reading clearly; nothing is invented', async () => {

@@ -22,6 +22,7 @@ export const DEFAULT_SETTINGS = {
   autoUpdate: false,
   autoIntervalMinutes: 15,
   autoKins: [], // [{ id, name }]
+  autoAdaptive: true, // wait longer while nothing changes (see auto.js, adaptiveWaitMinutes)
 };
 
 /** Preferences only (theme, which Kin is selected, the local-mode name, the automatic-update schedule). */

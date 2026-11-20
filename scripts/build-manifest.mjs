@@ -6,7 +6,7 @@ export function buildManifest() {
   return {
     kin: 1,
     name: 'Clotheskin',
-    purpose: 'Shows where a Kin is, what it is doing and what it is wearing, read from its recent chat, now or on a schedule.',
+    purpose: 'Shows where a Kin is, what it is doing, what it is wearing and how its hair and makeup look, read from its recent chat, now or on a schedule.',
     // The schedule beat is fixed here; the person's interval is applied by the run (see screen/src/core/auto.js).
     triggers: [{ on: 'schedule', cron: `*/${SCHEDULE_TICK_MINUTES} * * * *`, tz: 'user' }],
     run: { entry: 'node main.js', timeout: '4m' },
@@ -14,7 +14,7 @@ export function buildManifest() {
     actions: [
       {
         name: 'read_outfit',
-        description: 'Reads the Kin’s recent chat and describes what it is wearing in one sentence.',
+        description: 'Reads the Kin’s recent chat and describes where it is, what it is doing, what it is wearing and its hair and makeup, one sentence each.',
         input: { type: 'object', properties: { kin: { type: 'string' }, name: { type: 'string' } }, required: ['kin'] },
         by: ['user'],
       },

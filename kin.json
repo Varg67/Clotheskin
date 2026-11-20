@@ -1,7 +1,7 @@
 {
   "kin": 1,
   "name": "Clotheskin",
-  "purpose": "Shows where a Kin is, what it is doing and what it is wearing, read from its recent chat, now or on a schedule.",
+  "purpose": "Shows where a Kin is, what it is doing, what it is wearing and how its hair and makeup look, read from its recent chat, now or on a schedule.",
   "triggers": [
     {
       "on": "schedule",
@@ -23,7 +23,7 @@
   "actions": [
     {
       "name": "read_outfit",
-      "description": "Reads the Kin’s recent chat and describes what it is wearing in one sentence.",
+      "description": "Reads the Kin’s recent chat and describes where it is, what it is doing, what it is wearing and its hair and makeup, one sentence each.",
       "input": {
         "type": "object",
         "properties": {

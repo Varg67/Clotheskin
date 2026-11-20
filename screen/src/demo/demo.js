@@ -12,8 +12,8 @@ export const DEMO_SCENES = [
   {
     id: 'accessories-bag',
     title: 'Café in Alfenas: dress, glasses, necklace and a bag',
-    chat: 'Isa: Sitting at my usual café in Alfenas, sipping a latte. Glasses on, silver necklace, and my brown backpack on the chair. Still in my black dress and ankle boots.',
-    response: r({ location: 'at a café in Alfenas', pose: 'sitting at a table', action: 'sipping a latte', topwear: ['a black dress'], footwear: ['ankle boots'], 'eyes-accessory': ['round glasses'], 'neck-accessory': ['a silver necklace'], bags: ['a brown backpack'] }),
+    chat: 'Isa: Sitting at my usual café in Alfenas, sipping a latte. Glasses on, silver necklace, and my brown backpack on the chair. Still in my black dress and ankle boots, hair up in a messy bun, a bit of red lipstick.',
+    response: r({ location: 'at a café in Alfenas', pose: 'sitting at a table', action: 'sipping a latte', topwear: ['a black dress'], footwear: ['ankle boots'], 'eyes-accessory': ['round glasses'], 'neck-accessory': ['a silver necklace'], bags: ['a brown backpack'], hair: 'up in a messy bun', makeup: 'red lipstick' }),
   },
   {
     id: 'taken-off',

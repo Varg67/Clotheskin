@@ -1,5 +1,6 @@
 // The whole "tracker" logic: read the Kin's JSON, put its branches in order, add commas, show a sentence.
 // Nothing here is saved: every reading stands on its own.
+// Five sentences: location, pose and action, outfit, hair, makeup.
 import { CLOTHING_SLOTS, ACCESSORY_SLOTS, BAG_SLOT, WEAR_SLOTS } from './constants.js';
 import { cleanString, capitalizeFirst } from './text.js';
 import { parseJsonObject } from './json.js';
@@ -54,7 +55,9 @@ const keyName = (k) => String(k).toLowerCase().replace(/[\s_-]+/g, '');
 // "position" counts as pose: it was the original name of that field.
 const isPoseKey = (k) => ['pose', 'posture', 'position', 'stance', 'bodyposition'].includes(keyName(k));
 const isActionKey = (k) => ['action', 'activity', 'doing', 'doingnow', 'currentaction', 'currentactivity', 'currentlydoing'].includes(keyName(k));
-const isReadingKey = (k) => isLocationKey(k) || isPoseKey(k) || isActionKey(k);
+const isHairKey = (k) => ['hair', 'hairstyle', 'hairdo', 'haircut'].includes(keyName(k));
+const isMakeupKey = (k) => ['makeup', 'cosmetics', 'facemakeup'].includes(keyName(k));
+const isReadingKey = (k) => isLocationKey(k) || isPoseKey(k) || isActionKey(k) || isHairKey(k) || isMakeupKey(k);
 
 /** Slots from a parsed JSON object. Location, pose and action belong to the reading, so they are skipped here without a warning. */
 function outfitFromObject(doc) {
@@ -218,6 +221,40 @@ export function poseIcon(pose) {
   return 'person';
 }
 
+// ---- hair and makeup: one short phrase each ("long black hair in a ponytail", "red lipstick and eyeliner")
+export const NO_HAIR = 'No hair described in the recent chat.';
+export const NO_MAKEUP = 'No makeup described in the recent chat.';
+const MAX_LOOK = 100;
+// Saying "none" may mean "not mentioned"; only an explicit "no makeup" means a bare face.
+const BARE_FACE = /^(no makeup|no make-up|without (any )?make-?up|make-?up[- ]free|bare[- ]?faced?|a bare face|natural,? no make-?up)$/i;
+
+/** Text or a list of texts as one phrase. Returns string | null | undefined (wrong type). */
+function lookPhrase(v) {
+  if (v === null || v === undefined) return null;
+  let s;
+  if (Array.isArray(v)) {
+    if (v.some((x) => typeof x !== 'string')) return undefined;
+    s = joinNatural(v.map((x) => cleanString(x, MAX_LOOK).replace(/[.;,!?\s]+$/, '')).filter(Boolean).slice(0, 4));
+  } else if (typeof v === 'string') s = v;
+  else return undefined;
+  s = cleanString(s, 400).replace(/^[\s*_"'“”‘’()[\]]+/, '').replace(/[\s*_"'“”‘’()[\]]+$/, '').replace(/[.;,!?\s]+$/, '')
+    .replace(/^(my|her|his|their) (hair|make-?up) (is|are)\s+/i, '');
+  if (!s || NO_VALUE.test(s)) return null;
+  return s.length > MAX_LOOK ? `${s.slice(0, MAX_LOOK).replace(/\s+\S*$/, '')}…` : s;
+}
+
+export const cleanHair = (v) => lookPhrase(v);
+export function cleanMakeup(v) {
+  const s = lookPhrase(v);
+  return typeof s === 'string' && BARE_FACE.test(s) ? 'no makeup' : s;
+}
+
+const sentence = (s) => capitalizeFirst(s.endsWith('…') ? s : `${s}.`);
+/** "Long black hair in a ponytail." */
+export const describeHair = (value) => (value ? sentence(value) : NO_HAIR);
+/** "Red lipstick and eyeliner." / "No makeup." */
+export const describeMakeup = (value) => (value ? sentence(value) : NO_MAKEUP);
+
 /** One parse for the whole answer: where the Kin is, how it is positioned, what it is doing and what it wears. */
 export function parseReading(text) {
   const p = parseObject(text);
@@ -234,18 +271,20 @@ export function parseReading(text) {
   let location = read(isLocationKey, cleanLocation, 'location');
   let pose = read(isPoseKey, cleanPose, 'pose');
   const action = read(isActionKey, cleanAction, 'action');
+  const hair = read(isHairKey, cleanHair, 'hair');
+  const makeup = read(isMakeupKey, cleanMakeup, 'makeup');
   // A pose that is really a place ("in the kitchen") is not a pose. It becomes the location if there is none.
   if (pose && PLACE_ONLY_START.test(pose) && !POSTURE_WORD.test(pose)) {
     if (!location) location = cleanLocation(pose);
     pose = null;
   }
   if (errors.length) return { ok: false, error: errors.join(' ') };
-  return { ok: true, outfit, location, pose, action, warnings };
+  return { ok: true, outfit, location, pose, action, hair, makeup, warnings };
 }
 
 /** The sentences shown on the card. */
-export function describeReading({ outfit, location, pose, action }) {
-  return { location: describeLocation(location), doing: describeDoing({ pose, action }), outfit: describeOutfit(outfit) };
+export function describeReading({ outfit, location, pose, action, hair = null, makeup = null }) {
+  return { location: describeLocation(location), doing: describeDoing({ pose, action }), outfit: describeOutfit(outfit), hair: describeHair(hair), makeup: describeMakeup(makeup) };
 }
 
 /** "a" / "a and b" / "a, b and c". */

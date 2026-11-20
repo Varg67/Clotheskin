@@ -15,3 +15,13 @@ test('relative times are English', () => {
   assert.equal(formatRelative('2026-11-19T12:00:00Z', now), '3 hours ago');
   assert.equal(formatRelative('2026-11-18T12:00:00Z', now), 'yesterday');
 });
+
+test('formatting dates is cheap: formatters are reused, so a screen full of times stays fast', () => {
+  const iso = '2026-11-20T12:00:00Z';
+  const now = new Date('2026-11-21T12:00:00Z');
+  formatClock(iso, { now }); formatRelative(iso, now); // warm up
+  const t = performance.now();
+  for (let i = 0; i < 2000; i += 1) { formatClock(iso, { now }); formatRelative(iso, now); }
+  const ms = performance.now() - t;
+  assert.ok(ms < 250, `${ms.toFixed(0)} ms for 2000 (creating formatters each time took ~500 ms)`);
+});

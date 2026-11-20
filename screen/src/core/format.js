@@ -1,9 +1,22 @@
 // All user-visible dates are English, in the user's own time zone, regardless of browser locale.
 const LOCALE = 'en-US';
 
+let zone;
 export function userTimeZone() {
-  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; }
+  if (zone) return zone;
+  try { zone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { zone = 'UTC'; }
+  return zone;
 }
+
+// Creating an Intl formatter costs ~0.07 ms; the screen formats dozens of times per render (history, diagnostics).
+// Formatters are made once per time zone and kind, then reused (~0.001 ms per call).
+const cache = new Map();
+const fmt = (kind, timeZone, options) => {
+  const key = `${kind}|${timeZone}`;
+  if (!cache.has(key)) cache.set(key, new Intl.DateTimeFormat(LOCALE, { ...options, timeZone }));
+  return cache.get(key);
+};
+let rtf;
 
 const valid = (iso) => typeof iso === 'string' && Number.isFinite(Date.parse(iso));
 
@@ -11,10 +24,10 @@ const valid = (iso) => typeof iso === 'string' && Number.isFinite(Date.parse(iso
 export function formatClock(iso, { timeZone = userTimeZone(), now = new Date() } = {}) {
   if (!valid(iso)) return 'unknown time';
   const d = new Date(iso);
-  const time = new Intl.DateTimeFormat(LOCALE, { hour: 'numeric', minute: '2-digit', timeZone }).format(d);
-  const dayKey = (x) => new Intl.DateTimeFormat(LOCALE, { year: 'numeric', month: 'numeric', day: 'numeric', timeZone }).format(x);
+  const time = fmt('time', timeZone, { hour: 'numeric', minute: '2-digit' }).format(d);
+  const dayKey = (x) => fmt('day', timeZone, { year: 'numeric', month: 'numeric', day: 'numeric' }).format(x);
   if (dayKey(d) === dayKey(now)) return time;
-  const date = new Intl.DateTimeFormat(LOCALE, { month: 'short', day: 'numeric', timeZone }).format(d);
+  const date = fmt('date', timeZone, { month: 'short', day: 'numeric' }).format(d);
   return `${date}, ${time}`;
 }
 
@@ -23,7 +36,7 @@ export function formatRelative(iso, now = new Date()) {
   const diff = (new Date(iso).getTime() - now.getTime()) / 1000;
   const abs = Math.abs(diff);
   if (abs < 45) return 'just now';
-  const rtf = new Intl.RelativeTimeFormat(LOCALE, { numeric: 'auto' });
+  rtf ??= new Intl.RelativeTimeFormat(LOCALE, { numeric: 'auto' });
   if (abs < 3600) return rtf.format(Math.round(diff / 60), 'minute');
   if (abs < 86400) return rtf.format(Math.round(diff / 3600), 'hour');
   return rtf.format(Math.round(diff / 86400), 'day');

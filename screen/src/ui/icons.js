@@ -27,12 +27,18 @@ const P = {
   image: '<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10.5" r="1.6"/><path d="m4 17.5 5-4.5 4 3.5 3-2.5 4 3.5"/>',
 };
 
+// Parsing SVG text on every render is the slowest part of drawing the screen: each icon is parsed once, then copied.
+const made = new Map();
 export function icon(name, { size = 22, cls = '' } = {}) {
-  const span = document.createElement('span');
-  span.className = `icon ${cls}`.trim();
-  span.setAttribute('aria-hidden', 'true');
-  span.innerHTML = `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false">${P[name] || P.person}</svg>`;
-  return span;
+  const key = `${name}|${size}|${cls}`;
+  if (!made.has(key)) {
+    const span = document.createElement('span');
+    span.className = `icon ${cls}`.trim();
+    span.setAttribute('aria-hidden', 'true');
+    span.innerHTML = `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false">${P[name] || P.person}</svg>`;
+    made.set(key, span);
+  }
+  return made.get(key).cloneNode(true);
 }
 
 export function spinner() {

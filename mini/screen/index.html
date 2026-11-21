@@ -7,8 +7,9 @@
 <style>
   body { margin: 0; padding: 16px; font: 15px/1.45 system-ui, sans-serif; background: #15161a; color: #ece9f1; }
   h1 { font-size: 18px; margin: 0 0 12px; }
-  select, button { font: inherit; width: 100%; padding: 10px; border-radius: 10px; border: 1px solid #3a3b44; background: #22232a; color: inherit; margin-bottom: 10px; }
+  select, input, button { font: inherit; width: 100%; box-sizing: border-box; padding: 10px; border-radius: 10px; border: 1px solid #3a3b44; background: #22232a; color: inherit; margin-bottom: 10px; }
   button { background: #7c5cff; border: 0; font-weight: 600; }
+  button.quiet { background: #2b2c34; }
   button:disabled { opacity: .5; }
   .card { background: #1f2026; border-radius: 12px; padding: 12px; margin-bottom: 10px; }
   .label { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: #a9a5b5; }
@@ -21,34 +22,49 @@
 <body>
 <h1>Clotheskin</h1>
 <select id="kin"><option value="">Procurando Kins…</option></select>
-<button id="read" disabled>Ler agora</button>
 <div class="card">
   <div class="label">Local</div><div class="value" id="location">—</div>
   <div class="label">Fazendo</div><div class="value" id="doing">—</div>
   <div class="label">Vestindo</div><div class="value" id="wearing">—</div>
+  <div class="label">Cabelo</div><div class="value" id="hair">—</div>
   <div class="muted" id="when"></div>
 </div>
+<button class="quiet" id="refresh" disabled>Atualizar</button>
 <div class="muted" id="msg"></div>
-<details><summary class="muted">Diagnóstico</summary><pre id="log"></pre><pre id="raw"></pre></details>
+
+<details id="editbox"><summary class="muted">Editar à mão</summary>
+  <input id="e-location" placeholder="Local (ex.: in the kitchen)" maxlength="120">
+  <input id="e-doing" placeholder="Fazendo (ex.: sitting on the sofa, reading)" maxlength="160">
+  <input id="e-wearing" placeholder="Vestindo (ex.: a white shirt and blue jeans)" maxlength="300">
+  <input id="e-hair" placeholder="Cabelo (ex.: long hair in a ponytail)" maxlength="120">
+  <button id="save" disabled>Salvar</button>
+</details>
+<details><summary class="muted">Diagnóstico</summary><pre id="log"></pre></details>
 
 <script>
 (function () {
   var $ = function (id) { return document.getElementById(id); };
+  var FIELDS = ['location', 'doing', 'wearing', 'hair'];
   var inFrame = window.parent && window.parent !== window;
   var gotKins = false, busy = false;
 
   function log(t) { var l = $('log'); l.textContent = (new Date().toLocaleTimeString() + ' ' + t + '\n' + l.textContent).slice(0, 4000); }
-  function send(m) { if (inFrame) { window.parent.postMessage(m, '*'); } }
+  function send(m) { if (inFrame) { window.parent.postMessage(m, '*'); log('enviado: ' + JSON.stringify(m).slice(0, 200)); } }
   function say(t) { $('msg').textContent = t; }
+  function current() { return $('kin').value; }
+  function fileFor(id) { return 'looks/kin-' + id + '.json'; }
+  function setBusy(b) { busy = b; $('refresh').disabled = b || !current(); $('save').disabled = b || !current(); }
 
-  function show(s) {
-    if (!s) return;
-    $('location').textContent = s.location || '—';
-    $('doing').textContent = s.doing || '—';
-    $('wearing').textContent = s.wearing || '—';
-    $('when').textContent = s.at ? 'Lido em ' + new Date(s.at).toLocaleString() : '';
-    $('raw').textContent = s.raw ? 'Resposta do Kin:\n' + s.raw : '';
-    if (s.kin && $('kin').querySelector('option[value="' + s.kin + '"]')) $('kin').value = s.kin;
+  function show(look) {
+    FIELDS.forEach(function (k) { $(k).textContent = (look && look[k]) || '—'; });
+    $('when').textContent = look && look.at ? 'Salvo em ' + new Date(look.at).toLocaleString() + (look.by === 'kin' ? ' pelo Kin' : ' por você') : '';
+    FIELDS.forEach(function (k) { $('e-' + k).value = (look && look[k]) || ''; });
+  }
+
+  function load() {
+    var id = current();
+    if (!id) return;
+    send({ kin: 'files.read', path: fileFor(id) });
   }
 
   window.addEventListener('message', function (e) {
@@ -59,44 +75,49 @@
 
     if (d.kin === 'kins') {
       gotKins = true;
-      var list = Array.isArray(d.kins) ? d.kins : [];
+      var list = d.ok !== false && Array.isArray(d.kins) ? d.kins : [];
       var sel = $('kin'), keep = sel.value;
       sel.innerHTML = '';
-      if (!list.length) { sel.innerHTML = '<option value="">Nenhum Kin ligado ao app</option>'; $('read').disabled = true; say('Abra as configurações do app → Kins e marque o seu Kin.'); return; }
+      if (!list.length) {
+        sel.innerHTML = '<option value="">Nenhum Kin ligado ao app</option>';
+        setBusy(false); show(null);
+        say('Abra as configurações do app → Kins e marque o seu Kin.');
+        return;
+      }
       list.forEach(function (k) { var o = document.createElement('option'); o.value = k.id; o.textContent = k.name || k.id; sel.appendChild(o); });
-      if (keep) sel.value = keep;
-      $('read').disabled = busy;
-      send({ kin: 'files.read', path: 'status.json' });
+      if (keep && sel.querySelector('option[value="' + keep + '"]')) sel.value = keep;
+      say(''); setBusy(false); load();
     }
-    if (d.kin === 'files.read' && d.path === 'status.json') {
-      if (d.body == null) return;
-      try { show(typeof d.body === 'string' ? JSON.parse(d.body) : d.body); } catch (err) { log('status.json ilegível'); }
+    if (d.kin === 'files.read' && d.path === fileFor(current())) {
+      if (d.body === undefined) { say('Não consegui ler o arquivo. Veja o Diagnóstico.'); return; }
+      if (d.body === null) { show(null); say('Ainda nada salvo. Peça ao Kin no chat: "update your Clotheskin".'); return; }
+      try { show(typeof d.body === 'string' ? JSON.parse(d.body) : d.body); } catch (err) { say('Arquivo ilegível.'); }
     }
-    if (d.kin === 'action' && d.name === 'read_now') {
-      busy = false; $('read').disabled = false;
-      say(d.ok === false ? 'Falhou: ' + (d.summary || 'sem detalhes') : (d.summary || 'Pronto.'));
-      send({ kin: 'files.read', path: 'status.json' });
+    if (d.kin === 'action' && d.name === 'update_look') {
+      setBusy(false);
+      say(d.ok === false ? 'Falhou: ' + (d.summary || 'sem detalhes') : 'Salvo.');
+      load();
     }
   });
 
-  $('read').addEventListener('click', function () {
-    var id = $('kin').value;
-    if (!id) return;
-    busy = true; $('read').disabled = true;
-    say('Perguntando ao Kin… (pode levar até 1 minuto)');
-    send({ kin: 'action', name: 'read_now', input: { kin: id } });
-    log('enviado: action read_now ' + id);
+  $('kin').addEventListener('change', function () { show(null); setBusy(false); load(); });
+  $('refresh').addEventListener('click', function () { say(''); load(); });
+  $('save').addEventListener('click', function () {
+    var input = { profile: current() }, any = false;
+    FIELDS.forEach(function (k) { var v = $('e-' + k).value.trim(); if (v) { input[k] = v; any = true; } });
+    if (!any) { say('Preencha pelo menos um campo.'); return; }
+    setBusy(true); say('Salvando…');
+    send({ kin: 'action', name: 'update_look', input: input });
   });
 
-  if (!inFrame) { say('Aberto fora do Kindroid: nada para ler.'); return; }
-  // Ask for the Kin list until Kindroid answers (it may not be listening yet when the screen starts).
+  if (!inFrame) { say('Aberto fora do Kindroid.'); return; }
   var tries = 0;
   (function ask() {
     if (gotKins) return;
     send({ kin: 'kins' });
-    send({ kin: 'files.read', path: 'status.json' });
     if (++tries < 20) setTimeout(ask, 500); else say('O Kindroid não respondeu à tela. Veja o Diagnóstico.');
   })();
+  setInterval(function () { if (!busy && !document.hidden) load(); }, 30000);
 })();
 </script>
 </body>

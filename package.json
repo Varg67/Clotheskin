@@ -9,7 +9,8 @@
     "build": "node scripts/build-screen.mjs && node scripts/build-manifest.mjs && node scripts/build-test-script.mjs",
     "test": "node --test \"tests/*.test.js\"",
     "test:e2e": "node tests/e2e/screen.cjs",
-    "try": "node scripts/try-run.mjs"
+    "try": "node scripts/try-run.mjs",
+    "pack": "node scripts/pack.mjs"
   },
   "engines": {
     "node": ">=22"

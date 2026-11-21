@@ -14,10 +14,11 @@ mkdirSync(files, { recursive: true });
 if (cmd === 'files' && args[0] === 'get') {
   if (opt.getFails && args[1] === 'status.json') { process.stderr.write(`kin: ${opt.getFails}\n`); process.exit(5); }
   const f = join(files, args[1]);
-  if (!existsSync(f)) { process.stderr.write(`404 ${args[1]} not found\n`); process.exit(4); }
+  if (!existsSync(f)) { process.stderr.write(`kin: 404 ${args[1]} not found\n`); process.exit(4); }
   process.stdout.write(readFileSync(f));
 } else if (cmd === 'files' && args[0] === 'put') {
-  writeFileSync(join(files, args[1]), readFileSync(args[2]));
+  if (args.length !== 2) { process.stderr.write('usage: kin files put <path> (body on stdin)\n'); process.exit(8); }
+  writeFileSync(join(files, args[1]), readFileSync(0));
 } else if (cmd === 'kins') {
   process.stdout.write('k1\tIsa\nk2\tBea Maria\n');
 } else if (cmd === 'ask') {

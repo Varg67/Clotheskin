@@ -4,14 +4,12 @@
 //
 // Lessons from the guide and from published programs (Aurora Alert, Bunny & Fox BBS):
 //  - output is read as UTF-8 text in one piece (execFile with encoding), so a character is never split between chunks;
-//  - stdin is closed at once, so a subcommand never waits for input;
+//  - stdin is closed at once, so a subcommand never waits for input; `files put` gets the body there (Kin Bank, Planner);
+//  - a missing file is "kin: 404 ..." on stderr (Kin Bank and Planner check /^kin: 404\b/);
 //  - a failure says which subcommand failed and the last line kin printed, not the whole command line;
 //  - `kin files get` of a missing file is "not found" (null), any other failure is an error: the caller must then
 //    not write over the file it could not read.
 import { execFile } from 'node:child_process';
-import { writeFileSync, rmSync, mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { oneLine } from '../src/core/text.js';
 
 export const END_LIMIT = 500; // kin end keeps at most 500 characters
@@ -36,7 +34,7 @@ const NOT_FOUND = /\b404\b/;
 export function createKin({ bin = process.env.KIN_BIN || 'kin', defaultTimeoutMs = 30000 } = {}) {
   const viaNode = bin.endsWith('.mjs') || bin.endsWith('.js');
 
-  function call(args, { timeoutMs = defaultTimeoutMs } = {}) {
+  function call(args, { timeoutMs = defaultTimeoutMs, input = null } = {}) {
     const cmd = viaNode ? process.execPath : bin;
     const argv = viaNode ? [bin, ...args] : args;
     return new Promise((resolve, reject) => {
@@ -48,7 +46,7 @@ export function createKin({ bin = process.env.KIN_BIN || 'kin', defaultTimeoutMs
         reject(new KinError(timedOut ? `kin ${what} timed out after ${Math.round(timeoutMs / 1000)} s` : `kin ${what} failed: ${last}`, { code: err.code, stderr: String(stderr || ''), timedOut }));
       });
       child.stdin?.on('error', () => {}); // kin may exit before reading stdin
-      child.stdin?.end();
+      child.stdin?.end(input == null ? undefined : input); // `kin files put <path>` reads the body here
     });
   }
 
@@ -71,16 +69,9 @@ export function createKin({ bin = process.env.KIN_BIN || 'kin', defaultTimeoutMs
         throw e;
       }
     },
-    /** Saves text as a file of the program's folder (through /tmp: a shared program's folder is read-only). */
+    /** Saves text as a file of the program's folder: `kin files put <path>` with the body on stdin (as Kin Bank and Planner do). */
     async put(path, text) {
-      const dir = mkdtempSync(join(tmpdir(), 'clotheskin-'));
-      const file = join(dir, 'body');
-      try {
-        writeFileSync(file, text);
-        await call(['files', 'put', path, file]);
-      } finally {
-        rmSync(dir, { recursive: true, force: true });
-      }
+      await call(['files', 'put', path], { input: String(text) });
     },
     /** The Kins attached to the program: [{ id, name }] (kin kins prints one per line: id, a tab, the name). */
     async kins() {

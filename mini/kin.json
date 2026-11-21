@@ -1,0 +1,29 @@
+{
+  "kin": 1,
+  "name": "Clotheskin Mini",
+  "purpose": "Asks the selected Kin where it is, what it is doing and what it is wearing, from its recent chat, and shows three short lines.",
+  "run": {
+    "entry": "node main.js",
+    "timeout": "2m"
+  },
+  "screens": [
+    {
+      "slot": "panel",
+      "entry": "screen/index.html",
+      "title": "Clotheskin"
+    }
+  ],
+  "actions": [
+    {
+      "name": "read_now",
+      "description": "Asks the selected Kin where it is, what it is doing and what it is wearing.",
+      "input": {
+        "type": "object",
+        "properties": { "kin": { "type": "string" } },
+        "required": ["kin"]
+      },
+      "by": ["user"]
+    }
+  ],
+  "grants": ["kin:read", "chat:read:2"]
+}

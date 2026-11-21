@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clotheskin</title>
+<style>
+  body { margin: 0; padding: 16px; font: 15px/1.45 system-ui, sans-serif; background: #15161a; color: #ece9f1; }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  select, button { font: inherit; width: 100%; padding: 10px; border-radius: 10px; border: 1px solid #3a3b44; background: #22232a; color: inherit; margin-bottom: 10px; }
+  button { background: #7c5cff; border: 0; font-weight: 600; }
+  button:disabled { opacity: .5; }
+  .card { background: #1f2026; border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+  .label { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: #a9a5b5; }
+  .value { margin-bottom: 8px; }
+  .muted { color: #a9a5b5; font-size: 13px; }
+  details { margin-top: 12px; }
+  pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; background: #0e0f12; padding: 8px; border-radius: 8px; }
+</style>
+</head>
+<body>
+<h1>Clotheskin</h1>
+<select id="kin"><option value="">Procurando Kins…</option></select>
+<button id="read" disabled>Ler agora</button>
+<div class="card">
+  <div class="label">Local</div><div class="value" id="location">—</div>
+  <div class="label">Fazendo</div><div class="value" id="doing">—</div>
+  <div class="label">Vestindo</div><div class="value" id="wearing">—</div>
+  <div class="muted" id="when"></div>
+</div>
+<div class="muted" id="msg"></div>
+<details><summary class="muted">Diagnóstico</summary><pre id="log"></pre><pre id="raw"></pre></details>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var inFrame = window.parent && window.parent !== window;
+  var gotKins = false, busy = false;
+
+  function log(t) { var l = $('log'); l.textContent = (new Date().toLocaleTimeString() + ' ' + t + '\n' + l.textContent).slice(0, 4000); }
+  function send(m) { if (inFrame) { window.parent.postMessage(m, '*'); } }
+  function say(t) { $('msg').textContent = t; }
+
+  function show(s) {
+    if (!s) return;
+    $('location').textContent = s.location || '—';
+    $('doing').textContent = s.doing || '—';
+    $('wearing').textContent = s.wearing || '—';
+    $('when').textContent = s.at ? 'Lido em ' + new Date(s.at).toLocaleString() : '';
+    $('raw').textContent = s.raw ? 'Resposta do Kin:\n' + s.raw : '';
+    if (s.kin && $('kin').querySelector('option[value="' + s.kin + '"]')) $('kin').value = s.kin;
+  }
+
+  window.addEventListener('message', function (e) {
+    if (e.source !== window.parent) return;
+    var d = e.data;
+    if (!d || typeof d !== 'object' || typeof d.kin !== 'string') return;
+    log('recebido: ' + JSON.stringify(d).slice(0, 300));
+
+    if (d.kin === 'kins') {
+      gotKins = true;
+      var list = Array.isArray(d.kins) ? d.kins : [];
+      var sel = $('kin'), keep = sel.value;
+      sel.innerHTML = '';
+      if (!list.length) { sel.innerHTML = '<option value="">Nenhum Kin ligado ao app</option>'; $('read').disabled = true; say('Abra as configurações do app → Kins e marque o seu Kin.'); return; }
+      list.forEach(function (k) { var o = document.createElement('option'); o.value = k.id; o.textContent = k.name || k.id; sel.appendChild(o); });
+      if (keep) sel.value = keep;
+      $('read').disabled = busy;
+      send({ kin: 'files.read', path: 'status.json' });
+    }
+    if (d.kin === 'files.read' && d.path === 'status.json') {
+      if (d.body == null) return;
+      try { show(typeof d.body === 'string' ? JSON.parse(d.body) : d.body); } catch (err) { log('status.json ilegível'); }
+    }
+    if (d.kin === 'action' && d.name === 'read_now') {
+      busy = false; $('read').disabled = false;
+      say(d.ok === false ? 'Falhou: ' + (d.summary || 'sem detalhes') : (d.summary || 'Pronto.'));
+      send({ kin: 'files.read', path: 'status.json' });
+    }
+  });
+
+  $('read').addEventListener('click', function () {
+    var id = $('kin').value;
+    if (!id) return;
+    busy = true; $('read').disabled = true;
+    say('Perguntando ao Kin… (pode levar até 1 minuto)');
+    send({ kin: 'action', name: 'read_now', input: { kin: id } });
+    log('enviado: action read_now ' + id);
+  });
+
+  if (!inFrame) { say('Aberto fora do Kindroid: nada para ler.'); return; }
+  // Ask for the Kin list until Kindroid answers (it may not be listening yet when the screen starts).
+  var tries = 0;
+  (function ask() {
+    if (gotKins) return;
+    send({ kin: 'kins' });
+    send({ kin: 'files.read', path: 'status.json' });
+    if (++tries < 20) setTimeout(ask, 500); else say('O Kindroid não respondeu à tela. Veja o Diagnóstico.');
+  })();
+})();
+</script>
+</body>
+</html>

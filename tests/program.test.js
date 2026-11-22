@@ -547,3 +547,20 @@ test('a Kin that undresses: "Not wearing anything" replaces the last known cloth
   await tick(k);
   assert.equal(k.entry().reading.outfit, 'Not wearing anything.');
 });
+
+test('a whole messy roleplay answer, every slip at once, reads as five short sentences about the Kin only', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1' } });
+  k.answers.reading.push('*smiles softly* Sure! ```json\n' + JSON.stringify({
+    location: 'Bia is in the kitchen with Ari and Marina',
+    pose: 'Bia is sitting at the table (on a stool)',
+    action: 'asking Ari to check whether Marina is home',
+    hair: 'Bia has long dark hair, which she keeps tucking behind her ear',
+    makeup: 'not mentioned in the chat',
+    topwear: ['wearing a purple shirt', 'a cardigan (taken off)'],
+    bottomunderwear: ['purple panties'],
+    footwear: ['barefoot'],
+  }) + '\n```');
+  const r = await tick(k);
+  assert.equal(r.message, 'Isa: In the kitchen. Sitting at the table on a stool, talking with Ari. Wearing a purple shirt and purple panties, barefoot. Long dark hair.');
+  assert.equal(k.entry().reading.makeup, null, '"not mentioned" is no makeup row');
+});

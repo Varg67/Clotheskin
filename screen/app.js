@@ -11,7 +11,7 @@ __def("src/core/constants.js", function () {
  * The app's version (package.json's, checked by a test). The screen shows it in Settings, and the run writes it to
  * status.json each time it saves, so a screen and a run from different updates are noticed.
  */
-const APP_VERSION = '0.4.0';
+const APP_VERSION = '0.5.0';
 
 // Canonical slot identifiers. Keys are English by design.
 

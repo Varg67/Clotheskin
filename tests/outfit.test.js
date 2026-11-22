@@ -191,3 +191,49 @@ test('slips in the pieces: "wearing", a capital article, the same piece twice, "
 test('the prompt says how to answer naked and barefoot', () => {
   assert.match(buildOutfitPrompt({ name: 'Isa' }), /Wearing nothing: "clothing":\["naked"\]; no shoes: "footwear":\["barefoot"\]\./);
 });
+
+// ---- Real-test review (Nov 2026): hair and makeup as a roleplay Kin writes them
+
+const look = (o) => { const p = parseReading(JSON.stringify(o)); assert.ok(p.ok, p.error); const r = describeReading(p); return { hair: p.hair ? r.hair : null, makeup: p.makeup ? r.makeup : null }; };
+
+test('hair and makeup: the Kin\'s own name in front, a label, a *roleplay* aside, brackets', () => {
+  assert.equal(look({ hair: 'Bia has long dark hair' }).hair, 'Long dark hair.');
+  assert.equal(look({ hair: "Bia's hair is up in a bun" }).hair, 'Up in a bun.');
+  assert.equal(look({ makeup: 'Bia is wearing red lipstick' }).makeup, 'Red lipstick.');
+  assert.equal(look({ hair: 'hair: long, wavy, brown' }).hair, 'Long, wavy, brown.');
+  assert.equal(look({ makeup: 'makeup: red lipstick' }).makeup, 'Red lipstick.');
+  assert.equal(look({ hair: '*runs fingers through her hair* long and messy' }).hair, 'Long and messy.');
+  assert.equal(look({ hair: 'long black hair (tied back)' }).hair, 'Long black hair tied back.');
+});
+
+test('hair and makeup: "not mentioned", "the chat does not say", "same as before" are nothing new (the last known one stays)', () => {
+  for (const v of ['not mentioned in the chat', 'the chat does not say', 'same as before', 'none mentioned', 'unchanged']) {
+    assert.equal(look({ hair: v }).hair, null, v);
+    assert.equal(look({ makeup: v }).makeup, null, v);
+  }
+  assert.equal(look({ makeup: 'no makeup' }).makeup, 'No makeup.', 'an explicit bare face is said');
+});
+
+test('hair and makeup: about the Kin only, short', () => {
+  assert.equal(look({ hair: 'long dark hair that Ari loves to play with' }).hair, 'Long dark hair.');
+  assert.equal(look({ hair: 'long black hair in a ponytail, which she keeps adjusting while she talks to Ari' }).hair, 'Long black hair in a ponytail.');
+});
+
+test('hair as a list or an object reads as one phrase; makeup as an object too', () => {
+  assert.equal(look({ hair: ['long', 'black', 'ponytail'] }).hair, 'Long black ponytail.');
+  assert.equal(look({ hair: ['long black hair', 'in a ponytail'] }).hair, 'Long black hair in a ponytail.');
+  assert.equal(look({ hair: ['long black hair', 'wavy'] }).hair, 'Long black hair, wavy.');
+  assert.equal(look({ hair: { color: 'black', length: 'long', style: 'ponytail' } }).hair, 'Long black ponytail.');
+  assert.equal(look({ makeup: { lips: 'red lipstick', eyes: 'eyeliner' } }).makeup, 'Red lipstick and eyeliner.');
+  assert.equal(look({ makeup: ['mascara', 'lip gloss'] }).makeup, 'Mascara and lip gloss.');
+  assert.equal(parseReading('{"hair":{"size":3}}').ok, false, 'an object with no words');
+});
+
+test('hair: Title Case is lowered ("Long Dark Hair, Loose"); one word stays', () => {
+  assert.equal(look({ hair: 'Long Dark Hair, Loose' }).hair, 'Long dark hair, loose.');
+  assert.equal(look({ hair: 'Bald' }).hair, 'Bald.');
+});
+
+test('the prompt limits the hair to 8 words', () => {
+  assert.match(buildOutfitPrompt({ name: 'Isa' }), /"hair": at most 8 words, e\.g\. "long black hair in a ponytail"/);
+});

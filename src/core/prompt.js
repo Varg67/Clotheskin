@@ -17,7 +17,7 @@ Format: minified JSON only, on one line; no code fence or comment.
 "location": the place only, at most 8 words, starting with in, at or on ("in the kitchen", "on the bus to college"); not your posture, activity or who is with you. Travelling is a place ("on the way to the hospital"); planning to go is not.
 "pose": your body position, at most 6 words ("sitting on the sofa"); it may name the furniture, "location" is the room or place.
 "action": what you are doing now, a short -ing phrase of at most 5 words ("drinking coffee", "talking with Ari"); not what you say or what others do, not plans, finished things or feelings.
-"hair": e.g. "long black hair in a ponytail". "makeup": e.g. "red lipstick and eyeliner"; "no makeup" only if the chat says so.
+"hair": at most 8 words, e.g. "long black hair in a ponytail". "makeup": e.g. "red lipstick and eyeliner"; "no makeup" only if the chat says so.
 Other keys are slots: arrays of short noun phrases with article and key traits, at most 6 words ("a perfumed white shirt"), innermost layer first. Slots: ${SLOT_LIST}.
 topwear = shirts, sweaters, jackets, coats, dresses; bottomwear = trousers, jeans, skirts, shorts; footwear = shoes, boots; footunderwear = socks, tights; topunderwear, bottomunderwear = bra, undershirt, underpants only; eyes-accessory = glasses; bags = backpack, handbag. Wearing nothing: "clothing":["naked"]; no shoes: "footwear":["barefoot"].
 The example shows the format only; never copy its values.

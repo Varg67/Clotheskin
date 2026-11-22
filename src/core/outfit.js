@@ -369,26 +369,53 @@ const MAX_LOOK = 100;
 // Saying "none" may mean "not mentioned"; only an explicit "no makeup" means a bare face.
 const BARE_FACE = /^(no make-?up( at all)?|without (any )?make-?up|make-?up[- ]free|bare[- ]?faced?|a bare face|natural,? no make-?up|((i|she|he)\s*(['’]m|am|is|['’]s)\s+)?not wearing (any )?make-?up( at all| today)?)$/i;
 
-/** Text or a list of texts as one phrase. Returns string | null | undefined (wrong type). */
-function lookPhrase(v) {
+// Hair written as an object ({"length":"long","color":"black","style":"ponytail"}): its words, in a natural order.
+const HAIR_ORDER = ['length', 'color', 'colour', 'texture', 'type', 'style', 'state'];
+// A list item that goes on the phrase before it: ["long black hair", "in a ponytail"] -> "long black hair in a ponytail".
+const GOES_ON = /^(in|on|up|down|with|tied|pulled|swept|tucked|held|braided|loose|wet|messy|half)\b/i;
+const LOOK_LABEL = /^(hair|hairstyle|make-?up)\s*[:\-–—]\s*/i;
+// "Bia has long dark hair", "Bia is wearing red lipstick", "Bia's hair is up": the Kin's own name in front.
+const NAME_HAS = /^(?:[A-Z][\w'’-]*\s+){1,2}(?:has|has got|is wearing|wears|is in)\s+|^[A-Z][\w'’-]*['’]s\s+(?:hair|make-?up)\s+(?:is|are)\s+/;
+
+/**
+ * Text, a list of texts, or an object, as one short phrase. Returns string | null | undefined (wrong type).
+ * The same repairs as a pose: a *roleplay* aside, a label, brackets, a subject ("I have", "Bia has"), a clause about
+ * someone else, and "not mentioned" or "same as before" (nothing new: the last known one stays).
+ */
+function lookPhrase(v, kind) {
   if (v === null || v === undefined) return null;
   let s;
-  if (Array.isArray(v)) {
+  if (isPlainObject(v)) {
+    const words = (kind === 'hair' ? HAIR_ORDER.map((k) => v[k]) : Object.values(v)).filter((x) => typeof x === 'string' && x.trim());
+    if (!words.length) return undefined;
+    s = kind === 'hair' ? words.join(' ') : joinNatural(words);
+  } else if (Array.isArray(v)) {
     if (v.some((x) => typeof x !== 'string')) return undefined;
-    s = joinNatural(v.map((x) => cleanString(x, MAX_LOOK).replace(/[.;,!?\s]+$/, '')).filter(Boolean).slice(0, 4));
-  } else if (typeof v === 'string') s = v;
-  else return undefined;
-  s = cleanString(s, 400).replace(/^[\s*_"'“”‘’()[\]]+/, '').replace(/[\s*_"'“”‘’()[\]]+$/, '').replace(/[.;,!?\s]+$/, '')
+    const items = v.map((x) => cleanString(x, MAX_LOOK).replace(/[.;,!?\s]+$/, '')).filter(Boolean).slice(0, 4);
+    if (kind === 'hair' && items.every((x) => !/\s/.test(x))) s = items.join(' ');           // ["long","black","ponytail"]
+    else if (kind === 'hair') s = items.reduce((a, x) => (!a ? x : `${a}${GOES_ON.test(x) ? ' ' : ', '}${x}`), '');
+    else s = joinNatural(items);
+  } else if (typeof v === 'string') {
+    s = v.replace(/\*[^*]+\*/g, ' ').trim() || v;                                          // "*runs fingers through her hair* long"
+  } else return undefined;
+  s = cleanString(s, 400).replace(/^[\s*_"'“”‘’()[\]]+/, '').replace(/[\s*_"'“”‘’()[\]]+$/, '').replace(/\*/g, '').replace(/[.;,!?\s]+$/, '')
+    .replace(LOOK_LABEL, '')
+    .replace(/\s*\(([^()]*)\)?/g, (m, inner) => (inner.trim() ? ` ${inner.trim()}` : ''))   // "(tied back)"
+    .replace(NAME_HAS, '')
     .replace(/^(my|her|his|their) (hair|make-?up) (is|are)\s+/i, '')
-    .replace(/^((i|she|he)\s+(have|has|['’]ve got|has got|am wearing|is wearing)|i['’]ve got|(she|he)['’]s got|i['’]m wearing|she['’]s wearing|he['’]s wearing|wearing)\s+/i, '');
-  if (!s || NO_VALUE.test(s)) return null;
+    .replace(/^((i|she|he)\s+(have|has|['’]ve got|has got|am wearing|is wearing)|i['’]ve got|(she|he)['’]s got|i['’]m wearing|she['’]s wearing|he['’]s wearing|wearing)\s+/i, '')
+    .replace(/,?\s+(who|whom|whose|which)\b.*$/i, '')                         // ", which she keeps adjusting"
+    .replace(/\s+that\s+(I|you|he|she|they|we|[A-Z][\w'’-]*)\s.*$/, '')     // "that Ari loves"
+    .replace(/[.;,!?\s]+$/, '');
+  if (!s || NO_VALUE.test(s) || NO_VALUE_START.test(s) || /^none (mentioned|specified|described|stated)$/i.test(s)) return null;
+  if (/^([A-Z][a-z]*[\s,]*)+$/.test(s) && /\s/.test(s)) s = s.toLowerCase();         // "Long Dark Hair, Loose"
   return s.length > MAX_LOOK ? `${s.slice(0, MAX_LOOK).replace(/\s+\S*$/, '')}…` : s;
 }
 
-const cleanHair = (v) => lookPhrase(v);
+const cleanHair = (v) => lookPhrase(v, 'hair');
 function cleanMakeup(v) {
   if (typeof v === 'string' && BARE_FACE.test(cleanString(v, 200).replace(/[.!\s]+$/, ''))) return 'no makeup';
-  const s = lookPhrase(v);
+  const s = lookPhrase(v, 'makeup');
   return typeof s === 'string' && BARE_FACE.test(s) ? 'no makeup' : s;
 }
 

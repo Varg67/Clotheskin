@@ -52,7 +52,9 @@ or "improve" anything. Then tell me if anything was rejected, with the exact err
 (cole aqui a lista dos arquivos)
 ```
 
-**Para atualizar**, dá para mandar só os arquivos que mudaram. Na dúvida, mande todos: não faz mal.
+**Para atualizar, mande sempre os 22 arquivos juntos.** Eles dependem uns dos outros, e uma mistura de arquivos novos e velhos pode quebrar o app.
+
+**Para conferir a versão:** na tela, abra **Settings**. No fim aparece "Clotheskin 0.4.0". Se só uma parte foi atualizada, a tela mostra um aviso amarelo no topo: *"Some of Clotheskin's files are from another update… Update all the files together."*
 
 ## Depois de instalar
 

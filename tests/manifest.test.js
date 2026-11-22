@@ -61,3 +61,8 @@ test('the run imports only files that Kindroid gets: nothing from tests/, dev/ o
     }
   }
 });
+
+test('the app\'s version is package.json\'s', async () => {
+  const { APP_VERSION } = await import('../src/core/constants.js');
+  assert.equal(APP_VERSION, JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version);
+});

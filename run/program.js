@@ -13,7 +13,7 @@ import { parseReading, describeReading } from '../src/core/outfit.js';
 import { looksAsleep, sentenceMark, planSleep, parseSleepAnswer, parseDreamAnswer, describeDream, dreamFact, DREAM_TTL_HOURS } from '../src/core/sleep.js';
 import { retryDelay, errorKind, isDue, TICK_S } from '../src/core/schedule.js';
 import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, forgetOld, carryOver, SETTINGS_FILE, STATUS_FILE, ACTION, OPS } from '../src/core/state.js';
-import { NOT_DESCRIBED } from '../src/core/constants.js';
+import { NOT_DESCRIBED, APP_VERSION } from '../src/core/constants.js';
 import { describeNow } from '../src/core/time.js';
 import { formatWhen } from '../src/core/format.js';
 import { oneLine } from '../src/core/text.js';
@@ -50,7 +50,7 @@ export async function runProgram({ event, kin, clock = () => new Date(), log = (
   if (forgetOld(status, settings, clock()).changed) {
     try {
       const fresh = forgetOld(normalizeStatus(await kin.get(STATUS_FILE)), settings, clock());
-      if (fresh.changed) { await kin.put(STATUS_FILE, JSON.stringify(fresh.status)); log('old dream or night erased'); }
+      if (fresh.changed) { await kin.put(STATUS_FILE, JSON.stringify({ ...fresh.status, runVersion: APP_VERSION })); log('old dream or night erased'); }
       status = fresh.status;
     } catch (e) {
       return failed(`Could not erase an old dream from the app's files: ${e.message}`);
@@ -269,5 +269,6 @@ async function save(ctx, id, entry, base) {
   }
 
   fresh.kins[id] = next;
+  fresh.runVersion = APP_VERSION;
   try { await ctx.kin.put(STATUS_FILE, JSON.stringify(fresh)); } catch (e) { throw new Error(`status.json could not be saved: ${e.message}`); }
 }

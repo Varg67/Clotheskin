@@ -2,11 +2,12 @@
 // work, every 15 minutes or when Update status is pressed; the screen never asks the Kin anything itself.
 import { h, keepFocus } from './dom.js';
 import { icon, spinner, poseIcon, hairIcon } from './icons.js';
-import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, warningOf, SETTINGS_FILE, STATUS_FILE, ACTION, THEMES } from '../core/state.js';
+import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, warningOf, versionMismatch, SETTINGS_FILE, STATUS_FILE, ACTION, THEMES } from '../core/state.js';
 import { INTERVAL_STEPS, formatInterval, snapInterval, startDueFor } from '../core/schedule.js';
 import { describeDream, DREAM_TTL_HOURS } from '../core/sleep.js';
 import { deviceTimeZone } from '../core/time.js';
 import { formatClock, formatRelative, formatWhen } from '../core/format.js';
+import { APP_VERSION } from '../core/constants.js';
 
 const POLL_MS = 60000; // status.json is read again every minute while the screen is visible
 const RUN_WORDS = { running: 'started', paused: 'paused', stopped: 'stopped' };
@@ -308,7 +309,8 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
         h('select', { id: 'theme-pick', class: 'text-input', 'data-key': 'theme-pick', onChange: (ev) => { applyTheme(ev.target.value); saveSettings({ theme: ev.target.value }); } },
           ...Object.entries(THEMES).map(([id, text]) => h('option', { value: id, selected: s.theme === id ? '' : undefined }, text))),
         h('h3', { class: 'sub' }, 'How it works'),
-        h('p', { class: 'help' }, 'Your Kin looks at its recent chat with you and says where it is, how it is positioned, what it is doing, what it is wearing, and its hair and makeup; Clotheskin shows that as short sentences. When it is asleep, Clotheskin asks when it will wake up, lets it sleep, and asks about its dream in the morning. Kept in the app’s files: the last reading, the night’s times and the last dream. The dream is erased after a day, and Stop erases the night and the dream within 15 minutes. The chat is never kept.')));
+        h('p', { class: 'help' }, 'Your Kin looks at its recent chat with you and says where it is, how it is positioned, what it is doing, what it is wearing, and its hair and makeup; Clotheskin shows that as short sentences. When it is asleep, Clotheskin asks when it will wake up, lets it sleep, and asks about its dream in the morning. Kept in the app’s files: the last reading, the night’s times and the last dream. The dream is erased after a day, and Stop erases the night and the dream within 15 minutes. The chat is never kept.'),
+        h('p', { class: 'help', 'data-testid': 'version' }, `Clotheskin ${APP_VERSION}`)));
   }
 
   function applyTheme(id) {
@@ -329,6 +331,8 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
     keepFocus(root, () => {
       const parts = [
         h('header', { class: 'app-head' }, h('h1', {}, 'Clotheskin'), h('p', {}, 'Where your Kin is, what it is doing and what it is wearing')),
+        versionMismatch(S.status) ? h('div', { class: 'banner warn', role: 'alert', 'data-testid': 'version-mismatch' }, icon('alert', { size: 18 }),
+          h('span', { class: 'banner-text' }, `Some of Clotheskin’s files are from another update: the screen is ${APP_VERSION}, the automatic part is ${versionMismatch(S.status)}. Update all the files together.`)) : null,
         renderCard(),
         selectedKin() ? renderDreams() : null,
         selectedKin() ? renderSettings() : null,

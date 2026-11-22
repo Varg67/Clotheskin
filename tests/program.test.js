@@ -525,3 +525,15 @@ test('after a night, an answer without a pose keeps the mark: the same still "as
   await tick(k);
   assert.deepEqual(k.asks(), ['reading', 'sleep', 'dream', 'reading', 'reading'], 'no second sleep question');
 });
+
+test('the run writes its version to status.json each time it saves; the screen notices a run from another update', async () => {
+  const { APP_VERSION } = await import('../src/core/constants.js');
+  const { versionMismatch, normalizeStatus } = await import('../src/core/state.js');
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1' } });
+  k.answers.reading.push(AWAKE);
+  await tick(k);
+  assert.equal(k.status().runVersion, APP_VERSION);
+  assert.equal(versionMismatch(normalizeStatus(k.files.get('status.json'))), null);
+  assert.equal(versionMismatch(normalizeStatus({ runVersion: '0.3.9', kins: {} })), '0.3.9');
+  assert.equal(versionMismatch(normalizeStatus({ kins: {} })), null, 'a file from before 0.4.0 says nothing');
+});

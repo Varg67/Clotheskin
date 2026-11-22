@@ -9,7 +9,7 @@ import { snapInterval, DEFAULT_INTERVAL_S, ERRORS_BEFORE_WARNING } from './sched
 import { safeTimeZone } from './time.js';
 import { REMEMBERED, DREAM_TTL_HOURS } from './sleep.js';
 import { oneLine } from './text.js';
-import { NOT_DESCRIBED } from './constants.js';
+import { NOT_DESCRIBED, APP_VERSION } from './constants.js';
 
 export const SETTINGS_FILE = 'settings.json';
 export const STATUS_FILE = 'status.json';
@@ -107,7 +107,8 @@ export function normalizeStatus(raw) {
   if (o.kins && typeof o.kins === 'object') {
     for (const [id, e] of Object.entries(o.kins)) if (str(id, 120)) kins[id] = normalizeEntry(e && typeof e === 'object' ? e : {});
   }
-  return { v: 1, kins };
+  // runVersion: the version of the run that last saved the file (APP_VERSION), or null before 0.4.0.
+  return { v: 1, runVersion: str(o.runVersion, 20), kins };
 }
 
 /**
@@ -147,6 +148,11 @@ export function plannedAt(entry, settings) {
   if (entry.retryAt) return entry.retryAt;
   if (!entry.lastRunAt) return null;
   return new Date(new Date(entry.lastRunAt).getTime() + settings.intervalS * 1000).toISOString();
+}
+
+/** The run's version when it differs from the screen's (some files were updated and others not), or null. */
+export function versionMismatch(status) {
+  return status.runVersion && status.runVersion !== APP_VERSION ? status.runVersion : null;
 }
 
 /** A warning about Kindroid itself for a Kin's entry, or null. */

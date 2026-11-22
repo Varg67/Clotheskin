@@ -7,6 +7,12 @@ function __def(p, f) { __defs[p] = f; }
 function __req(p) { if (!(p in __mods)) { if (!__defs[p]) throw new Error('missing module ' + p); __mods[p] = null; __mods[p] = __defs[p](); } return __mods[p]; }
 
 __def("src/core/constants.js", function () {
+/**
+ * The app's version (package.json's, checked by a test). The screen shows it in Settings, and the run writes it to
+ * status.json each time it saves, so a screen and a run from different updates are noticed.
+ */
+const APP_VERSION = '0.4.0';
+
 // Canonical slot identifiers. Keys are English by design.
 
 const CLOTHING_SLOTS = [
@@ -32,7 +38,7 @@ const NOT_DESCRIBED = Object.freeze({
   doing: 'No pose or action described in the recent chat.',
   outfit: 'No outfit described in the recent chat.',
 });
-return { CLOTHING_SLOTS, ACCESSORY_SLOTS, BAG_SLOT, WEAR_SLOTS, NOT_DESCRIBED };
+return { APP_VERSION, CLOTHING_SLOTS, ACCESSORY_SLOTS, BAG_SLOT, WEAR_SLOTS, NOT_DESCRIBED };
 });
 
 __def("src/core/format.js", function () {
@@ -398,7 +404,7 @@ const { snapInterval, DEFAULT_INTERVAL_S, ERRORS_BEFORE_WARNING } = __req("src/c
 const { safeTimeZone } = __req("src/core/time.js");
 const { REMEMBERED, DREAM_TTL_HOURS } = __req("src/core/sleep.js");
 const { oneLine } = __req("src/core/text.js");
-const { NOT_DESCRIBED } = __req("src/core/constants.js");
+const { NOT_DESCRIBED, APP_VERSION } = __req("src/core/constants.js");
 
 const SETTINGS_FILE = 'settings.json';
 const STATUS_FILE = 'status.json';
@@ -496,7 +502,8 @@ function normalizeStatus(raw) {
   if (o.kins && typeof o.kins === 'object') {
     for (const [id, e] of Object.entries(o.kins)) if (str(id, 120)) kins[id] = normalizeEntry(e && typeof e === 'object' ? e : {});
   }
-  return { v: 1, kins };
+  // runVersion: the version of the run that last saved the file (APP_VERSION), or null before 0.4.0.
+  return { v: 1, runVersion: str(o.runVersion, 20), kins };
 }
 
 /**
@@ -538,6 +545,11 @@ function plannedAt(entry, settings) {
   return new Date(new Date(entry.lastRunAt).getTime() + settings.intervalS * 1000).toISOString();
 }
 
+/** The run's version when it differs from the screen's (some files were updated and others not), or null. */
+function versionMismatch(status) {
+  return status.runVersion && status.runVersion !== APP_VERSION ? status.runVersion : null;
+}
+
 /** A warning about Kindroid itself for a Kin's entry, or null. */
 function warningOf(entry) {
   if (!entry) return null;
@@ -545,7 +557,7 @@ function warningOf(entry) {
   if (entry.errorKind === 'server' && entry.serverFailures >= ERRORS_BEFORE_WARNING) return { kind: 'server', failures: entry.serverFailures };
   return null;
 }
-return { SETTINGS_FILE, STATUS_FILE, THEMES, ACTION, OPS, DEFAULT_SETTINGS, normalizeSettings, carryOver, normalizeEntry, normalizeStatus, afterStop, forgetOld, plannedAt, warningOf };
+return { SETTINGS_FILE, STATUS_FILE, THEMES, ACTION, OPS, DEFAULT_SETTINGS, normalizeSettings, carryOver, normalizeEntry, normalizeStatus, afterStop, forgetOld, plannedAt, versionMismatch, warningOf };
 });
 
 __def("src/core/text.js", function () {
@@ -644,11 +656,12 @@ __def("src/screen/app.js", function () {
 // work, every 15 minutes or when Update status is pressed; the screen never asks the Kin anything itself.
 const { h, keepFocus } = __req("src/screen/dom.js");
 const { icon, spinner, poseIcon, hairIcon } = __req("src/screen/icons.js");
-const { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, warningOf, SETTINGS_FILE, STATUS_FILE, ACTION, THEMES } = __req("src/core/state.js");
+const { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, warningOf, versionMismatch, SETTINGS_FILE, STATUS_FILE, ACTION, THEMES } = __req("src/core/state.js");
 const { INTERVAL_STEPS, formatInterval, snapInterval, startDueFor } = __req("src/core/schedule.js");
 const { describeDream, DREAM_TTL_HOURS } = __req("src/core/sleep.js");
 const { deviceTimeZone } = __req("src/core/time.js");
 const { formatClock, formatRelative, formatWhen } = __req("src/core/format.js");
+const { APP_VERSION } = __req("src/core/constants.js");
 
 const POLL_MS = 60000; // status.json is read again every minute while the screen is visible
 const RUN_WORDS = { running: 'started', paused: 'paused', stopped: 'stopped' };
@@ -950,7 +963,8 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
         h('select', { id: 'theme-pick', class: 'text-input', 'data-key': 'theme-pick', onChange: (ev) => { applyTheme(ev.target.value); saveSettings({ theme: ev.target.value }); } },
           ...Object.entries(THEMES).map(([id, text]) => h('option', { value: id, selected: s.theme === id ? '' : undefined }, text))),
         h('h3', { class: 'sub' }, 'How it works'),
-        h('p', { class: 'help' }, 'Your Kin looks at its recent chat with you and says where it is, how it is positioned, what it is doing, what it is wearing, and its hair and makeup; Clotheskin shows that as short sentences. When it is asleep, Clotheskin asks when it will wake up, lets it sleep, and asks about its dream in the morning. Kept in the app’s files: the last reading, the night’s times and the last dream. The dream is erased after a day, and Stop erases the night and the dream within 15 minutes. The chat is never kept.')));
+        h('p', { class: 'help' }, 'Your Kin looks at its recent chat with you and says where it is, how it is positioned, what it is doing, what it is wearing, and its hair and makeup; Clotheskin shows that as short sentences. When it is asleep, Clotheskin asks when it will wake up, lets it sleep, and asks about its dream in the morning. Kept in the app’s files: the last reading, the night’s times and the last dream. The dream is erased after a day, and Stop erases the night and the dream within 15 minutes. The chat is never kept.'),
+        h('p', { class: 'help', 'data-testid': 'version' }, `Clotheskin ${APP_VERSION}`)));
   }
 
   function applyTheme(id) {
@@ -971,6 +985,8 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
     keepFocus(root, () => {
       const parts = [
         h('header', { class: 'app-head' }, h('h1', {}, 'Clotheskin'), h('p', {}, 'Where your Kin is, what it is doing and what it is wearing')),
+        versionMismatch(S.status) ? h('div', { class: 'banner warn', role: 'alert', 'data-testid': 'version-mismatch' }, icon('alert', { size: 18 }),
+          h('span', { class: 'banner-text' }, `Some of Clotheskin’s files are from another update: the screen is ${APP_VERSION}, the automatic part is ${versionMismatch(S.status)}. Update all the files together.`)) : null,
         renderCard(),
         selectedKin() ? renderDreams() : null,
         selectedKin() ? renderSettings() : null,

@@ -328,6 +328,18 @@ const step = async (name, fn) => {
     await t.ctx.close();
   });
 
+  await step('Settings shows the version; a run from another update shows a warning to update all the files', async () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8'));
+    const t = await open({ kins: [{ id: 'kin-isa', name: 'Isa' }], files: { 'status.json': JSON.stringify({ runVersion: '0.3.0', kins: {} }) } });
+    await t.key('update').waitFor();
+    await t.key('settings-summary').click();
+    assert.equal(await t.text('version'), `Clotheskin ${pkg.version}`);
+    assert.match(await t.text('version-mismatch'), new RegExp(`the screen is ${pkg.version.replace(/\./g, '\\.')}, the automatic part is 0\\.3\\.0\\. Update all the files together\\.`));
+    await t.key('update').click();
+    await t.fr.locator('[data-testid="version-mismatch"]').waitFor({ state: 'detached' }); // the run saved: same version now
+    await t.ctx.close();
+  });
+
   await step('no page errors or console errors', async () => { assert.deepEqual(problems, []); });
 
   await browser.close(); server.close();

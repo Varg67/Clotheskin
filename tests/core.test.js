@@ -68,7 +68,7 @@ test('settings and status files: anything damaged falls back to defaults, nothin
   assert.deepEqual(normalizeSettings(null), { ...DEFAULT_SETTINGS });
   assert.deepEqual(normalizeSettings('not json'), { ...DEFAULT_SETTINGS });
   const s = normalizeSettings({ kinId: ' k1 ', autoState: 'running', intervalS: 600, tz: 'Europe/Lisbon', theme: 'sage', tellDream: false, reachOut: 'yes', extra: 1 });
-  assert.deepEqual(s, { v: 1, kinId: 'k1', autoState: 'running', intervalS: 900, tz: 'Europe/Lisbon', theme: 'sage', tellDream: false, reachOut: false, stoppedAt: null });
+  assert.deepEqual(s, { v: 1, kinId: 'k1', autoState: 'running', intervalS: 900, tz: 'Europe/Lisbon', theme: 'sage', tellDream: false, reachOut: false, tellLook: false, stoppedAt: null });
   assert.deepEqual(normalizeStatus('[]'), { v: 1, runVersion: null, kins: {} });
   const st = normalizeStatus({ kins: { k1: { reading: { outfit: 'Wearing jeans.', location: 5, at: 'nope' }, sleep: { wakeAt: 'x' }, sleptOn: 'Lying in bed, sleeping.', failures: -3, errorKind: 'weird' } } });
   assert.deepEqual(st.kins.k1.reading, { location: '', doing: '', outfit: 'Wearing jeans.', hair: null, makeup: null, at: null, seen: {} });

@@ -11,7 +11,7 @@ __def("src/core/constants.js", function () {
  * The app's version (package.json's, checked by a test). The screen shows it in Settings, and the run writes it to
  * status.json each time it saves, so a screen and a run from different updates are noticed.
  */
-const APP_VERSION = '0.5.1';
+const APP_VERSION = '0.6.0';
 
 // Canonical slot identifiers. Keys are English by design.
 
@@ -408,7 +408,7 @@ __def("src/core/state.js", function () {
 // damaged or hand-edited file can never break the screen or the run, it only falls back to defaults.
 const { snapInterval, DEFAULT_INTERVAL_S, ERRORS_BEFORE_WARNING } = __req("src/core/schedule.js");
 const { safeTimeZone } = __req("src/core/time.js");
-const { REMEMBERED, DREAM_TTL_HOURS } = __req("src/core/sleep.js");
+const { REMEMBERED, DREAM_TTL_HOURS, sentenceMark } = __req("src/core/sleep.js");
 const { oneLine } = __req("src/core/text.js");
 const { NOT_DESCRIBED, APP_VERSION, BARE_FACE_SENTENCE } = __req("src/core/constants.js");
 
@@ -429,6 +429,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   theme: 'warm',
   tellDream: false, // tell the Kin its dream (kin tell), so it can remember it during the day: only if the person turns it on
   reachOut: false, // and let it bring the dream up by itself (kin tell --reach-out)
+  tellLook: false, // tell the Kin its outfit, hair and makeup when they change (kin tell): only if the person turns it on
   stoppedAt: null, // when Stop was last pressed: any night, dream or slowing down from before it is forgotten
 });
 
@@ -453,6 +454,7 @@ function normalizeSettings(raw) {
     theme: Object.prototype.hasOwnProperty.call(THEMES, String(o.theme)) ? o.theme : DEFAULT_SETTINGS.theme,
     tellDream: typeof o.tellDream === 'boolean' ? o.tellDream : DEFAULT_SETTINGS.tellDream,
     reachOut: typeof o.reachOut === 'boolean' ? o.reachOut : DEFAULT_SETTINGS.reachOut,
+    tellLook: typeof o.tellLook === 'boolean' ? o.tellLook : DEFAULT_SETTINGS.tellLook,
     stoppedAt: iso(o.stoppedAt),
   };
 }
@@ -498,7 +500,37 @@ function normalizeEntry(e = {}) {
     sleep,
     sleptOn: typeof e.sleptOn === 'string' && /^[0-9a-f]{8}$/.test(e.sleptOn) ? e.sleptOn : null,
     dream,
+    told: toldOf(e.told), // what the Kin was told of its look: a fingerprint and when, per field (never the sentence)
+    lookFailedAt: iso(e.lookFailedAt), // telling the look failed: not tried again for LOOK_RETRY_HOURS
+    lookError: str(e.lookError, 300), // why, shown on the Current look card
   };
+}
+
+// ---- telling the Kin its current look (settings.tellLook)
+/** How long a told look lasts in the Kin (kin tell --ttl): a look older than that is no longer true anyway. */
+const LOOK_TTL_HOURS = 12;
+/** After a failed kin tell (Kindroid down, or the note refused), the look is not told again for this long. */
+const LOOK_RETRY_HOURS = 1;
+const LOOK_FIELDS = ['outfit', 'hair', 'makeup'];
+const LOOK_FACT_MAX = 300;
+const toldOf = (o) => Object.fromEntries(LOOK_FIELDS.filter((k) => o && o[k] && /^[0-9a-f]{8}$/.test(o[k].mark) && iso(o[k].at)).map((k) => [k, { mark: o[k].mark, at: iso(o[k].at) }]));
+
+/**
+ * What to tell the Kin of its look after a reading: [{ field, key, fact, mark }]. Only what the Kin said just now
+ * (`fresh`, never a sentence kept from an earlier reading: an old or wrong sentence must not become the Kin's truth),
+ * and only when it changed since it was last told, or that telling is about to expire. `when` is the person's clock.
+ */
+function lookFacts({ fresh, told, now, when }) {
+  const out = [];
+  for (const field of LOOK_FIELDS) {
+    const v = fresh && fresh[field];
+    if (!said(field, v)) continue;
+    const mark = sentenceMark(v);
+    const last = told && told[field];
+    if (last && last.mark === mark && now - new Date(last.at) < (LOOK_TTL_HOURS - 1) * 3600e3) continue;
+    out.push({ field, key: `look-${field}`, fact: oneLine(`Your ${field} right now (${when}): ${v[0].toLowerCase()}${v.slice(1)}`, LOOK_FACT_MAX), mark });
+  }
+  return out;
 }
 
 /** status.json (text or object) -> { v, kins: { id: entry } }. */
@@ -519,7 +551,7 @@ function normalizeStatus(raw) {
  */
 function afterStop(entry, settings) {
   if (!entry || !settings.stoppedAt || (entry.lastRunAt && entry.lastRunAt > settings.stoppedAt)) return entry;
-  return { ...entry, sleep: null, sleptOn: null, dream: null, retryAt: null, failures: 0, serverFailures: 0, errorKind: null, error: null, note: null };
+  return { ...entry, sleep: null, sleptOn: null, dream: null, retryAt: null, failures: 0, serverFailures: 0, errorKind: null, error: null, note: null, told: {}, lookFailedAt: null, lookError: null };
 }
 
 /**
@@ -566,7 +598,7 @@ function warningOf(entry) {
   if (entry.errorKind === 'server' && entry.serverFailures >= ERRORS_BEFORE_WARNING) return { kind: 'server', failures: entry.serverFailures };
   return null;
 }
-return { SETTINGS_FILE, STATUS_FILE, THEMES, ACTION, OPS, DEFAULT_SETTINGS, normalizeSettings, carryOver, normalizeEntry, normalizeStatus, afterStop, forgetOld, plannedAt, shownMakeup, versionMismatch, warningOf };
+return { SETTINGS_FILE, STATUS_FILE, THEMES, ACTION, OPS, DEFAULT_SETTINGS, normalizeSettings, carryOver, normalizeEntry, LOOK_TTL_HOURS, LOOK_RETRY_HOURS, lookFacts, normalizeStatus, afterStop, forgetOld, plannedAt, shownMakeup, versionMismatch, warningOf };
 });
 
 __def("src/core/text.js", function () {
@@ -665,7 +697,7 @@ __def("src/screen/app.js", function () {
 // work, every 15 minutes or when Update status is pressed; the screen never asks the Kin anything itself.
 const { h, keepFocus } = __req("src/screen/dom.js");
 const { icon, spinner, poseIcon, hairIcon } = __req("src/screen/icons.js");
-const { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, warningOf, versionMismatch, shownMakeup, SETTINGS_FILE, STATUS_FILE, ACTION, THEMES } = __req("src/core/state.js");
+const { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, warningOf, versionMismatch, shownMakeup, LOOK_RETRY_HOURS, SETTINGS_FILE, STATUS_FILE, ACTION, THEMES } = __req("src/core/state.js");
 const { INTERVAL_STEPS, formatInterval, snapInterval, startDueFor } = __req("src/core/schedule.js");
 const { describeDream, DREAM_TTL_HOURS } = __req("src/core/sleep.js");
 const { deviceTimeZone } = __req("src/core/time.js");
@@ -949,6 +981,27 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
   }
 
   // The dream choices, in plain sight (not inside Settings): nothing is told to the Kin unless the person ticks it.
+  // Telling the Kin its look, in plain sight like the dream choices: nothing is told unless the person ticks it.
+  function renderLook() {
+    const s = S.settings;
+    return h('section', { class: 'card dreams', 'aria-labelledby': 'look-title' },
+      h('div', { class: 'card-body' },
+        h('h2', { class: 'section-title', id: 'look-title' }, 'Current look'),
+        h('p', { class: 'help' }, 'Clotheskin can tell your Kin its outfit, hair and makeup when they change, so it stays consistent in your roleplay. Each note lasts 12 hours. Your Kin is not told anything unless you turn this on.'),
+        h('label', { class: 'check' }, h('input', { type: 'checkbox', 'data-key': 'tell-look', checked: s.tellLook || undefined, onChange: (ev) => saveSettings({ tellLook: ev.target.checked }) }),
+          h('span', {}, 'Tell my Kin its current look')),
+        lookProblem()));
+  }
+
+  // The last kin tell of the look failed (Kindroid down, or the note refused): said here, with when it is tried again.
+  function lookProblem() {
+    const kin = selectedKin();
+    const e = kin && entryOf(kin.id);
+    if (!S.settings.tellLook || !e || !e.lookFailedAt || !e.lookError) return null;
+    const again = new Date(new Date(e.lookFailedAt).getTime() + LOOK_RETRY_HOURS * 3600e3).toISOString();
+    return h('p', { class: 'help', role: 'status', 'data-testid': 'look-problem' }, `Kindroid did not take the last note (${e.lookError}). Clotheskin tries again after ${formatClock(again, { now: clock() })}.`);
+  }
+
   function renderDreams() {
     const s = S.settings;
     const reachOn = s.tellDream && s.reachOut;
@@ -972,7 +1025,7 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
         h('select', { id: 'theme-pick', class: 'text-input', 'data-key': 'theme-pick', onChange: (ev) => { applyTheme(ev.target.value); saveSettings({ theme: ev.target.value }); } },
           ...Object.entries(THEMES).map(([id, text]) => h('option', { value: id, selected: s.theme === id ? '' : undefined }, text))),
         h('h3', { class: 'sub' }, 'How it works'),
-        h('p', { class: 'help' }, 'Your Kin looks at its recent chat with you and says where it is, how it is positioned, what it is doing, what it is wearing, and its hair and makeup; Clotheskin shows that as short sentences. When it is asleep, Clotheskin asks when it will wake up, lets it sleep, and asks about its dream in the morning. Kept in the app’s files: the last reading, the night’s times and the last dream. The dream is erased after a day, and Stop erases the night and the dream within 15 minutes. The chat is never kept.'),
+        h('p', { class: 'help' }, 'Your Kin looks at its recent chat with you and says where it is, how it is positioned, what it is doing, what it is wearing, and its hair and makeup; Clotheskin shows that as short sentences. When it is asleep, Clotheskin asks when it will wake up, lets it sleep, and asks about its dream in the morning. Kept in the app’s files: the last reading, the night’s times, the last dream, and when your Kin was last told its look (a fingerprint, not the words). The dream is erased after a day, and Stop erases the night, the dream and what was told within 15 minutes. The chat is never kept.'),
         h('p', { class: 'help', 'data-testid': 'version' }, `Clotheskin ${APP_VERSION}`)));
   }
 
@@ -997,6 +1050,7 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
         versionMismatch(S.status) ? h('div', { class: 'banner warn', role: 'alert', 'data-testid': 'version-mismatch' }, icon('alert', { size: 18 }),
           h('span', { class: 'banner-text' }, `Some of Clotheskin’s files are from another update: the screen is ${APP_VERSION}, the automatic part is ${versionMismatch(S.status)}. Update all the files together.`)) : null,
         renderCard(),
+        selectedKin() ? renderLook() : null,
         selectedKin() ? renderDreams() : null,
         selectedKin() ? renderSettings() : null,
       ];

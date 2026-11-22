@@ -108,7 +108,9 @@ Then, in Kindroid: Apps → **Waiting for you** → Allow. It reads your Kin's c
 6. **What the chat leaves out.** When the recent chat says nothing about the outfit (or the place, the hair…), the card keeps the last known sentence, marked "seen 2:40 AM", instead of "No outfit described".
 7. **The App Library review** asked for two things, both done: the Kin is told its dream only if the person turns it on (off by default, on the screen's **Dreams** card), and the dream is erased from `status.json` after a day or after Stop, as the screen says.
 
-Still to watch: the night and the dream with a real Kin over a whole night, and several Kins in one account.
+8. **Telling the Kin its look** (off by default, on the screen's **Current look** card): after a reading, the run tells the Kin its outfit, hair and makeup with `kin tell --key look-outfit|look-hair|look-makeup --ttl 12`, so it stays consistent in the roleplay. Only what the Kin said just now (never a sentence kept from an earlier reading), only when it changed, and again before the 12 hours run out. A refused or failed note waits an hour and is shown on the card. `status.json` keeps only a fingerprint and the time of what was told. Scenarios: `tests/look.test.js`.
+
+Still to watch: whether `kin tell` needs a grant of its own, and whether a note under the same `--key` replaces the last one; the night and the dream with a real Kin over a whole night, and several Kins in one account.
 
 ## Limits
 

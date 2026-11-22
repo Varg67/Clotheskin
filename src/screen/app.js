@@ -2,7 +2,7 @@
 // work, every 15 minutes or when Update status is pressed; the screen never asks the Kin anything itself.
 import { h, keepFocus } from './dom.js';
 import { icon, spinner, poseIcon, hairIcon } from './icons.js';
-import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, warningOf, versionMismatch, shownMakeup, SETTINGS_FILE, STATUS_FILE, ACTION, THEMES } from '../core/state.js';
+import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, warningOf, versionMismatch, shownMakeup, LOOK_RETRY_HOURS, SETTINGS_FILE, STATUS_FILE, ACTION, THEMES } from '../core/state.js';
 import { INTERVAL_STEPS, formatInterval, snapInterval, startDueFor } from '../core/schedule.js';
 import { describeDream, DREAM_TTL_HOURS } from '../core/sleep.js';
 import { deviceTimeZone } from '../core/time.js';
@@ -286,6 +286,27 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
   }
 
   // The dream choices, in plain sight (not inside Settings): nothing is told to the Kin unless the person ticks it.
+  // Telling the Kin its look, in plain sight like the dream choices: nothing is told unless the person ticks it.
+  function renderLook() {
+    const s = S.settings;
+    return h('section', { class: 'card dreams', 'aria-labelledby': 'look-title' },
+      h('div', { class: 'card-body' },
+        h('h2', { class: 'section-title', id: 'look-title' }, 'Current look'),
+        h('p', { class: 'help' }, 'Clotheskin can tell your Kin its outfit, hair and makeup when they change, so it stays consistent in your roleplay. Each note lasts 12 hours. Your Kin is not told anything unless you turn this on.'),
+        h('label', { class: 'check' }, h('input', { type: 'checkbox', 'data-key': 'tell-look', checked: s.tellLook || undefined, onChange: (ev) => saveSettings({ tellLook: ev.target.checked }) }),
+          h('span', {}, 'Tell my Kin its current look')),
+        lookProblem()));
+  }
+
+  // The last kin tell of the look failed (Kindroid down, or the note refused): said here, with when it is tried again.
+  function lookProblem() {
+    const kin = selectedKin();
+    const e = kin && entryOf(kin.id);
+    if (!S.settings.tellLook || !e || !e.lookFailedAt || !e.lookError) return null;
+    const again = new Date(new Date(e.lookFailedAt).getTime() + LOOK_RETRY_HOURS * 3600e3).toISOString();
+    return h('p', { class: 'help', role: 'status', 'data-testid': 'look-problem' }, `Kindroid did not take the last note (${e.lookError}). Clotheskin tries again after ${formatClock(again, { now: clock() })}.`);
+  }
+
   function renderDreams() {
     const s = S.settings;
     const reachOn = s.tellDream && s.reachOut;
@@ -309,7 +330,7 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
         h('select', { id: 'theme-pick', class: 'text-input', 'data-key': 'theme-pick', onChange: (ev) => { applyTheme(ev.target.value); saveSettings({ theme: ev.target.value }); } },
           ...Object.entries(THEMES).map(([id, text]) => h('option', { value: id, selected: s.theme === id ? '' : undefined }, text))),
         h('h3', { class: 'sub' }, 'How it works'),
-        h('p', { class: 'help' }, 'Your Kin looks at its recent chat with you and says where it is, how it is positioned, what it is doing, what it is wearing, and its hair and makeup; Clotheskin shows that as short sentences. When it is asleep, Clotheskin asks when it will wake up, lets it sleep, and asks about its dream in the morning. Kept in the app’s files: the last reading, the night’s times and the last dream. The dream is erased after a day, and Stop erases the night and the dream within 15 minutes. The chat is never kept.'),
+        h('p', { class: 'help' }, 'Your Kin looks at its recent chat with you and says where it is, how it is positioned, what it is doing, what it is wearing, and its hair and makeup; Clotheskin shows that as short sentences. When it is asleep, Clotheskin asks when it will wake up, lets it sleep, and asks about its dream in the morning. Kept in the app’s files: the last reading, the night’s times, the last dream, and when your Kin was last told its look (a fingerprint, not the words). The dream is erased after a day, and Stop erases the night, the dream and what was told within 15 minutes. The chat is never kept.'),
         h('p', { class: 'help', 'data-testid': 'version' }, `Clotheskin ${APP_VERSION}`)));
   }
 
@@ -334,6 +355,7 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
         versionMismatch(S.status) ? h('div', { class: 'banner warn', role: 'alert', 'data-testid': 'version-mismatch' }, icon('alert', { size: 18 }),
           h('span', { class: 'banner-text' }, `Some of Clotheskin’s files are from another update: the screen is ${APP_VERSION}, the automatic part is ${versionMismatch(S.status)}. Update all the files together.`)) : null,
         renderCard(),
+        selectedKin() ? renderLook() : null,
         selectedKin() ? renderDreams() : null,
         selectedKin() ? renderSettings() : null,
       ];

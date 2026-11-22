@@ -56,8 +56,8 @@ export function createKin({ bin = process.env.KIN_BIN || 'kin', defaultTimeoutMs
       return call(['ask', ...(kin ? ['--kin', kin] : []), prompt], { timeoutMs });
     },
     /** Tells the Kin a plain fact (rarely). `ttl` in hours; `reachOut` lets the Kin bring it up by itself. */
-    async tell(fact, { kin, key, ttl, reachOut = false } = {}) {
-      await call(['tell', ...(kin ? ['--kin', kin] : []), ...(key ? ['--key', key] : []), ...(ttl ? ['--ttl', String(ttl)] : []), ...(reachOut ? ['--reach-out', 'soon'] : []), fact]);
+    async tell(fact, { kin, key, ttl, reachOut = false, timeoutMs } = {}) {
+      await call(['tell', ...(kin ? ['--kin', kin] : []), ...(key ? ['--key', key] : []), ...(ttl ? ['--ttl', String(ttl)] : []), ...(reachOut ? ['--reach-out', 'soon'] : []), fact], timeoutMs ? { timeoutMs } : {});
     },
     /** A file of the program's folder as text, or null when it does not exist yet. Any other failure throws. */
     async get(path) {

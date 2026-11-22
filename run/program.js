@@ -12,7 +12,7 @@ import { buildOutfitPrompt, buildFollowUpPrompt, buildCorrectionPrompt, SLEEP_PR
 import { parseReading, describeReading } from '../src/core/outfit.js';
 import { looksAsleep, sentenceMark, planSleep, parseSleepAnswer, parseDreamAnswer, describeDream, dreamFact, DREAM_TTL_HOURS } from '../src/core/sleep.js';
 import { retryDelay, errorKind, isDue, TICK_S } from '../src/core/schedule.js';
-import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, forgetOld, carryOver, shownMakeup, SETTINGS_FILE, STATUS_FILE, ACTION, OPS } from '../src/core/state.js';
+import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, forgetOld, carryOver, shownMakeup, lookFacts, LOOK_TTL_HOURS, LOOK_RETRY_HOURS, SETTINGS_FILE, STATUS_FILE, ACTION, OPS } from '../src/core/state.js';
 import { NOT_DESCRIBED, APP_VERSION } from '../src/core/constants.js';
 import { describeNow } from '../src/core/time.js';
 import { formatWhen } from '../src/core/format.js';
@@ -24,6 +24,7 @@ const ASK_TIMEOUT_MS = 90000; // one question to the Kin never waits longer than
 const RUN_BUDGET_MS = 100000; // the whole run fits well inside kin.json's 2 minutes (main.js stops it at 110 s)
 const RESERVE_MS = 10000; // kept at the end of the budget for saving status.json and kin end
 const MIN_ASK_MS = 15000; // a question with less time than this left waits for the next start
+const TELL_TIMEOUT_MS = 15000; // telling the Kin its look waits no longer than this, and only with this much time left
 
 const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
 const ok = (message) => ({ ok: true, message: oneLine(message) });
@@ -126,7 +127,9 @@ async function read(ctx, who, entry) {
   const reading = carryOver(fresh, entry.reading, now);
   e.reading = reading;
   e.serverFailures = 0; // Kindroid answered
-  const line = `${who.name}: ${[reading.location, reading.doing, reading.outfit, reading.hair, shownMakeup(reading.makeup)].filter(Boolean).join(' ')}`;
+  const look = settings.tellLook ? await tellLook(ctx, who, e, fresh, now) : { said: [] };
+  Object.assign(e, look.entry || {});
+  const line = `${who.name}: ${[reading.location, reading.doing, reading.outfit, reading.hair, shownMakeup(reading.makeup)].filter(Boolean).join(' ')}${look.said.length ? ` (Told ${who.name}: ${look.said.join(', ')}.)` : ''}`;
 
   // Sleep is read from what the Kin said just now, never from a pose kept from an earlier reading. An answer that says
   // nothing about the pose or action is not a sign of being awake: the night, if any, and its mark stay as they are.
@@ -180,6 +183,31 @@ async function wake(ctx, who, entry) {
 }
 
 // ---------------------------------------------------------------- helpers
+
+/**
+ * Tells the Kin what it is wearing now (settings.tellLook), so it stays consistent in the roleplay: one fact per field
+ * (look-outfit, look-hair, look-makeup), each replacing the last and lasting LOOK_TTL_HOURS. Only what changed, only
+ * from what the Kin said just now (lookFacts). A failure or a lack of time is not an error: the reading is kept, and
+ * what was not told is told at the next reading. Returns { told, said }.
+ */
+async function tellLook(ctx, who, entry, fresh, now) {
+  // A failure waits an hour: a Kindroid that refuses the note is not asked three times every 15 minutes.
+  if (entry.lookFailedAt && now - new Date(entry.lookFailedAt) < LOOK_RETRY_HOURS * 3600e3) return { said: [] };
+  const told = { ...(entry.told || {}) };
+  const said = [];
+  for (const f of lookFacts({ fresh, told: entry.told, now, when: describeNow(now, ctx.settings.tz) })) {
+    if (ctx.deadline - Date.now() < RESERVE_MS + TELL_TIMEOUT_MS) { ctx.log('not enough time left to tell the look: at the next reading'); break; }
+    try {
+      await ctx.kin.tell(f.fact, { kin: who.id, key: f.key, ttl: LOOK_TTL_HOURS, timeoutMs: TELL_TIMEOUT_MS });
+      told[f.field] = { mark: f.mark, at: now.toISOString() };
+      said.push(f.field);
+    } catch (err) {
+      ctx.log(`kin tell (${f.key}) failed: ${err.message}`);
+      return { entry: { told, lookFailedAt: now.toISOString(), lookError: oneLine(err.message, 300) }, said }; // the rest waits too
+    }
+  }
+  return { entry: { told, lookFailedAt: null, lookError: null }, said };
+}
 
 /**
  * Asks the Kin within the run's time budget; a fast Kindroid failure (not maintenance) is tried once more if there is

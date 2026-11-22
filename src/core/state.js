@@ -7,7 +7,7 @@
 // damaged or hand-edited file can never break the screen or the run, it only falls back to defaults.
 import { snapInterval, DEFAULT_INTERVAL_S, ERRORS_BEFORE_WARNING } from './schedule.js';
 import { safeTimeZone } from './time.js';
-import { REMEMBERED, DREAM_TTL_HOURS } from './sleep.js';
+import { REMEMBERED, DREAM_TTL_HOURS, sentenceMark } from './sleep.js';
 import { oneLine } from './text.js';
 import { NOT_DESCRIBED, APP_VERSION, BARE_FACE_SENTENCE } from './constants.js';
 
@@ -28,6 +28,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   theme: 'warm',
   tellDream: false, // tell the Kin its dream (kin tell), so it can remember it during the day: only if the person turns it on
   reachOut: false, // and let it bring the dream up by itself (kin tell --reach-out)
+  tellLook: false, // tell the Kin its outfit, hair and makeup when they change (kin tell): only if the person turns it on
   stoppedAt: null, // when Stop was last pressed: any night, dream or slowing down from before it is forgotten
 });
 
@@ -52,6 +53,7 @@ export function normalizeSettings(raw) {
     theme: Object.prototype.hasOwnProperty.call(THEMES, String(o.theme)) ? o.theme : DEFAULT_SETTINGS.theme,
     tellDream: typeof o.tellDream === 'boolean' ? o.tellDream : DEFAULT_SETTINGS.tellDream,
     reachOut: typeof o.reachOut === 'boolean' ? o.reachOut : DEFAULT_SETTINGS.reachOut,
+    tellLook: typeof o.tellLook === 'boolean' ? o.tellLook : DEFAULT_SETTINGS.tellLook,
     stoppedAt: iso(o.stoppedAt),
   };
 }
@@ -97,7 +99,37 @@ export function normalizeEntry(e = {}) {
     sleep,
     sleptOn: typeof e.sleptOn === 'string' && /^[0-9a-f]{8}$/.test(e.sleptOn) ? e.sleptOn : null,
     dream,
+    told: toldOf(e.told), // what the Kin was told of its look: a fingerprint and when, per field (never the sentence)
+    lookFailedAt: iso(e.lookFailedAt), // telling the look failed: not tried again for LOOK_RETRY_HOURS
+    lookError: str(e.lookError, 300), // why, shown on the Current look card
   };
+}
+
+// ---- telling the Kin its current look (settings.tellLook)
+/** How long a told look lasts in the Kin (kin tell --ttl): a look older than that is no longer true anyway. */
+export const LOOK_TTL_HOURS = 12;
+/** After a failed kin tell (Kindroid down, or the note refused), the look is not told again for this long. */
+export const LOOK_RETRY_HOURS = 1;
+const LOOK_FIELDS = ['outfit', 'hair', 'makeup'];
+const LOOK_FACT_MAX = 300;
+const toldOf = (o) => Object.fromEntries(LOOK_FIELDS.filter((k) => o && o[k] && /^[0-9a-f]{8}$/.test(o[k].mark) && iso(o[k].at)).map((k) => [k, { mark: o[k].mark, at: iso(o[k].at) }]));
+
+/**
+ * What to tell the Kin of its look after a reading: [{ field, key, fact, mark }]. Only what the Kin said just now
+ * (`fresh`, never a sentence kept from an earlier reading: an old or wrong sentence must not become the Kin's truth),
+ * and only when it changed since it was last told, or that telling is about to expire. `when` is the person's clock.
+ */
+export function lookFacts({ fresh, told, now, when }) {
+  const out = [];
+  for (const field of LOOK_FIELDS) {
+    const v = fresh && fresh[field];
+    if (!said(field, v)) continue;
+    const mark = sentenceMark(v);
+    const last = told && told[field];
+    if (last && last.mark === mark && now - new Date(last.at) < (LOOK_TTL_HOURS - 1) * 3600e3) continue;
+    out.push({ field, key: `look-${field}`, fact: oneLine(`Your ${field} right now (${when}): ${v[0].toLowerCase()}${v.slice(1)}`, LOOK_FACT_MAX), mark });
+  }
+  return out;
 }
 
 /** status.json (text or object) -> { v, kins: { id: entry } }. */
@@ -118,7 +150,7 @@ export function normalizeStatus(raw) {
  */
 export function afterStop(entry, settings) {
   if (!entry || !settings.stoppedAt || (entry.lastRunAt && entry.lastRunAt > settings.stoppedAt)) return entry;
-  return { ...entry, sleep: null, sleptOn: null, dream: null, retryAt: null, failures: 0, serverFailures: 0, errorKind: null, error: null, note: null };
+  return { ...entry, sleep: null, sleptOn: null, dream: null, retryAt: null, failures: 0, serverFailures: 0, errorKind: null, error: null, note: null, told: {}, lookFailedAt: null, lookError: null };
 }
 
 /**

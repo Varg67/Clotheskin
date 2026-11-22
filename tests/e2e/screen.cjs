@@ -353,6 +353,24 @@ const step = async (name, fn) => {
     await t.ctx.close();
   });
 
+  await step('Current look: off and in plain sight; ticking it saves the choice; a refused note is said, with when it is tried again', async () => {
+    const t = await open({ kins: [{ id: 'kin-isa', name: 'Isa' }] });
+    await t.key('update').waitFor();
+    assert.equal(await t.key('tell-look').isVisible(), true, 'not inside Settings');
+    assert.equal(await t.key('tell-look').isChecked(), false, 'off until the person turns it on');
+    await t.key('tell-look').check();
+    await t.until(async () => (await t.settings()).tellLook === true, 'tellLook saved');
+    await t.ctx.close();
+    const failedAt = '2026-11-20T21:50:00-03:00';
+    const u = await open({ kins: [{ id: 'kin-isa', name: 'Isa' }], files: {
+      'settings.json': JSON.stringify({ kinId: 'kin-isa', tellLook: true, tz: 'America/Sao_Paulo' }),
+      'status.json': JSON.stringify({ kins: { 'kin-isa': { name: 'Isa', lastRunAt: failedAt, lookFailedAt: failedAt, lookError: 'kin tell failed: not allowed' } } }),
+    } });
+    await u.until(async () => /did not take the last note/.test(await u.text('look-problem')), 'the problem is shown');
+    assert.equal(await u.text('look-problem'), 'Kindroid did not take the last note (kin tell failed: not allowed). Clotheskin tries again after 10:50 PM.');
+    await u.ctx.close();
+  });
+
   await step('no page errors or console errors', async () => { assert.deepEqual(problems, []); });
 
   await browser.close(); server.close();

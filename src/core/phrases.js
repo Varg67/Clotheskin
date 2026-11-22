@@ -1,7 +1,7 @@
 // The short phrases of a reading, cleaned and turned into the card's sentences: where the Kin is, its pose and
 // action, its hair and makeup. A roleplay model writes them loosely ("I'm in the kitchen right now", "**sitting**",
 // "going to read later"), so the usual slips are repaired here, and plans, feelings and placeholders are not kept.
-import { cleanString, toSentence, clipWords, trimEndPunctuation, stripWrapping, joinNatural } from './text.js';
+import { cleanString, toSentence, clipWords, trimEndPunctuation, stripWrapping, joinNatural, nothingSaid, NOT_STATED_OR_UNSURE } from './text.js';
 
 // ---- shared first step
 const CLOTHES_CLAUSE = /\s*[,;–—-]?\s*\b(wearing|dressed)\b.*$/i; // "…, wearing a robe"
@@ -25,7 +25,10 @@ const PT_PREP = 'em|na|no|nas|nos|numa|num|ao|à|aos|às|pra|para|de|da|do|das|d
 const STARTS_PLACE = new RegExp(`^(${EN_PREP}|${MOTION}|on the way)\\b`, 'i');
 const STARTS_PORTUGUESE = new RegExp(`^(${PT_PREP})(?=\\s|$)`, 'i'); // \b is unreliable with accents
 const IS_MOTION = new RegExp(`^(${MOTION})$`, 'i');
-const NO_PLACE = /^(unknown|unspecified|undefined|null|none|nothing|nowhere|somewhere( else)?|elsewhere|unclear|unsure|no (specific |particular )?(place|location)|not (mentioned|specified|stated|known|visible|described|sure|clear)|n\/?a|-+|\?+)$/i;
+const NO_PLACE = nothingSaid({
+  extra: ['nowhere', 'somewhere( else)?', 'elsewhere', 'unclear', 'unsure', 'no (specific |particular )?(place|location)'],
+  notWords: NOT_STATED_OR_UNSURE,
+});
 const MAX_LOCATION = 120;
 
 /**
@@ -71,16 +74,25 @@ export function describeLocation(value) {
 }
 
 // ---- pose and action
-const NO_VALUE = /^(unknown|unspecified|undefined|null|none|nothing|not (mentioned|specified|stated|known|visible|described|sure|clear)|n\/?a|-+|\?+)$/i;
+const NO_VALUE = nothingSaid({ notWords: NOT_STATED_OR_UNSURE });
 const NO_ACTION = /^(nothing( in particular| special)?|doing nothing|idle|no (specific |particular )?(action|activity))$/i;
 const PLAN_OR_PAST = /^(will|would|about to|planning to|plans? to|wants? to|wanted to|hoping to|used to|finished|stopped|was|were|had|just (finished|stopped))\b/i;
 // "going to the store" is movement in progress; "going to read" is a plan. Future time words are plans too.
-const GOING_TO_VERB = /^going to (read|eat|drink|sleep|take|make|cook|watch|play|call|write|study|have|get|buy|try|go|do|see|meet|visit|clean|wash|work|start|check|lie|sit|relax|rest|shower|bathe|leave|head|text|ask|tell|order)\b/i;
+const PLANNED_VERBS = [
+  'read', 'eat', 'drink', 'sleep', 'take', 'make', 'cook', 'watch', 'play', 'call', 'write', 'study', 'have', 'get', 'buy', 'try',
+  'go', 'do', 'see', 'meet', 'visit', 'clean', 'wash', 'work', 'start', 'check', 'lie', 'sit', 'relax', 'rest', 'shower', 'bathe',
+  'leave', 'head', 'text', 'ask', 'tell', 'order',
+];
+const GOING_TO_VERB = new RegExp(`^going to (${PLANNED_VERBS.join('|')})\\b`, 'i');
 const FUTURE_WORD = /\b(later|tomorrow|soon|tonight|afterwards|next (week|time)|in a (bit|moment|while)|in \d+ (minutes?|hours?))\b/i;
 const FEELING = /^(feeling|being|seeming)\b/i; // a state of mind is not an action
 const SUBJECT = /^((currently|right now|now|just)\s+)?((i|she|he|they|we)\s+(am|is|are)|i['’]m|she['’]s|he['’]s|they['’]re|am|is|are)\s+((currently|right now|now|just)\s+)?/i;
 const PLACE_ONLY_START = /^(in|at|inside|outside|near|nearby)\b/i;
-const POSTURE_WORD = /\b(sitting|seated|standing|lying|laying|leaning|kneeling|crouching|squatting|reclining|resting|lounging|walking|sleeping|slouching|perched|curled|stretched)\b/i;
+const POSTURES = [
+  'sitting', 'seated', 'standing', 'lying', 'laying', 'leaning', 'kneeling', 'crouching', 'squatting', 'reclining', 'resting',
+  'lounging', 'walking', 'sleeping', 'slouching', 'perched', 'curled', 'stretched',
+];
+const POSTURE_WORD = new RegExp(`\\b(${POSTURES.join('|')})\\b`, 'i');
 const MAX_DOING = 80;
 
 /** A "pose" that is really a place ("in the kitchen") and names no posture. */

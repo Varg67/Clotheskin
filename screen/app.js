@@ -788,7 +788,23 @@ function joinNatural(list) {
 
 /** What went wrong, as text, whatever was thrown (an Error, a string, anything): never "undefined". */
 const errorMessage = (e) => (e instanceof Error ? e.message : String(e));
-return { capitalizeFirst, cleanString, oneLine, toSentence, clipWords, trimEndPunctuation, stripWrapping, joinNatural, errorMessage };
+
+// What a model writes when it has nothing to say: "unknown", "none", "n/a", "---", "???", "not mentioned".
+const NOTHING = ['unknown', 'unspecified', 'undefined', 'null', 'none', 'nothing', 'n\\/?a', '-+', '\\?+'];
+const NOT_STATED = ['mentioned', 'specified', 'stated', 'known', 'visible', 'described'];
+
+/**
+ * A regular expression for a whole value that says nothing: the words above, "not <one of notWords>", and the
+ * `extra` alternatives (regular-expression source). Case is ignored.
+ * @param {{ extra?: string[], notWords?: string[] }} [words]
+ */
+function nothingSaid({ extra = [], notWords = NOT_STATED } = {}) {
+  return new RegExp(`^(${[...NOTHING, ...extra, `not (${notWords.join('|')})`].join('|')})$`, 'i');
+}
+
+/** Also "not sure" and "not clear": a value that hesitates says nothing either. */
+const NOT_STATED_OR_UNSURE = [...NOT_STATED, 'sure', 'clear'];
+return { capitalizeFirst, cleanString, oneLine, toSentence, clipWords, trimEndPunctuation, stripWrapping, joinNatural, errorMessage, nothingSaid, NOT_STATED_OR_UNSURE };
 });
 
 __def("src/core/time.js", function () {

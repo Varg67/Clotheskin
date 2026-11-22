@@ -3,7 +3,7 @@
 // Nothing here is saved: every reading stands on its own.
 import { ACCESSORY_SLOTS, BAG_SLOT } from './constants.js';
 import { readingFieldOf, normalizeSlot, looseGroupOf, isPortugueseKey } from './vocabulary.js';
-import { cleanString, capitalizeFirst, joinNatural } from './text.js';
+import { cleanString, capitalizeFirst, joinNatural, nothingSaid } from './text.js';
 import { cleanLocation, describeLocation, cleanPose, cleanAction, describeDoing, isPlaceNotPose, cleanHair, cleanMakeup, describeHair, describeMakeup } from './phrases.js';
 import { parseJsonObject } from './json.js';
 import { looksCopiedFromExample } from './prompt.js';
@@ -14,7 +14,7 @@ const CLOTHING_ORDER = ['headwear', 'topwear', 'bottomwear', 'footwear', 'footun
 const UNDERWEAR_ORDER = ['topunderwear', 'bottomunderwear'];
 const ACCESSORY_ORDER = [...ACCESSORY_SLOTS, BAG_SLOT, 'accessories'];
 
-const PLACEHOLDER = /^(unknown|unspecified|undefined|null|none|nothing|no\s.*|not (mentioned|specified|stated|known|visible|described)|n\/?a|-+|\?+)$/i;
+const PLACEHOLDER = nothingSaid({ extra: ['no\\s.*'] }); // "no shoes" is not a piece either
 const MAX_PER_SLOT = 8;
 const MAX_LEN = 80;
 
@@ -89,7 +89,14 @@ function openWrapper(doc) {
 
 // ---- English only: the Kin is asked to answer in English (fewer tokens, and the sentences are English). Portuguese
 // keys and values are still read, but they are reported so the diagnostics show whether the Kin follows the rule.
-const PT_WORDS = 'uma|um|umas|uns|com|na|nas|nos|da|das|dos|em|sem|meu|minha|seu|sua|estou|está|esta|sentada|sentado|deitada|deitado|vestindo|usando|calça|calca|camisa|camiseta|vestido|saia|jaqueta|casaco|tênis|sapato|sapatos|bota|botas|meia|meias|bolsa|mochila|óculos|colar|brinco|brincos|cabelo|preso|presa|solto|solta|batom|maquiagem|rímel|sala|quarto|cozinha|banheiro|casa|cama|sofá|tomando|lendo|bebendo|olhando|conversando|cozinhando';
+const PT_WORDS = [
+  'uma', 'um', 'umas', 'uns', 'com', 'na', 'nas', 'nos', 'da', 'das', 'dos', 'em', 'sem', 'meu', 'minha', 'seu',
+  'sua', 'estou', 'está', 'esta', 'sentada', 'sentado', 'deitada', 'deitado', 'vestindo', 'usando', 'calça', 'calca',
+  'camisa', 'camiseta', 'vestido', 'saia', 'jaqueta', 'casaco', 'tênis', 'sapato', 'sapatos', 'bota', 'botas',
+  'meia', 'meias', 'bolsa', 'mochila', 'óculos', 'colar', 'brinco', 'brincos', 'cabelo', 'preso', 'presa', 'solto',
+  'solta', 'batom', 'maquiagem', 'rímel', 'sala', 'quarto', 'cozinha', 'banheiro', 'casa', 'cama', 'sofá', 'tomando',
+  'lendo', 'bebendo', 'olhando', 'conversando', 'cozinhando',
+].join('|');
 const PT_WORD = new RegExp(`(?<![\\p{L}.])(${PT_WORDS})(?![\\p{L}])`, 'iu');
 // ã or õ inside a lowercase word ("algodão", "botões"); a capitalised name ("São Paulo") is a place, not a slip.
 // ç alone is not enough: English has "façade". Portuguese words with ç ("calça") are in the list above.

@@ -18,8 +18,8 @@ test('the prompt demands English-only, concise, one-line JSON and pins down the 
   assert.match(p, /never guess/);
   assert.match(p, /if the recent chat does not say it, leave that key out, and \{\} is a correct answer/);
   assert.match(p, /report where you are, your pose, what you are doing, what you are wearing, and your hair and makeup/);
-  assert.match(p, /"location": the place only, starting with in, at or on/);
-  assert.match(p, /not your posture or activity/);
+  assert.match(p, /"location": the place only, at most 8 words, starting with in, at or on/);
+  assert.match(p, /not your posture, activity or who is with you/);
   assert.match(p, /planning to go is not/);
   assert.match(p, /Not from your memories, journal, backstory or earlier days/);
   assert.match(p, /a place you have left is no longer where you are/);

@@ -134,8 +134,17 @@ const PT_PREP = 'em|na|no|nas|nos|numa|num|ao|à|aos|às|pra|para|de|da|do|das|d
 const STARTS_PLACE = new RegExp(`^(${EN_PREP}|${MOTION}|on the way)\\b`, 'i');
 const STARTS_PORTUGUESE = new RegExp(`^(${PT_PREP})(?=\\s|$)`, 'i'); // \b is unreliable with accents
 const IS_MOTION = new RegExp(`^(${MOTION})$`, 'i');
-const NO_PLACE = /^(unknown|unspecified|undefined|null|none|nothing|nowhere|somewhere( else)?|elsewhere|unclear|unsure|no (specific |particular )?(place|location)|not (mentioned|specified|stated|known|visible|described|sure|clear)|n\/?a|-+|\?+)$/i;
-const MAX_LOCATION = 120;
+const NO_PLACE = /^(unknown|unspecified|undefined|null|none|nothing|nowhere|somewhere( else)?|elsewhere|unclear|unsure|unchanged|(the )?same|no (specific |particular )?(place|location)|not (mentioned|specified|stated|known|visible|described|sure|clear)|n\/?a|-+|\?+)$/i;
+// "Not specified in the chat", "unknown location", "the chat does not say", "same place as before": no new place.
+// (With nothing new, the card keeps the last known place: such a sentence must never replace it.)
+const NO_PLACE_START = /^(unknown|unspecified|unclear|not (mentioned|specified|stated|known|described|clear|given|said)|no (specific |particular |clear )?(place|location|info)|the (recent )?(chat|conversation) (does not|doesn['’]t|did not|didn['’]t)|(the )?same (place|location|room|spot)|still the same|as before)\b/i;
+const MAX_LOCATION = 80;
+const ING_PLACE = new Set(['building', 'wedding', 'meeting', 'landing', 'crossing', 'parking', 'clearing', 'gathering', 'evening', 'morning']);
+const PLACE_COMPOUND = /^(room|rooms|area|hall|lot|garage|pool|mall|centre|center|alley|lane|rink|deck|booth|station)\b/i;
+// A label the Kin wrote into the value: "Location: in the kitchen".
+const LABEL = /^(current\s+)?(location|place|where)\s*[:\-–—]\s*/i;
+// Who is there is not the place: "in the kitchen with Ari and Marina" -> "in the kitchen" ("a room with a view" stays).
+const COMPANY = /\s+(together\s+)?with\s+(you|me|him|her|them|us|[A-Z][\w'’-]*|(my|his|her|their|our|your)\s+\w+|the person|friends|family)\b.*$/;
 
 /**
  * Cleans the Kin's location. Returns a string, null (nothing stated) or undefined (wrong type).
@@ -146,24 +155,38 @@ const MAX_LOCATION = 120;
 export function cleanLocation(v) {
   let s = rawText(v, 400);
   if (s === null || s === undefined) return s;
+  s = s.replace(LABEL, '');
+  // "in the kitchen (cooking)": an activity in brackets goes; any other bracket becomes a comma clause.
+  s = s.replace(/\s*\(([^()]*)\)?/g, (m, inner) => (/^\s*[a-z]+ing\b/.test(inner) || !inner.trim() ? '' : `, ${inner.trim()}`));
+  // "Bia is in the kitchen": a roleplay answer in the third person, with the Kin's own name.
+  s = s.replace(new RegExp(`^(?:[A-Z][\\w'’-]*\\s+){1,2}(?:is|was)\\s+(?=(${EN_PREP}|${MOTION}|on the way)\\b)`, 'i'), '');
   // "I'm in the kitchen right now", "She is at the hospital": the subject and the time words go.
   s = s.replace(/^((currently|right now|still|now)\s+)?((i|she|he|they|we)\s+(am|is|are|['’]?m)|i['’]m|she['’]s|he['’]s|they['’]re|we['’]re)\s+((currently|still|now|just)\s+)?/i, '')
     .replace(/^(currently|right now|still|now)\s+(?=(in|at|on|inside|outside|near)\b)/i, '')
     .replace(/[\s,]+(right now|at the moment|currently|now|still)$/i, '');
   s = s.replace(CLOTHES_CLAUSE, '')                                          // clothes do not belong here
-    .replace(/\s*[,;]\s*[A-Za-z]+ing\b.*$/i, '')                           // ", cooking dinner"
-    .replace(/\s+(while|as|and)\s+[A-Za-z]+ing\b.*$/i, '')                 // "while reading"
+    .replace(/\s*[,;]\s*[a-z]+ing\b.*$/, '')                               // ", cooking dinner" (not ", Spring Street")
+    .replace(/\s+(while|as|and)\s+[a-z]+ing\b.*$/i, '')                    // "while reading"
+    .replace(COMPANY, '')                                                     // "with Ari and Marina"
     .replace(/[.;,!?\s]+$/, '');
   // A lowercase posture or activity first ("sitting on the sofa", "cooking in the kitchen") is dropped when a place follows.
   const lead = s.match(/^([a-z]+ing|seated|perched|sat|stood|lay)(?:\s+(.*))?$/);
-  if (lead && !IS_MOTION.test(lead[1])) {
+  // …but "living room", "waiting room", "parking lot" and "a building" are places, not a posture with a place after it.
+  const placeNoun = lead && (ING_PLACE.has(lead[1]) || PLACE_COMPOUND.test(lead[2] || ''));
+  if (lead && !placeNoun && !IS_MOTION.test(lead[1])) {
     const rest = (lead[2] || '').trim();
     if (STARTS_PLACE.test(rest) || STARTS_PORTUGUESE.test(rest)) s = rest;
     else return null; // a posture with no place in it
   }
-  if (!s || NO_PLACE.test(s)) return null;
+  if (!s || NO_PLACE.test(s) || NO_PLACE_START.test(s)) return null;
   return clipWords(s, MAX_LOCATION);
 }
+
+// Common places written bare ("kitchen", "Living room"): they get "in the". A few get "at" ("at home", "at work").
+const COMMON_PLACE = new Set(['kitchen', 'kitchenette', 'bedroom', 'bathroom', 'living', 'dining', 'lounge', 'hallway', 'hall', 'garden', 'backyard', 'yard', 'garage', 'office', 'study', 'library', 'classroom', 'car', 'bus', 'train', 'park', 'cafe', 'café', 'restaurant', 'bar', 'pub', 'shop', 'store', 'mall', 'gym', 'pool', 'beach', 'street', 'balcony', 'attic', 'basement', 'cellar', 'porch', 'room', 'shower', 'bath', 'bathtub', 'studio', 'apartment', 'flat', 'house', 'hotel', 'hospital', 'station', 'airport', 'supermarket', 'market', 'club', 'theater', 'theatre', 'cinema', 'laundry', 'closet', 'terrace', 'rooftop', 'patio', 'lobby', 'elevator', 'stairs', 'staircase', 'guest', 'master', 'spare', 'kids', 'nursery', 'dressing', 'waiting', 'break', 'meeting', 'locker', 'changing', 'tv', 'family', 'sitting', 'front', 'back', 'parking', 'swimming', 'shopping', 'bowling', 'building']);
+const AT_PLACE = new Set(['home', 'work', 'school', 'college', 'university', 'uni', 'church', 'the office']);
+// Portuguese place words, shown as written (the question asks for English; this only keeps "Cozinha" from "in Cozinha").
+const PT_PLACE = new Set(['cozinha', 'sala', 'quarto', 'banheiro', 'varanda', 'jardim', 'escritório', 'carro', 'casa', 'garagem', 'quintal', 'corredor']);
 
 /**
  * "in the kitchen" -> "In the kitchen." Only a bare noun phrase is adjusted: articles and proper names get "in",
@@ -171,10 +194,15 @@ export function cleanLocation(v) {
  */
 export function describeLocation(value) {
   if (!value) return NOT_DESCRIBED.location;
-  const v = value.trim();
+  let v = value.trim();
+  const first = v.split(/[\s,]+/)[0].toLowerCase();
+  // "Kitchen" and "Living room" are common nouns written with a capital, not names: "in the kitchen", not "in Kitchen".
+  if (COMMON_PLACE.has(first) || PT_PLACE.has(first)) v = v[0].toLowerCase() + v.slice(1);
   let phrase = v;
-  if (STARTS_PLACE.test(v) || STARTS_PORTUGUESE.test(v)) phrase = v;
-  else if (/^home$/i.test(v)) phrase = 'at home';
+  if (STARTS_PLACE.test(v) || STARTS_PORTUGUESE.test(v) || PT_PLACE.has(first)) phrase = v;
+  else if (AT_PLACE.has(v.toLowerCase())) phrase = `at ${v}`;
+  else if (/^bed$/i.test(v)) phrase = 'in bed';
+  else if (COMMON_PLACE.has(first)) phrase = `in the ${v}`;
   else if (/^(the|a|an|my|our|his|her|their|your)\b/i.test(v) || /^[A-Z]/.test(v)) phrase = `in ${v}`;
   return capitalizeFirst(phrase.endsWith('…') ? phrase : `${phrase}.`);
 }

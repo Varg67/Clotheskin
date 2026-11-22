@@ -14,7 +14,7 @@ English only: every key and value in English, whatever language the chat is in; 
 Task: you are {{name}}. From your recent chat with the person, report where you are, your pose, what you are doing, what you are wearing, and your hair and makeup, as of your last message.
 Only what the recent chat states; never guess or invent: if the recent chat does not say it, leave that key out, and {} is a correct answer. Not from your memories, journal, backstory or earlier days, unless the recent chat says it is still so. Apply later changes: something taken off is no longer worn, a place you have left is no longer where you are, a finished action is no longer what you are doing. Ignore plans, wishes and hypothetical outfits. Describe only yourself.
 Format: minified JSON only, on one line; no code fence or comment.
-"location": the place only, starting with in, at or on ("in the kitchen", "on the bus to college"); not your posture or activity. Travelling is a place ("on the way to the hospital"); planning to go is not.
+"location": the place only, at most 8 words, starting with in, at or on ("in the kitchen", "on the bus to college"); not your posture, activity or who is with you. Travelling is a place ("on the way to the hospital"); planning to go is not.
 "pose": your body position ("sitting on the sofa"); it may name the furniture, "location" is the room or place.
 "action": what you are doing now, a short -ing phrase of at most 5 words ("drinking coffee", "talking with Ari"); not what you say or what others do, not plans, finished things or feelings.
 "hair": e.g. "long black hair in a ponytail". "makeup": e.g. "red lipstick and eyeliner"; "no makeup" only if the chat says so.

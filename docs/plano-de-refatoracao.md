@@ -204,7 +204,16 @@ Resultado: os 6 itens abaixo feitos; `npm run check` com `unused-exports` e regr
 5. Decidir `KinError`: passar a usá-la (`instanceof` em `kin.get` para o 404) ou removê-la.
 6. Regra de lint `no-unused-vars` como `error` a partir daqui; um script `npm run unused-exports` (o mesmo levantamento deste plano, ~20 linhas) roda no `check`.
 
-### Fase 3 — DRY
+### Fase 3 — DRY — **feita**
+
+Resultado: as 11 repetições resolvidas em 7 commits, sem mudar nenhuma frase do app (o roteiro gerado do Kin real ficou idêntico, e os prompts foram conferidos byte a byte). 167 testes verdes, desempenho 10/10, e2e 17/17, lint e tipos sem erros. A lista de arquivos que vão para o Kindroid passou de 22 para **23** (`src/core/vocabulary.js`, o primeiro dos ~3 módulos da opção (a) do §4.4). O que saiu diferente ou a mais:
+- **D1:** a tabela única foi conferida contra as listas antigas antes da troca (as mesmas 37 chaves em português e os mesmos 44 sinônimos de slot). As buscas usam `Map`, então nomes embutidos como `constructor` continuam sem significado.
+- **D2:** `toSentence` adota a regra mais completa (não põe ponto depois de `.`, `!`, `?` ou `…`). Os valores que chegam até ela já vêm sem pontuação final, então o resultado é o mesmo.
+- **D6:** com `cleanString`, o nome do Kin no prompt também perde caracteres invisíveis e nunca corta um emoji ao meio.
+- **D8:** além de unificar, achou um custo escondido: `zonedParts` validava o fuso criando um `Intl.DateTimeFormat` novo a cada chamada. Com o cache, `zonedParts` foi de 57 para 9 µs e `nextWallTime` de 518 para 55 µs; o orçamento de desempenho foi apertado de 8 s para 2 s, para proteger o ganho. Em troca, a formatação de datas da tela custa ~4 µs a mais por data.
+- **D9:** as constantes se chamam `ERROR` (em `schedule.js`) e `AUTO` (em `state.js`). `ERROR.TIME` está documentado como "nunca gravado".
+- **D10:** `scripts/lib/generated.mjs` também traz `isMainModule`, usado pelos quatro scripts.
+- **Achado no caminho:** a ferramenta de escrita gravou o intervalo `̀-ͯ` como caracteres combinantes literais (invisíveis). Foi corrigido para o escape, e uma varredura confirmou que não há outros no código. O único que resta é proposital, num teste de fuzz.
 
 | Ação | Resolve |
 | --- | --- |
@@ -247,7 +256,7 @@ Os nomes de arquivo respeitam o bundler (imports nomeados relativos). Os testes 
 - `announcer.js`: as duas regiões `aria-live`.
 - `app.js` só monta, assina o canal e agenda o polling; devolve `{ render, update, dispose }`.
 
-**4.4 Arquivos que vão para o Kindroid (§2.2).** A tela é empacotada num arquivo só, então dividir `src/screen/` não muda nada na instalação. Já cada módulo novo em `src/core/` é **um arquivo a mais para o agente copiar**: a divisão de `outfit.js` em 7 arquivos levaria a lista de 22 para 28. Duas saídas (decisão 5 no §6):
+**4.4 Arquivos que vão para o Kindroid (§2.2).** A tela é empacotada num arquivo só, então dividir `src/screen/` não muda nada na instalação. Já cada módulo novo em `src/core/` é **um arquivo a mais para o agente copiar**: a divisão de `outfit.js` em 7 arquivos levaria a lista de 22 para 28. (Depois da Fase 3, a lista tem 23: `vocabulary.js` já é o primeiro módulo da opção (a).) Duas saídas (decisão 5 no §6):
 - (a) dividir `src/core/` com moderação (`outfit.js` → 3 arquivos: vocabulário, limpeza das frases, leitura), mantendo a lista em ~24;
 - (b) empacotar também o run num arquivo gerado, como já é feito com a tela, e enviar só ele, o que deixa a lista em ~12 arquivos fixos, seja qual for a estrutura interna. Custa um gerador a mais e deixa o código do run publicado como gerado (legível, como `screen/app.js`).
 

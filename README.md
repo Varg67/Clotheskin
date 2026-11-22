@@ -98,7 +98,7 @@ npm run try -- action    # the screen's Update status
 | `main.js` | the run's entry: stdin → program → always exactly one `kin end` |
 | `run/kin.js` | the `kin` command as functions: UTF-8 output read whole, stdin closed, timeouts, a missing file (404) told apart from a failure |
 | `run/program.js` | the engine: schedule and action, reading, sleep, dream, errors (no Node imports: it also runs in the harness) |
-| `src/core/` | shared logic: reading the Kin's answers (`outfit.js`), prompts, sleep, schedule, time zones, the two files (`state.js`) |
+| `src/core/` | shared logic: reading the Kin's answers (`outfit.js`, with every key it understands in `vocabulary.js`), prompts, sleep, schedule, time zones, the two files (`state.js`), text helpers (`text.js`) |
 | `src/screen/` | the screen's sources: channel to the page, app, DOM helpers, icons |
 | `screen/` | what Kindroid serves: `index.html`, `app.js` (**generated**: one classic script from `src/`, no modules, checked for features newer than Safari 14.1), `styles.css`, `theme.css` |
 | `sample/` | sample `settings.json` and `status.json` for the App Library card's picture |

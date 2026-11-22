@@ -134,13 +134,14 @@ export const SCENARIOS = [
 /** The card for a scene, as the run stores it: hair and makeup only when the Kin described them. */
 export function expected(scenario) {
   const p = parseReading(scenario.answer);
-  if (!p.ok) throw new Error(`${scenario.id}: ${p.error}`);
+  if (p.ok === false) throw new Error(`${scenario.id}: ${p.error}`);
   const d = describeReading(p);
   return { ...d, hair: p.hair ? d.hair : null, makeup: p.makeup ? d.makeup : null };
 }
 
 /** What the card says when the Kin answers in character, computed from the code (run/program.js adds the last part). */
-export const IN_CHARACTER_ERROR = `${parseReading('*giggles* Not today!').error} Nothing was changed.`;
+const inCharacter = parseReading('*giggles* Not today!');
+export const IN_CHARACTER_ERROR = `${inCharacter.ok === false ? inCharacter.error : ''} Nothing was changed.`;
 export const SHORTEST_INTERVAL = formatInterval(INTERVAL_STEPS[0]);
 
 // ---------------------------------------------------------------------------------------------------------------

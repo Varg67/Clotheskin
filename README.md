@@ -67,7 +67,7 @@ paid for, every 15 minutes.
 
 ```bash
 npm run tools        # once: installs ESLint and TypeScript into tools/ (development only)
-npm run check        # lint, unit tests with coverage limits, performance budgets, generated files up to date
+npm run check        # lint, type check, unit tests with coverage limits, performance budgets, generated files
 npm run typecheck    # tsc on the JavaScript (JSDoc types)
 npm run test:perf    # performance budgets alone (tests/perf/)
 ```

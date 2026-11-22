@@ -1,3 +1,8 @@
+/**
+ * @typedef {{ ok: false, error: string }} Failure  what every reading of an answer returns when it cannot be used
+ * @typedef {{ ok: true, value: any, repaired?: boolean }} Parsed
+ */
+
 /** The longest answer that is searched and repaired; a longer one is read only if it is strict JSON. */
 export const MAX_ANSWER_CHARS = 20000;
 
@@ -8,6 +13,7 @@ export const MAX_ANSWER_CHARS = 20000;
  * 'single quotes', bare keys, Python's True/False/None, an object sent as a JSON string). A cut-off answer is an
  * error, never completed by guessing.
  */
+/** @returns {Parsed | Failure} */
 export function parseJsonObject(text) {
   const raw = String(text ?? '').trim();
   if (!raw) return { ok: false, error: 'The answer is empty.' };
@@ -40,7 +46,10 @@ export function parseJsonObject(text) {
   return { ok: false, error: 'The answer is not valid JSON.' };
 }
 
-/** An object sent as a JSON string ("{\"location\":…}") is read as the object. */
+/**
+ * An object sent as a JSON string ("{\"location\":…}") is read as the object.
+ * @returns {Parsed}
+ */
 function unwrap(value, repaired) {
   if (typeof value === 'string' && /^\s*\{/.test(value)) {
     try { return { ok: true, value: JSON.parse(value), repaired: true }; } catch { /* keep the string */ }

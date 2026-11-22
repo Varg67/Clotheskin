@@ -68,6 +68,11 @@ return { formatClock, formatRelative, formatWhen };
 });
 
 __def("src/core/json.js", function () {
+/**
+ * @typedef {{ ok: false, error: string }} Failure  what every reading of an answer returns when it cannot be used
+ * @typedef {{ ok: true, value: any, repaired?: boolean }} Parsed
+ */
+
 /** The longest answer that is searched and repaired; a longer one is read only if it is strict JSON. */
 const MAX_ANSWER_CHARS = 20000;
 
@@ -78,6 +83,7 @@ const MAX_ANSWER_CHARS = 20000;
  * 'single quotes', bare keys, Python's True/False/None, an object sent as a JSON string). A cut-off answer is an
  * error, never completed by guessing.
  */
+/** @returns {Parsed | Failure} */
 function parseJsonObject(text) {
   const raw = String(text ?? '').trim();
   if (!raw) return { ok: false, error: 'The answer is empty.' };
@@ -110,7 +116,10 @@ function parseJsonObject(text) {
   return { ok: false, error: 'The answer is not valid JSON.' };
 }
 
-/** An object sent as a JSON string ("{\"location\":…}") is read as the object. */
+/**
+ * An object sent as a JSON string ("{\"location\":…}") is read as the object.
+ * @returns {Parsed}
+ */
 function unwrap(value, repaired) {
   if (typeof value === 'string' && /^\s*\{/.test(value)) {
     try { return { ok: true, value: JSON.parse(value), repaired: true }; } catch { /* keep the string */ }
@@ -258,6 +267,7 @@ __def("src/core/sleep.js", function () {
 const { cleanString } = __req("src/core/text.js");
 const { parseJsonObject } = __req("src/core/json.js");
 const { nextWallTime } = __req("src/core/time.js");
+/** @import { Failure } from './json.js' */
 
 const WAKE_LEAD_S = 600; // the dream question is due this long before the wake-up time
 const MIN_SLEEP_S = 15 * 60; // waking up sooner than this: no hibernation, the readings just go on
@@ -319,9 +329,10 @@ const falsy = (v) => v === false || /^(false|no|n|awake|not sleeping)$/i.test(St
  * The answer to the sleep question: {"sleeping":true,"wake_at":"07:30"} or {"sleeping":false}.
  * Returns { ok, sleeping, wakeAt } or { ok: false, error }. A sleeping Kin without a usable time is an error.
  */
+/** @returns {{ ok: true, sleeping: boolean, wakeAt: string|null } | Failure} */
 function parseSleepAnswer(text) {
   const p = parseJsonObject(text);
-  if (!p.ok) return p;
+  if (p.ok === false) return p;
   const o = p.value;
   if (!o || typeof o !== 'object' || Array.isArray(o)) return { ok: false, error: 'The answer must be a JSON object.' };
   const key = Object.keys(o).find((k) => /^(sleeping|asleep|is_?sleeping)$/i.test(k));
@@ -338,10 +349,13 @@ const REMEMBERED = ['all', 'most', 'some', 'little', 'nothing'];
 const REMEMBERED_TEXT = { all: 'Remembers all of it.', most: 'Remembers most of it.', some: 'Remembers some of it.', little: 'Remembers little of it.', nothing: 'Remembers nothing of it.' };
 const NO_DREAM = /^(none|nothing|no dream|n\/?a|unknown|-+)?$/i;
 
+/** @typedef {{ ok?: true, dream: string|null, remembered: string }} Dream */
+
 /** The answer to the dream question: {"dream":"…","remembered":"all|most|some|little|nothing"}. */
+/** @returns {Dream | Failure} */
 function parseDreamAnswer(text) {
   const p = parseJsonObject(text);
-  if (!p.ok) return p;
+  if (p.ok === false) return p;
   const o = p.value;
   if (!o || typeof o !== 'object' || Array.isArray(o)) return { ok: false, error: 'The answer must be a JSON object.' };
   const dream = o.dream ?? o.summary ?? '';
@@ -354,6 +368,7 @@ function parseDreamAnswer(text) {
 }
 
 /** The dream as shown on the card: "Flying over the sea with my sister. Remembers most of it." */
+/** @param {Partial<Dream>} [d] */
 function describeDream({ dream, remembered } = {}) {
   if (!dream) return 'No dream remembered.';
   const text = /[.!?…]$/.test(dream) ? dream : `${dream}.`;
@@ -364,6 +379,7 @@ function describeDream({ dream, remembered } = {}) {
  * What the Kin is told about its dream (`kin tell --key dream`), so it can remember it in the chat during the day.
  * A plain fact, in the second person, never an instruction.
  */
+/** @param {Partial<Dream>} [d] */
 function dreamFact({ dream, remembered } = {}) {
   if (!dream) return null;
   const amount = { all: 'all', most: 'most', some: 'some', little: 'a little', nothing: 'almost nothing' }[remembered] || 'some';
@@ -1179,7 +1195,11 @@ function boot() {
     started = true;
     const hadFocus = root.contains(document.activeElement);
     await startApp({ root, channel, kins });
-    if (hadFocus) { const el = root.querySelector('[data-key="update"], [data-key^="pick-"], button'); if (el) el.focus(); }
+    if (hadFocus) {
+      /** @type {HTMLElement|null} */
+      const el = root.querySelector('[data-key="update"], [data-key^="pick-"], button');
+      if (el) el.focus();
+    }
   }
 
   /** The "Could not reach Kindroid" card: the alert is built once; later attempts only change the button and the text. */

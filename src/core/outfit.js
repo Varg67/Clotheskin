@@ -5,6 +5,7 @@ import { ACCESSORY_SLOTS, BAG_SLOT, WEAR_SLOTS } from './constants.js';
 import { cleanString, capitalizeFirst } from './text.js';
 import { parseJsonObject } from './json.js';
 import { looksCopiedFromExample } from './prompt.js';
+/** @import { Failure } from './json.js' */
 
 /** Key matching ignores case, spaces, underscores and hyphens: "Top Wear", "top_wear" and "topwear" are one key. */
 // Accents are dropped so a Kin that translates the keys ("localização", "maquiagem") still matches.
@@ -95,9 +96,10 @@ function outfitFromObject(doc, nested = false) {
   return { outfit, warnings, errors };
 }
 
+/** @returns {{ ok: true, doc: Object<string, any> } | Failure} */
 function parseObject(text) {
   const parsed = parseJsonObject(text);
-  if (!parsed.ok) return parsed;
+  if (parsed.ok === false) return parsed;
   let doc = parsed.value;
   // A Kin that wraps its one object in a list ([{...}]) is understood.
   if (Array.isArray(doc) && doc.length === 1 && doc[0] && typeof doc[0] === 'object' && !Array.isArray(doc[0])) doc = doc[0];
@@ -224,7 +226,10 @@ export function cleanAction(v) {
   return clipWords(s, MAX_DOING);
 }
 
-/** "Sitting on the sofa, drinking coffee." Pose first, then the action; an action already inside the pose is not repeated. */
+/**
+ * "Sitting on the sofa, drinking coffee." Pose first, then the action; an action already inside the pose is not repeated.
+ * @param {{ pose?: string|null, action?: string|null }} [doing]
+ */
 export function describeDoing({ pose, action } = {}) {
   const parts = [];
   if (pose) parts.push(pose);
@@ -289,10 +294,19 @@ export function notEnglishKeys(doc) {
   return Object.entries(doc).filter(([k, v]) => PT_KEYS.has(keyName(k)) || textsOf(v).some((t) => PT_TEXT.test(t))).map(([k]) => String(k).slice(0, 30)).slice(0, 8);
 }
 
-/** One parse for the whole answer: where the Kin is, how it is positioned, what it is doing and what it wears. */
+/**
+ * @typedef {Object<string, string[]>} Outfit  slot -> pieces, innermost first
+ * @typedef {{ ok: true, outfit: Outfit, location: string|null, pose: string|null, action: string|null, hair: string|null,
+ *   makeup: string|null, warnings: string[], notEnglish: string[] }} Reading
+ */
+
+/**
+ * One parse for the whole answer: where the Kin is, how it is positioned, what it is doing and what it wears.
+ * @returns {Reading | Failure}
+ */
 export function parseReading(text) {
   const p = parseObject(text);
-  if (!p.ok) return p;
+  if (p.ok === false) return p;
   const { outfit, warnings, errors } = outfitFromObject(p.doc);
   const keyOf = (test) => Object.keys(p.doc).find(test);
   const read = (test, clean, label) => {

@@ -15,6 +15,7 @@ const ENTRY = 'src/screen/main.js';
 const OUT = 'screen/app.js';
 
 // Syntax and APIs newer than Safari 14 (or not needed in a screen) are refused, with the module that uses them.
+/** @type {Array<[RegExp, string]>} */
 const REFUSED = [
   [/(^|[^\w$.'"`])#[A-Za-z_$][\w$]*\s*[(=;]|this\.#/m, 'private class members (Safari 15)'],
   [/\.at\(/, 'Array.prototype.at (Safari 15.4)'],

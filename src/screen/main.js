@@ -34,7 +34,11 @@ export function boot() {
     started = true;
     const hadFocus = root.contains(document.activeElement);
     await startApp({ root, channel, kins });
-    if (hadFocus) { const el = root.querySelector('[data-key="update"], [data-key^="pick-"], button'); if (el) el.focus(); }
+    if (hadFocus) {
+      /** @type {HTMLElement|null} */
+      const el = root.querySelector('[data-key="update"], [data-key^="pick-"], button');
+      if (el) el.focus();
+    }
   }
 
   /** The "Could not reach Kindroid" card: the alert is built once; later attempts only change the button and the text. */

@@ -106,7 +106,7 @@ async function read(ctx, who, entry) {
   if (!answer.ok && answer.kind === 'time') return postpone(ctx, { who, entry: e, now, base: entry, note: 'The reading waits for the next start of the app.' });
   if (!answer.ok) return fail(ctx, { who, entry: e, outcome: answer, now, base: entry });
   const parsed = parseReading(answer.text);
-  if (!parsed.ok) {
+  if (parsed.ok === false) {
     const outcome = { kind: 'answer', error: `${parsed.error} Nothing was changed.`, length: answer.text.length };
     return fail(ctx, { who, entry: e, outcome, now, base: entry });
   }
@@ -138,7 +138,7 @@ async function read(ctx, who, entry) {
     return fail(ctx, { who, entry: e, outcome: s, now, note, base: e });
   }
   const p = parseSleepAnswer(s.text);
-  if (!p.ok) {
+  if (p.ok === false) {
     const note = `The sleep question did not get a clear answer (${p.error}) It is asked again at the next update.`;
     return fail(ctx, { who, entry: e, outcome: { kind: 'answer', error: p.error }, now, note, base: e });
   }

@@ -53,11 +53,19 @@ export function createKin({ bin = process.env.KIN_BIN || 'kin', defaultTimeoutMs
   }
 
   return {
-    /** Asks the Kin (grant kin:read; with chat:read:<days> it sees its recent chat). Returns the answer text. */
+    /**
+     * Asks the Kin (grant kin:read; with chat:read:<days> it sees its recent chat). Returns the answer text.
+     * @param {string} prompt
+     * @param {{ kin?: string, timeoutMs?: number }} [options]
+     */
     ask(prompt, { kin, timeoutMs = 90000 } = {}) {
       return call(['ask', ...(kin ? ['--kin', kin] : []), prompt], { timeoutMs });
     },
-    /** Tells the Kin a plain fact (rarely). `ttl` in hours; `reachOut` lets the Kin bring it up by itself. */
+    /**
+     * Tells the Kin a plain fact (rarely). `ttl` in hours; `reachOut` lets the Kin bring it up by itself.
+     * @param {string} fact
+     * @param {{ kin?: string, key?: string, ttl?: number, reachOut?: boolean }} [options]
+     */
     async tell(fact, { kin, key, ttl, reachOut = false } = {}) {
       await call(['tell', ...(kin ? ['--kin', kin] : []), ...(key ? ['--key', key] : []), ...(ttl ? ['--ttl', String(ttl)] : []), ...(reachOut ? ['--reach-out', 'soon'] : []), fact]);
     },

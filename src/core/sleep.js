@@ -3,6 +3,7 @@
 import { cleanString } from './text.js';
 import { parseJsonObject } from './json.js';
 import { nextWallTime } from './time.js';
+/** @import { Failure } from './json.js' */
 
 export const WAKE_LEAD_S = 600; // the dream question is due this long before the wake-up time
 export const MIN_SLEEP_S = 15 * 60; // waking up sooner than this: no hibernation, the readings just go on
@@ -64,9 +65,10 @@ const falsy = (v) => v === false || /^(false|no|n|awake|not sleeping)$/i.test(St
  * The answer to the sleep question: {"sleeping":true,"wake_at":"07:30"} or {"sleeping":false}.
  * Returns { ok, sleeping, wakeAt } or { ok: false, error }. A sleeping Kin without a usable time is an error.
  */
+/** @returns {{ ok: true, sleeping: boolean, wakeAt: string|null } | Failure} */
 export function parseSleepAnswer(text) {
   const p = parseJsonObject(text);
-  if (!p.ok) return p;
+  if (p.ok === false) return p;
   const o = p.value;
   if (!o || typeof o !== 'object' || Array.isArray(o)) return { ok: false, error: 'The answer must be a JSON object.' };
   const key = Object.keys(o).find((k) => /^(sleeping|asleep|is_?sleeping)$/i.test(k));
@@ -83,10 +85,13 @@ export const REMEMBERED = ['all', 'most', 'some', 'little', 'nothing'];
 const REMEMBERED_TEXT = { all: 'Remembers all of it.', most: 'Remembers most of it.', some: 'Remembers some of it.', little: 'Remembers little of it.', nothing: 'Remembers nothing of it.' };
 const NO_DREAM = /^(none|nothing|no dream|n\/?a|unknown|-+)?$/i;
 
+/** @typedef {{ ok?: true, dream: string|null, remembered: string }} Dream */
+
 /** The answer to the dream question: {"dream":"…","remembered":"all|most|some|little|nothing"}. */
+/** @returns {Dream | Failure} */
 export function parseDreamAnswer(text) {
   const p = parseJsonObject(text);
-  if (!p.ok) return p;
+  if (p.ok === false) return p;
   const o = p.value;
   if (!o || typeof o !== 'object' || Array.isArray(o)) return { ok: false, error: 'The answer must be a JSON object.' };
   const dream = o.dream ?? o.summary ?? '';
@@ -99,6 +104,7 @@ export function parseDreamAnswer(text) {
 }
 
 /** The dream as shown on the card: "Flying over the sea with my sister. Remembers most of it." */
+/** @param {Partial<Dream>} [d] */
 export function describeDream({ dream, remembered } = {}) {
   if (!dream) return 'No dream remembered.';
   const text = /[.!?…]$/.test(dream) ? dream : `${dream}.`;
@@ -109,6 +115,7 @@ export function describeDream({ dream, remembered } = {}) {
  * What the Kin is told about its dream (`kin tell --key dream`), so it can remember it in the chat during the day.
  * A plain fact, in the second person, never an instruction.
  */
+/** @param {Partial<Dream>} [d] */
 export function dreamFact({ dream, remembered } = {}) {
   if (!dream) return null;
   const amount = { all: 'all', most: 'most', some: 'some', little: 'a little', nothing: 'almost nothing' }[remembered] || 'some';

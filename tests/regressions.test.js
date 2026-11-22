@@ -2,7 +2,8 @@
 // before the fix (as todo) and kept after it, so the bug cannot come back.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { runProgram, ACTION } from '../run/program.js';
+import { runProgram } from '../run/program.js';
+import { ACTION } from '../src/core/state.js';
 import { describeReading, parseReading } from '../src/core/outfit.js';
 import { isDue, startDueFor } from '../src/core/schedule.js';
 import { fakeKindroid, READING } from './support/fake-kindroid.js';

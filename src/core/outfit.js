@@ -37,9 +37,9 @@ const LOOSE_CLOTHING = new Set(['clothing', 'clothes', 'outfit', 'wearing', 'gar
 const LOOSE_ACCESSORIES = new Set(['accessories', 'accessory', 'extras', 'jewelry', 'jewellery', 'acessorios', 'acessorio', 'joias']);
 
 /** Branches in reading order: head to toe, then accessories, then bags. Underwear goes last (see describe). */
-export const CLOTHING_ORDER = ['headwear', 'topwear', 'bottomwear', 'footwear', 'footunderwear', 'clothing'];
-export const UNDERWEAR_ORDER = ['topunderwear', 'bottomunderwear'];
-export const ACCESSORY_ORDER = [...ACCESSORY_SLOTS, BAG_SLOT, 'accessories'];
+const CLOTHING_ORDER = ['headwear', 'topwear', 'bottomwear', 'footwear', 'footunderwear', 'clothing'];
+const UNDERWEAR_ORDER = ['topunderwear', 'bottomunderwear'];
+const ACCESSORY_ORDER = [...ACCESSORY_SLOTS, BAG_SLOT, 'accessories'];
 
 const PLACEHOLDER = /^(unknown|unspecified|undefined|null|none|nothing|no\s.*|not (mentioned|specified|stated|known|visible|described)|n\/?a|-+|\?+)$/i;
 const MAX_PER_SLOT = 8;
@@ -109,18 +109,6 @@ function parseObject(text) {
   if (keys.length === 1 && isPlainObject(doc[keys[0]]) && !normalizeSlot(keys[0]) && !LOOSE_CLOTHING.has(keyName(keys[0])) && !LOOSE_ACCESSORIES.has(keyName(keys[0]))
     && Object.keys(doc[keys[0]]).some((k) => isReadingKey(k) || normalizeSlot(k))) doc = doc[keys[0]];
   return { ok: true, doc };
-}
-
-/**
- * Turns the Kin's answer into { slot: [pieces] }. Unknown keys are ignored with a warning; a wrong value type
- * is an error (nothing is guessed). `{}` is valid and means "no outfit described".
- */
-export function parseOutfit(text) {
-  const p = parseObject(text);
-  if (!p.ok) return p;
-  const { outfit, warnings, errors } = outfitFromObject(p.doc);
-  if (errors.length) return { ok: false, error: errors.join(' ') };
-  return { ok: true, outfit, warnings };
 }
 
 // ---- shared cleanup for location, pose and action
@@ -240,8 +228,8 @@ export function describeDoing({ pose, action } = {}) {
 }
 
 // ---- hair and makeup: one short phrase each ("long black hair in a ponytail", "red lipstick and eyeliner")
-export const NO_HAIR = 'No hair described in the recent chat.';
-export const NO_MAKEUP = 'No makeup described in the recent chat.';
+const NO_HAIR = 'No hair described in the recent chat.';
+const NO_MAKEUP = 'No makeup described in the recent chat.';
 const MAX_LOOK = 100;
 // Saying "none" may mean "not mentioned"; only an explicit "no makeup" means a bare face.
 const BARE_FACE = /^(no make-?up( at all)?|without (any )?make-?up|make-?up[- ]free|bare[- ]?faced?|a bare face|natural,? no make-?up|((i|she|he)\s*(['’]m|am|is|['’]s)\s+)?not wearing (any )?make-?up( at all| today)?)$/i;
@@ -262,8 +250,7 @@ function lookPhrase(v) {
   return s.length > MAX_LOOK ? `${s.slice(0, MAX_LOOK).replace(/\s+\S*$/, '')}…` : s;
 }
 
-export const cleanHair = (v) => lookPhrase(v);
-export function cleanMakeup(v) {
+function cleanMakeup(v) {
   if (typeof v === 'string' && BARE_FACE.test(cleanString(v, 200).replace(/[.!\s]+$/, ''))) return 'no makeup';
   const s = lookPhrase(v);
   return typeof s === 'string' && BARE_FACE.test(s) ? 'no makeup' : s;
@@ -271,9 +258,9 @@ export function cleanMakeup(v) {
 
 const sentence = (s) => capitalizeFirst(s.endsWith('…') ? s : `${s}.`);
 /** "Long black hair in a ponytail." */
-export const describeHair = (value) => (value ? sentence(value) : NO_HAIR);
+const describeHair = (value) => (value ? sentence(value) : NO_HAIR);
 /** "Red lipstick and eyeliner." / "No makeup." */
-export const describeMakeup = (value) => (value ? sentence(value) : NO_MAKEUP);
+const describeMakeup = (value) => (value ? sentence(value) : NO_MAKEUP);
 
 // ---- English only: the Kin is asked to answer in English (fewer tokens, and the sentences are English). Portuguese
 // keys and values are still read, but they are reported so the diagnostics show whether the Kin follows the rule.
@@ -302,6 +289,8 @@ export function notEnglishKeys(doc) {
 
 /**
  * One parse for the whole answer: where the Kin is, how it is positioned, what it is doing and what it wears.
+ * Unknown keys are ignored with a warning; a wrong value type is an error (nothing is guessed). `{}` is valid and
+ * means "nothing described".
  * @returns {Reading | Failure}
  */
 export function parseReading(text) {
@@ -319,7 +308,7 @@ export function parseReading(text) {
   let location = read(isLocationKey, cleanLocation, 'location');
   let pose = read(isPoseKey, cleanPose, 'pose');
   const action = read(isActionKey, cleanAction, 'action');
-  const hair = read(isHairKey, cleanHair, 'hair');
+  const hair = read(isHairKey, lookPhrase, 'hair');
   const makeup = read(isMakeupKey, cleanMakeup, 'makeup');
   // A pose that is really a place ("in the kitchen") is not a pose. It becomes the location if there is none.
   if (pose && PLACE_ONLY_START.test(pose) && !POSTURE_WORD.test(pose)) {

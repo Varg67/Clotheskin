@@ -107,7 +107,6 @@ button, input, select { font: inherit; color: inherit; }
 .ruler { width: 100%; margin: 10px 0 2px; accent-color: var(--accent); min-height: 24px; cursor: pointer; }
 .ruler-ends { display: flex; justify-content: space-between; font-size: .75rem; }
 .auto-status { margin: 8px 0 0; }
-.auto-note { margin: 6px 0 0; color: var(--accent-deep); }
 .cost { margin-top: 10px; font-size: .78rem; }
 
 /* settings */

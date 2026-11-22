@@ -5,10 +5,10 @@ import assert from 'node:assert/strict';
 import { parseReading, describeReading } from '../src/core/outfit.js';
 import { buildOutfitPrompt } from '../src/core/prompt.js';
 import { formatClock, formatRelative } from '../src/core/format.js';
-import { runProgram, ACTION } from '../run/program.js';
+import { runProgram } from '../run/program.js';
+import { ACTION } from '../src/core/state.js';
 import { fakeKindroid } from './support/fake-kindroid.js';
 const T0 = new Date('2026-11-20T12:00:00Z');
-const plus = (min) => new Date(T0.getTime() + min * 60000);
 /** The whole run with a stand-in Kin that gives `answer`: { out, reading } (reading as stored in status.json). */
 async function run(answer) {
   const k = fakeKindroid({ now: T0.toISOString() });

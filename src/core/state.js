@@ -12,7 +12,7 @@ import { oneLine } from './text.js';
 
 export const SETTINGS_FILE = 'settings.json';
 export const STATUS_FILE = 'status.json';
-export const RUN_STATES = ['running', 'paused', 'stopped'];
+const RUN_STATES = ['running', 'paused', 'stopped'];
 export const THEMES = { warm: 'Warm (default)', sage: 'Sage green' };
 /** The program's one action (kin.json), used by the screen. One action, so one input rule. */
 export const ACTION = 'update_status';

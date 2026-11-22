@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseOutfit, describeOutfit, joinNatural, normalizeSlot, parseReading, describeReading, describeLocation, cleanLocation } from '../src/core/outfit.js';
+import { describeOutfit, joinNatural, normalizeSlot, parseReading, describeReading } from '../src/core/outfit.js';
 import { DEMO_SCENES } from '../dev/scenes.js';
 
-const say = (json) => { const p = parseOutfit(typeof json === 'string' ? json : JSON.stringify(json)); assert.ok(p.ok, p.error); return describeOutfit(p.outfit); };
+const say = (json) => { const p = parseReading(typeof json === 'string' ? json : JSON.stringify(json)); assert.ok(p.ok, p.error); return describeOutfit(p.outfit); };
 
 test('the brief example: perfumed white shirt, leather jacket, blue jeans become one sentence', () => {
   assert.equal(
@@ -85,15 +85,15 @@ test('a single string instead of a list, repeated pieces and trailing punctuatio
 });
 
 test('unknown keys are ignored with a warning; a wrong value type is an error', () => {
-  const ok = parseOutfit('{"topwear":["a shirt"],"mood":"tired","notes":["x"]}');
+  const ok = parseReading('{"topwear":["a shirt"],"mood":"tired","notes":["x"]}');
   assert.equal(ok.ok, true);
   assert.equal(ok.warnings.length, 2);
   assert.match(ok.warnings[0], /"mood" is not a slot/);
-  const bad = parseOutfit('{"topwear":{"name":"shirt"}}');
+  const bad = parseReading('{"topwear":{"name":"shirt"}}');
   assert.equal(bad.ok, false);
   assert.match(bad.error, /"topwear" must be a text or a list of texts/);
-  assert.equal(parseOutfit('{"topwear":[1,2]}').ok, false);
-  assert.equal(parseOutfit('["a shirt"]').ok, false);
+  assert.equal(parseReading('{"topwear":[1,2]}').ok, false);
+  assert.equal(parseReading('["a shirt"]').ok, false);
 });
 
 test('format slips are repaired: fences, narration around JSON, trailing commas, curly quotes', () => {
@@ -106,7 +106,7 @@ test('format slips are repaired: fences, narration around JSON, trailing commas,
 
 test('answers that are not JSON at all fail with a readable English message', () => {
   for (const text of ['*giggles* I am wearing a red scarf, silly!', '', '   ', '{"topwear": [shirt']) {
-    const p = parseOutfit(text);
+    const p = parseReading(text);
     assert.equal(p.ok, false, text);
     assert.match(p.error, /empty|not valid JSON/);
   }
@@ -114,7 +114,7 @@ test('answers that are not JSON at all fail with a readable English message', ()
 
 test('long or numerous pieces are capped, so a runaway answer cannot flood the card', () => {
   const many = Array.from({ length: 30 }, (_, i) => `piece ${i}`);
-  const p = parseOutfit(JSON.stringify({ topwear: many, bottomwear: ['x'.repeat(500)] }));
+  const p = parseReading(JSON.stringify({ topwear: many, bottomwear: ['x'.repeat(500)] }));
   assert.equal(p.outfit.topwear.length, 8);
   assert.equal(p.outfit.bottomwear[0].length, 80);
 });

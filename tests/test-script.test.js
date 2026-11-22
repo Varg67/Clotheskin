@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { SCENARIOS, expected, STEPS, IN_CHARACTER_ERROR } from '../scripts/real-kin-scenarios.mjs';
 import { renderScript } from '../scripts/build-test-script.mjs';
-import { runProgram, ACTION } from '../run/program.js';
+import { runProgram } from '../run/program.js';
+import { ACTION } from '../src/core/state.js';
 import { fakeKindroid } from './support/fake-kindroid.js';
 
 test('the real-Kin test script is generated from the code and is up to date (npm run build)', () => {

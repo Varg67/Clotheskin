@@ -16,7 +16,6 @@ import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterSto
 import { describeNow } from '../src/core/time.js';
 import { oneLine } from '../src/core/text.js';
 
-export { ACTION, OPS }; // the program's one action (src/core/state.js): one input rule, nothing checked against another's
 const RETRY_AFTER_MS = 3000; // a fast Kindroid failure (a 502, a dropped connection) is tried once more
 const ASK_TIMEOUT_MS = 90000; // one question to the Kin never waits longer than this
 const RUN_BUDGET_MS = 100000; // the whole run fits well inside kin.json's 2 minutes (main.js stops it at 110 s)

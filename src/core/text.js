@@ -2,7 +2,7 @@
 // joiner is kept: emoji sequences need it.
 const INVISIBLE = /[\u200B\u2060\uFEFF\u00AD]/g;
 /** Never ends in half of an emoji (a lone surrogate) after a cut. */
-export const dropHalfChar = (s) => s.replace(/[\uD800-\uDBFF]$/, '');
+const dropHalfChar = (s) => s.replace(/[\uD800-\uDBFF]$/, '');
 
 export function capitalizeFirst(s) {
   const str = String(s ?? '');
@@ -14,7 +14,7 @@ export function cleanString(s, max = 200) {
   return dropHalfChar(String(s ?? '').replace(INVISIBLE, '').replace(/\s+/g, ' ').trim().slice(0, max));
 }
 
-/** One line, at most `max` characters, marked with "…" when cut (kin end keeps 500). */
+/** One line, at most `max` characters, marked with "…" when cut. */
 export function oneLine(text, max = 500) {
   const s = String(text ?? '').replace(INVISIBLE, '').replace(/\s+/g, ' ').trim();
   if (s.length <= max) return s;

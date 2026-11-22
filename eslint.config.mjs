@@ -39,13 +39,14 @@ const RULES = {
   'valid-typeof': 'error',
   'no-debugger': 'error',
   'eqeqeq': ['error', 'smart'],
-  // dead code (warn for now; an error once the clean-up phase is done)
-  'no-unused-vars': ['warn', { args: 'after-used', caughtErrors: 'none' }],
-  'no-unused-expressions': ['warn', { allowShortCircuit: true, allowTernary: true }],
-  'no-useless-catch': 'warn',
-  'no-empty': ['warn', { allowEmptyCatch: true }],
-  'prefer-const': 'warn',
-  'no-shadow': 'warn',
+  // dead code and leftovers (unused exports are checked by scripts/unused-exports.mjs)
+  'no-unused-vars': ['error', { args: 'after-used', caughtErrors: 'none' }],
+  'no-unused-expressions': ['error', { allowShortCircuit: true, allowTernary: true }],
+  'no-useless-catch': 'error',
+  'no-empty': ['error', { allowEmptyCatch: true }],
+  'no-console': 'off', // the run logs on stderr through the log it is given; scripts print on purpose
+  'prefer-const': 'error',
+  'no-shadow': 'error',
   // size and shape (warn for now; errors once the structure phase is done)
   'complexity': ['warn', 12],
   'max-params': ['warn', 4],

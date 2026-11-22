@@ -186,7 +186,7 @@ function normalizeLoose(text) {
   }
   return out.replace(/,(\s*[}\]])/g, '$1');
 }
-return { MAX_ANSWER_CHARS, parseJsonObject, balancedObjects, normalizeLoose };
+return { MAX_ANSWER_CHARS, parseJsonObject };
 });
 
 __def("src/core/schedule.js", function () {
@@ -258,7 +258,7 @@ function startDueFor(at, now) {
   const q = TICK_S * 1000;
   return new Date(Math.ceil(from / q) * q);
 }
-return { TICK_S, DUE_SLACK_S, INTERVAL_STEPS, DEFAULT_INTERVAL_S, MAX_RETRY_S, ERRORS_BEFORE_SLOWING, ERRORS_BEFORE_WARNING, MAINTENANCE_RETRY_S, formatInterval, snapInterval, retryDelay, errorKind, isDue, startDueFor };
+return { TICK_S, INTERVAL_STEPS, DEFAULT_INTERVAL_S, MAX_RETRY_S, ERRORS_BEFORE_WARNING, MAINTENANCE_RETRY_S, formatInterval, snapInterval, retryDelay, errorKind, isDue, startDueFor };
 });
 
 __def("src/core/sleep.js", function () {
@@ -386,7 +386,7 @@ function dreamFact({ dream, remembered } = {}) {
   const text = cleanString(dream, 240).replace(/["“”]/g, "'");
   return `While you slept, you dreamt: "${text}". Now that you are awake you remember ${amount} of it.`;
 }
-return { WAKE_LEAD_S, MIN_SLEEP_S, MAX_SLEEP_S, DREAM_TTL_HOURS, sentenceMark, looksAsleep, parseClockTime, planSleep, parseSleepAnswer, REMEMBERED, parseDreamAnswer, describeDream, dreamFact };
+return { WAKE_LEAD_S, DREAM_TTL_HOURS, sentenceMark, looksAsleep, parseClockTime, planSleep, parseSleepAnswer, REMEMBERED, parseDreamAnswer, describeDream, dreamFact };
 });
 
 __def("src/core/state.js", function () {
@@ -510,7 +510,7 @@ function warningOf(entry) {
   if (entry.errorKind === 'server' && entry.serverFailures >= ERRORS_BEFORE_WARNING) return { kind: 'server', failures: entry.serverFailures };
   return null;
 }
-return { SETTINGS_FILE, STATUS_FILE, RUN_STATES, THEMES, ACTION, OPS, DEFAULT_SETTINGS, normalizeSettings, normalizeEntry, normalizeStatus, afterStop, plannedAt, warningOf };
+return { SETTINGS_FILE, STATUS_FILE, THEMES, ACTION, OPS, DEFAULT_SETTINGS, normalizeSettings, normalizeEntry, normalizeStatus, afterStop, plannedAt, warningOf };
 });
 
 __def("src/core/text.js", function () {
@@ -530,13 +530,13 @@ function cleanString(s, max = 200) {
   return dropHalfChar(String(s ?? '').replace(INVISIBLE, '').replace(/\s+/g, ' ').trim().slice(0, max));
 }
 
-/** One line, at most `max` characters, marked with "…" when cut (kin end keeps 500). */
+/** One line, at most `max` characters, marked with "…" when cut. */
 function oneLine(text, max = 500) {
   const s = String(text ?? '').replace(INVISIBLE, '').replace(/\s+/g, ' ').trim();
   if (s.length <= max) return s;
   return `${dropHalfChar(s.slice(0, max - 1))}…`;
 }
-return { dropHalfChar, capitalizeFirst, cleanString, oneLine };
+return { capitalizeFirst, cleanString, oneLine };
 });
 
 __def("src/core/time.js", function () {
@@ -1104,7 +1104,7 @@ function keepFocus(root, fn) {
   const next = root.querySelector(`[data-key="${CSS.escape(key)}"]`);
   if (next) next.focus({ preventScroll: true });
 }
-return { h, append, keepFocus };
+return { h, keepFocus };
 });
 
 __def("src/screen/icons.js", function () {

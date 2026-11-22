@@ -14,8 +14,9 @@
     "test:e2e": "node tests/e2e/screen.cjs",
     "tools": "npm ci --prefix tools --no-audit --no-fund",
     "lint": "node tools/run.mjs eslint .",
+    "unused-exports": "node scripts/unused-exports.mjs",
     "typecheck": "node tools/run.mjs tsc -p jsconfig.json",
-    "check": "npm run lint && npm run typecheck && npm run test:coverage && npm run test:perf && npm run build:check",
+    "check": "npm run lint && npm run unused-exports && npm run typecheck && npm run test:coverage && npm run test:perf && npm run build:check",
     "try": "node scripts/try-run.mjs"
   },
   "engines": {

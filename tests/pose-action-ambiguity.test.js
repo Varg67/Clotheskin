@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import { parseReading, describeReading, describeDoing, cleanPose, cleanAction } from '../src/core/outfit.js';
 import { poseIcon } from '../src/screen/icons.js';
 import { OUTFIT_PROMPT, buildOutfitPrompt } from '../src/core/prompt.js';
-import { runProgram, ACTION } from '../run/program.js';
+import { runProgram } from '../run/program.js';
+import { ACTION } from '../src/core/state.js';
 import { fakeKindroid } from './support/fake-kindroid.js';
 import { DEMO_SCENES } from '../dev/scenes.js';
 

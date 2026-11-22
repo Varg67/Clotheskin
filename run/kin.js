@@ -14,9 +14,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { oneLine } from '../src/core/text.js';
 
-export const END_LIMIT = 500; // kin end keeps at most 500 characters
+// kin end takes up to 4,000 characters, shown in the chat and given back to the Kin when an action started the run.
+// Clotheskin's line is a status, so it is kept short on purpose.
+const END_LIMIT = 500;
 
-export class KinError extends Error {
+class KinError extends Error {
   constructor(message, { code = null, stderr = '', timedOut = false } = {}) {
     super(message);
     this.code = code;

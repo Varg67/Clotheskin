@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { runProgram, ACTION } from '../run/program.js';
+import { runProgram } from '../run/program.js';
+import { ACTION } from '../src/core/state.js';
 import { fakeKindroid, READING } from './support/fake-kindroid.js';
 
 const tick = (k) => runProgram({ event: { trigger: 'schedule' }, kin: k.kin, clock: k.clock, retryAfterMs: 0 });

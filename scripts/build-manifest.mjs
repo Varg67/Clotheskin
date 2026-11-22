@@ -3,7 +3,7 @@
 //   node scripts/build-manifest.mjs --check  fails if kin.json is not what this gives (a test runs this)
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { ACTION, OPS } from '../run/program.js';
+import { ACTION, OPS } from '../src/core/state.js';
 
 export const CHAT_DAYS = 2; // the Kin sees 2 days of its chat: an outfit described yesterday is still in view
 

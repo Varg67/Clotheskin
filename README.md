@@ -56,7 +56,7 @@ Requires Node 22+. No dependencies at run time.
 
 ```bash
 npm start            # the dev harness: http://localhost:5173
-npm test             # unit tests (node --test), ~160 checks, a few seconds
+npm test             # unit tests (node --test), ~180 checks, a few seconds
 npm run test:e2e     # browser tests on the dev harness (Playwright + Chromium)
 npm run build        # rebuilds screen/app.js and kin.json (tests fail if either is stale)
 ```

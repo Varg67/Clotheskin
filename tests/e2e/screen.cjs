@@ -308,6 +308,23 @@ const step = async (name, fn) => {
     await t.ctx.close(); await u.ctx.close();
   });
 
+  await step('a whole render of the card (a reading, three Kins, the list open and closed) takes well under a frame', async () => {
+    const t = await open({ kins: [{ id: 'kin-isa', name: 'Isa' }, { id: 'kin-bea', name: 'Bea' }, { id: 'kin-alex', name: 'Alex' }] });
+    await t.key('pick-kin-isa').click();
+    await t.key('update').click();
+    await t.idle();
+    await t.until(async () => /In the/.test(await t.text('location')), 'a reading');
+    // Each click on Switch Kin re-renders the whole screen at once (no timer). The browser's clock is fake in these
+    // tests, so the time is taken here, outside the page; the round trip to the page is spread over all renders.
+    const renders = 40;
+    const started = process.hrtime.bigint();
+    await t.frameEval((n) => { for (let i = 0; i < n; i += 1) document.querySelector('[data-key="switch"]').click(); }, renders);
+    const ms = Number(process.hrtime.bigint() - started) / 1e6 / renders;
+    console.log(`       a render takes ${ms.toFixed(2)} ms`);
+    assert.ok(ms < 16, `${ms.toFixed(1)} ms per render (one frame at 60 Hz is 16 ms)`);
+    await t.ctx.close();
+  });
+
   await step('no page errors or console errors', async () => { assert.deepEqual(problems, []); });
 
   await browser.close(); server.close();

@@ -27,7 +27,7 @@ Data do levantamento: 22/11/2026 · branch `claude/amazing-clarke-taz1xd` · com
 | **B1** | `run/program.js:88` (`attachedKin`) | `fail()` tem 7 parâmetros posicionais e a chamada passa `entry` no lugar de `note`. Quando `kin kins` falha, o run termina com a mensagem **`"[object Object]"`** e perde a proteção contra runs concorrentes (`base` fica `undefined`). Reproduzido com um `kin.kins()` que lança erro. O teste `program.test.js:317` só confere o `status.json`, não a mensagem. | Alta |
 | **B2** | `run/program.js:146` e `:104` (`wake`/`read`) | Uma falta de tempo no orçamento do run (`kind: 'time'`) vai para `fail()`: conta como **falha do servidor** (`serverFailures + 1`, desacelera as leituras) e o tipo `'time'` é apagado por `normalizeEntry` (`state.js:73` não o conhece). Uma limitação do próprio run vira "Kindroid falhou". A pergunta do sono já trata isso certo (`program.js:126`). | Média |
 | **B3** | `src/core/outfit.js:322-348` | `describeReading`/`describeOutfit` quebram (`TypeError: Cannot read properties of undefined`) se receberem um resultado sem `outfit` (p.ex. um `parseReading` que falhou). Hoje o chamador protege, mas é uma API pública sem guarda. | Baixa |
-| **B4** | `src/core/json.js:65` (`normalizeLoose`) | Crescimento superlinear com palavras soltas repetidas: 32 KB → 27 ms, 128 KB → 243 ms. A saída do `kin ask` aceita até 32 MB (`run/kin.js:43`). Sem limite de tamanho na entrada do parser. | Baixa (endurecimento) |
+| **B4** | `src/core/json.js` (`normalizeLoose`, `parseJsonObject`) | Sem limite de tamanho na entrada do parser, e a saída do `kin ask` aceita até 32 MB (`run/kin.js:43`). Palavras soltas repetidas crescem mais que linearmente (32 KB → 27 ms, 128 KB → 243 ms); milhares de `{...}` pequenos custam ~3,5 µs por caractere, porque cada um é uma tentativa de parse (60 KB → ~210 ms). | Baixa (endurecimento) |
 | **B5** | `src/core/sleep.js:10` | Comentário corrompido: o comentário de `MAX_SLEEP_S` foi colado no fim da linha de `DREAM_TTL_HOURS`. | Cosmético |
 
 ### 1.3 Código morto, imports órfãos e variáveis não usadas
@@ -119,6 +119,18 @@ O gargalo não é CPU: é **tempo de execução cobrado em créditos**. O Kindro
 8. Formato de `settings.json`/`status.json` compatível com os arquivos já salvos (`v: 1`).
 9. Os textos que a tela mostra não mudam sem intenção (o roteiro `docs/real-kin-test-script.md` é gerado a partir deles).
 
+### 2.1 Compatibilidade com o Kindroid Workshop (do guia "Making things for a Kin with your own coding tool")
+
+| Regra do guia | Consequência para a refatoração |
+| --- | --- |
+| *"Packages come from a lockfile, installed when each run starts"* | **Nenhum pacote no `package.json`/`package-lock.json` da raiz.** Ferramentas de desenvolvimento (ESLint, TypeScript, `@types/node`: 81 pacotes, 42 MB) ficam em `tools/`, com lockfile próprio, e nunca são instaladas num run. Os scripts da raiz não podem se chamar `install`, `prepare` ou `postinstall` (o `npm ci` da raiz os executaria). |
+| `run.entry` é exatamente `node <file>`; a cópia compartilhada roda numa pasta só de leitura e grava só em `/tmp` | `main.js` continua a entrada; `run/kin.js` já grava em `/tmp`. Nenhum passo de build em tempo de run. |
+| Todo arquivo do commit é texto (ou imagem/fonte/som da tela), sem código compilado | `screen/app.js` continua gerado e **commitado**; nenhum minificador binário. |
+| A tela é uma moldura de ~390 pt, sem cookies nem armazenamento, e põe dados salvos como texto, nunca HTML | Regras já garantidas pelo bundler e pelo e2e; o lint agora também as cobre. |
+| O `kin end` aceita até **4.000** caracteres e o resultado de uma ação volta para o Kin | O código usa 500 (`run/kin.js:17`, `END_LIMIT`), um limite antigo. Manter curto é bom para créditos, mas o comentário "kin end keeps at most 500" está errado: corrigir na Fase 2. |
+| A resposta a `{ kin: "kins" }` traz `current` quando a tela é aberta do chat de um Kin | Fora do escopo da refatoração (é recurso novo), mas a separação da tela na Fase 4 deve deixar fácil usar `current` para escolher o Kin. |
+| A entrada de uma ação traz `"kin":"<id>"` no topo | Já tratado (`program.js:70`). |
+
 **Portão de cada commit:** `npm test` verde · `npm run build` sem diferença no git · `npm run test:e2e` 17/17 · lint e typecheck sem erros (a partir da Fase 0).
 
 ---
@@ -127,11 +139,13 @@ O gargalo não é CPU: é **tempo de execução cobrado em créditos**. O Kindro
 
 Cada fase é um conjunto pequeno de commits revisáveis; nenhuma mistura "mudar comportamento" com "mover código".
 
-### Fase 0 — Rede de segurança (antes de mexer em qualquer coisa)
+### Fase 0 — Rede de segurança (antes de mexer em qualquer coisa) — **feita**, exceto a CI (0.9)
+
+O que ficou pronto: `tools/` (ESLint 10, TypeScript 6, `@types/node` 22, fora do lockfile da raiz), `eslint.config.mjs`, `jsconfig.json`, `tools/run.mjs` e os scripts `npm run tools | lint | typecheck | test:coverage | test:perf | build:check | check`; testes `tests/run-cost.test.js`, `tests/regressions.test.js` e `tests/perf/parsing.test.js`. `npm run check` passa: lint com 0 erros e 25 avisos (5 de código morto, que viram erro na Fase 2; 20 de tamanho e complexidade, que viram erro na Fase 4), 158 testes verdes e 6 pendentes (`todo`: B1, B2, B3 e o O1 nos três casos), cobertura de 99,9 % das linhas com limite mínimo aplicado, desempenho dentro do orçamento (2 pendentes: os dois casos do B4) e arquivos gerados em dia. O `typecheck` roda, mas só entra no `check` depois da Fase 1: hoje acusa 19 erros, todos de anotação (§1.4, mais `scripts/build-screen.mjs:46` e `scripts/real-kin-scenarios.mjs:138`).
 
 | Passo | Entrega |
 | --- | --- |
-| 0.1 | `devDependencies`: `eslint`, `typescript`, `@types/node`, `playwright` (versão fixada; hoje é instalado à mão). |
+| 0.1 | `eslint`, `typescript` e `@types/node` em `tools/package.json` (ver §2.1; **não** na raiz). `playwright` continua instalado à mão até decidir a CI. |
 | 0.2 | `eslint.config.js` (flat config): `no-unused-vars`, `no-undef` com globais por pasta (node / browser / harness), `no-unreachable`, `eqeqeq: smart`, `prefer-const`, `no-shadow`, `complexity: 12`, `max-params: 4`, `max-depth: 4`. Regras de complexidade começam como `warn` e viram `error` no fim da Fase 4. Ignorar `screen/app.js` (gerado). |
 | 0.3 | `jsconfig.json` com `checkJs`, `noEmit`, `strict: false` no início (endurecer na Fase 5). Script `npm run typecheck`. |
 | 0.4 | Regra própria no lint ou no `build-screen.mjs` que já recusa sintaxe nova também nos módulos importados por `run/program.js` (garantir o invariante 2: nenhum `node:` no grafo do programa). |
@@ -280,7 +294,7 @@ Não otimizar o que já é rápido (`parseReading`, fusos): o custo está nas ch
 
 ## 6. Decisões pendentes (para você)
 
-1. **`devDependencies`:** posso adicionar `eslint`, `typescript`, `@types/node` e fixar `playwright`? (Nada entra em tempo de execução.)
+1. ~~**`devDependencies`**~~ — aprovado, desde que compatível com o Workshop: ficam em `tools/` (§2.1).
 2. **Formatação:** reformatar tudo de uma vez com Prettier (um commit só, grande e mecânico) ou só aplicar o limite de colunas nos trechos tocados?
 3. **CI:** criar o workflow do GitHub Actions neste repositório?
 4. **Idioma:** manter código, comentários e mensagens em inglês (como hoje) e só a documentação de testes em português?

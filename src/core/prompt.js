@@ -19,7 +19,7 @@ Format: minified JSON only, on one line; no code fence or comment.
 "action": what you are doing now, a short -ing phrase of at most 5 words ("drinking coffee", "talking with Ari"); not what you say or what others do, not plans, finished things or feelings.
 "hair": e.g. "long black hair in a ponytail". "makeup": e.g. "red lipstick and eyeliner"; "no makeup" only if the chat says so.
 Other keys are slots: arrays of short noun phrases with article and key traits, at most 6 words ("a perfumed white shirt"), innermost layer first. Slots: ${SLOT_LIST}.
-topwear = shirts, sweaters, jackets, coats, dresses; bottomwear = trousers, jeans, skirts, shorts; footwear = shoes, boots; footunderwear = socks, tights; topunderwear, bottomunderwear = bra, undershirt, underpants only; eyes-accessory = glasses; bottom-accessory = hips; bags = backpack, handbag.
+topwear = shirts, sweaters, jackets, coats, dresses; bottomwear = trousers, jeans, skirts, shorts; footwear = shoes, boots; footunderwear = socks, tights; topunderwear, bottomunderwear = bra, undershirt, underpants only; eyes-accessory = glasses; bags = backpack, handbag. Wearing nothing: "clothing":["naked"]; no shoes: "footwear":["barefoot"].
 The example shows the format only; never copy its values.
 Example: {"location":"at a bookstore","pose":"standing by a shelf","action":"flipping through a book","hair":"a loose braid","topwear":["a grey hoodie"],"bottomwear":["black leggings"],"footwear":["white sneakers"]}
 [END DIRECTIVE] Your whole reply is one line of minified JSON in English: it starts with { and ends with }.`;

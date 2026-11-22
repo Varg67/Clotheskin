@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { describeOutfit, joinNatural, normalizeSlot, parseReading, describeReading, describeLocation, cleanLocation } from '../src/core/outfit.js';
 import { DEMO_SCENES } from '../dev/scenes.js';
+import { buildOutfitPrompt } from '../src/core/prompt.js';
 
 const say = (json) => { const p = parseReading(typeof json === 'string' ? json : JSON.stringify(json)); assert.ok(p.ok, p.error); return describeOutfit(p.outfit); };
 
@@ -84,15 +85,17 @@ test('a single string instead of a list, repeated pieces and trailing punctuatio
   assert.equal(say({ bottomwear: 'blue jeans.', topwear: ['a shirt', 'A Shirt', 'a shirt;'] }), 'Wearing a shirt and blue jeans.');
 });
 
-test('unknown keys are ignored with a warning; a wrong value type is an error', () => {
+test('unknown keys are ignored with a warning; a piece written as an object is read; a number is an error', () => {
   const ok = parseReading('{"topwear":["a shirt"],"mood":"tired","notes":["x"]}');
   assert.equal(ok.ok, true);
   assert.equal(ok.warnings.length, 2);
   assert.match(ok.warnings[0], /"mood" is not a slot/);
-  const bad = parseReading('{"topwear":{"name":"shirt"}}');
+  assert.equal(say({ topwear: { name: 'shirt' } }), 'Wearing shirt.');
+  assert.equal(say({ topwear: [{ item: 'shirt', color: 'white' }] }), 'Wearing white shirt.');
+  const bad = parseReading('{"topwear":[1,2]}');
   assert.equal(bad.ok, false);
   assert.match(bad.error, /"topwear" must be a text or a list of texts/);
-  assert.equal(parseReading('{"topwear":[1,2]}').ok, false);
+  assert.equal(parseReading('{"topwear":[{"size":3}]}').ok, false, 'an object with no words'); 
   assert.equal(parseReading('["a shirt"]').ok, false);
 });
 
@@ -142,4 +145,49 @@ test('hair and makeup: one short phrase each, lists joined, slips repaired, noth
   assert.deepEqual(p.warnings, [], 'hair is not an unknown slot');
   assert.deepEqual(Object.keys(p.outfit), ['topwear'], 'hair is not clothing');
   assert.match(parseReading('{"hair":{"a":1}}').error, /"hair" must be a text/);
+});
+
+// ---- Real-test review (Nov 2026): what a roleplay Kin writes about its clothes
+
+test('underwear shows where nothing covers it (real test: a shirt and panties, no trousers)', () => {
+  assert.equal(say({ topwear: ['a purple shirt'], bottomunderwear: ['purple panties'] }), 'Wearing a purple shirt and purple panties.');
+  assert.equal(say({ topunderwear: ['a black bra'], bottomwear: ['jeans'] }), 'Wearing a black bra and jeans.');
+  assert.equal(say({ topwear: ['a shirt'], topunderwear: ['a bra'], bottomwear: ['jeans'], bottomunderwear: ['briefs'] }), 'Wearing a shirt and jeans.', 'covered: not mentioned');
+  assert.equal(say({ topwear: ['a red dress'], bottomunderwear: ['black panties'] }), 'Wearing a red dress.', 'a dress covers the legs');
+  assert.equal(say({ topwear: ['a bathrobe'], bottomunderwear: ['briefs'] }), 'Wearing a bathrobe.');
+  assert.equal(say({ topwear: ['a long coat'], bottomunderwear: ['briefs'] }), 'Wearing a long coat and briefs.', 'a coat is not a dress');
+});
+
+test('wearing nothing at all is said as such, never "no outfit described" (which would keep the last clothes)', () => {
+  assert.equal(say({ clothing: ['naked'] }), 'Not wearing anything.');
+  assert.equal(say({ topwear: ['nothing'], bottomwear: ['nothing'] }), 'Not wearing anything.');
+  assert.equal(say({ clothing: ['nothing at all'] }), 'Not wearing anything.');
+  assert.equal(say({ topwear: ['naked'], 'ears-accessory': ['silver earrings'] }), 'Not wearing anything, with silver earrings.');
+  assert.equal(say({ topwear: ['nothing'], bottomwear: ['jeans'] }), 'Wearing jeans.', 'a lone "nothing" next to clothes is "not mentioned"');
+  assert.equal(say({ topwear: ['none'] }), 'Not wearing anything.', 'the only clothing slot says none');
+});
+
+test('barefoot and shirtless are how the Kin is, not pieces', () => {
+  assert.equal(say({ topwear: ['a dress'], footwear: ['barefoot'] }), 'Wearing a dress, barefoot.');
+  assert.equal(say({ topwear: ['shirtless'], bottomwear: ['gray sweatpants'] }), 'Wearing gray sweatpants, shirtless.');
+  assert.equal(say({ footwear: ['no shoes'], bottomwear: ['shorts'] }), 'Wearing shorts, barefoot.');
+  assert.equal(say({ footwear: ['barefoot'] }), 'Barefoot.');
+  assert.equal(say({ footwear: ['barefoot'], footunderwear: ['wool socks'], bottomwear: ['jeans'] }), 'Wearing jeans and wool socks.', 'socks: not barefoot');
+});
+
+test('a piece the Kin took off is not worn', () => {
+  assert.equal(say({ topwear: ['a jacket (taken off)', 'a white shirt'] }), 'Wearing a white shirt.');
+  assert.equal(say({ topwear: ['a white shirt', 'a cardigan, removed'] }), 'Wearing a white shirt.');
+  assert.equal(say({ footwear: ['heels, on the floor'], topwear: ['a dress'] }), 'Wearing a dress.');
+});
+
+test('slips in the pieces: "wearing", a capital article, the same piece twice, "unknown top"', () => {
+  assert.equal(say({ topwear: ['wearing a red dress'] }), 'Wearing a red dress.');
+  assert.equal(say({ topwear: ['A white shirt'] }), 'Wearing a white shirt.');
+  assert.equal(say({ topwear: ['a white shirt'], clothing: ['a white shirt', 'blue jeans'] }), 'Wearing a white shirt and blue jeans.');
+  assert.equal(say({ topwear: ['unknown top'], bottomwear: ['none mentioned'] }), 'No outfit described in the recent chat.');
+});
+
+test('the prompt says how to answer naked and barefoot', () => {
+  assert.match(buildOutfitPrompt({ name: 'Isa' }), /Wearing nothing: "clothing":\["naked"\]; no shoes: "footwear":\["barefoot"\]\./);
 });

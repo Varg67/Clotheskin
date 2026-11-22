@@ -35,27 +35,57 @@ export const normalizeSlot = (v) => (typeof v === 'string' && Object.prototype.h
 const LOOSE_CLOTHING = new Set(['clothing', 'clothes', 'outfit', 'wearing', 'garments', 'roupa', 'roupas', 'vestindo', 'traje', 'vestuario']);
 const LOOSE_ACCESSORIES = new Set(['accessories', 'accessory', 'extras', 'jewelry', 'jewellery', 'acessorios', 'acessorio', 'joias']);
 
-/** Branches in reading order: head to toe, then accessories, then bags. Underwear goes last (see describe). */
-const CLOTHING_ORDER = ['headwear', 'topwear', 'bottomwear', 'footwear', 'footunderwear', 'clothing'];
-const UNDERWEAR_ORDER = ['topunderwear', 'bottomunderwear'];
+/** Accessories in reading order, then bags. (Clothing is ordered in describeOutfit, with underwear where it shows.) */
 const ACCESSORY_ORDER = [...ACCESSORY_SLOTS, BAG_SLOT, 'accessories'];
 
 const PLACEHOLDER = /^(unknown|unspecified|undefined|null|none|nothing|no\s.*|not (mentioned|specified|stated|known|visible|described)|n\/?a|-+|\?+)$/i;
+// "unknown top", "none mentioned", "not specified in the chat": no piece.
+const PLACEHOLDER_START = /^(unknown|unspecified|none (mentioned|specified|described|stated)|not (mentioned|specified|stated|known|visible|described|given))\b/i;
+// Wearing nothing at all (a real roleplay answer): not "no outfit described", which would keep the last clothes.
+const NAKED = /^(naked|nude|completely naked|stark naked|undressed|nothing( at all| on)|wearing nothing( at all)?|no clothes( at all)?|not wearing anything)$/i;
+// Not a piece but how the Kin is: "Wearing a dress, barefoot."
+const BARE_STATES = [
+  ['barefoot', /^(barefoot(ed)?|bare ?feet|no (shoes|footwear))$/i],
+  ['shirtless', /^(shirtless|bare[- ]chested|no shirt)$/i],
+  ['topless', /^(topless|no top)$/i],
+];
+// A piece the Kin says it took off is not worn: "a jacket (taken off)".
+const TAKEN_OFF = /\b(taken off|took (it|them) off|removed|discarded|no longer (worn|wearing|on)|not (worn|wearing)|was wearing|on the (floor|chair|bed)|in (her|his|my|their) (hand|hands|bag))\b/i;
 const MAX_PER_SLOT = 8;
 const MAX_LEN = 80;
 
+/** A piece the Kin wrote as an object ({"item":"shirt","color":"white"}): its words, in a natural order. */
+function pieceFromObject(o) {
+  const order = ['color', 'colour', 'pattern', 'material', 'fabric', 'style', 'item', 'name', 'type', 'piece', 'garment'];
+  const words = order.map((k) => o[k]).filter((v) => typeof v === 'string' && v.trim());
+  return words.length ? words.join(' ') : null;
+}
+
+/**
+ * One slot's pieces: { pieces, states, naked, nothing } or null (a value that is no text). `states` are "barefoot",
+ * "shirtless" and the like; `naked` is an explicit "naked"; `nothing` is a bare "nothing" or "none".
+ */
 function cleanPieces(v) {
   const list = Array.isArray(v) ? v : [v];
+  const out = { pieces: [], states: [], naked: false, nothing: false };
   const seen = new Set();
-  const out = [];
-  for (const raw of list) {
+  for (let raw of list) {
+    if (isPlainObject(raw)) raw = pieceFromObject(raw);
     if (typeof raw !== 'string') return null;
-    const s = cleanString(raw, MAX_LEN).replace(/[.;,]+$/, '');
-    if (!s || PLACEHOLDER.test(s) || seen.has(s.toLowerCase())) continue;
+    let s = cleanString(raw, MAX_LEN).replace(/[.;,]+$/, '')
+      .replace(/^(wearing|dressed in|has on|have on)\s+/i, '')       // "wearing a red dress"
+      .replace(/^(A|An|The|My)\b/, (w) => w.toLowerCase());          // "A White Shirt" -> "a White Shirt"
+    if (!s) continue;
+    if (NAKED.test(s)) { out.naked = true; continue; }
+    const state = BARE_STATES.find(([, re]) => re.test(s));
+    if (state) { if (!out.states.includes(state[0])) out.states.push(state[0]); continue; }
+    if (/^(nothing|none)$/i.test(s)) { out.nothing = true; continue; }
+    if (PLACEHOLDER.test(s) || PLACEHOLDER_START.test(s) || TAKEN_OFF.test(s) || seen.has(s.toLowerCase())) continue;
     seen.add(s.toLowerCase());
-    out.push(s);
+    out.pieces.push(s);
   }
-  return out.slice(0, MAX_PER_SLOT);
+  out.pieces = out.pieces.slice(0, MAX_PER_SLOT);
+  return out;
 }
 
 // The Kin may name the key differently; all of these mean "where you are".
@@ -74,6 +104,8 @@ function outfitFromObject(doc, nested = false) {
   const outfit = {};
   const warnings = [];
   const errors = [];
+  const nothingIn = []; // clothing slots that said only "nothing" or "none"
+  let clothingSlots = 0;
   for (const [key, value] of Object.entries(doc)) {
     if (isReadingKey(key)) continue;
     let slot = normalizeSlot(key);
@@ -84,14 +116,21 @@ function outfitFromObject(doc, nested = false) {
     // {"outfit":{"topwear":[…],"bottomwear":[…]}}: a Kin that groups the slots under one key is understood.
     if ((slot === 'clothing' || slot === 'accessories') && isPlainObject(value) && !nested) {
       const inner = outfitFromObject(value, true);
-      for (const [sl, pieces] of Object.entries(inner.outfit)) outfit[sl] = [...(outfit[sl] || []), ...pieces];
+      for (const [sl, pieces] of Object.entries(inner.outfit)) outfit[sl] = sl === STATES ? [...new Set([...(outfit[sl] || []), ...pieces])] : [...(outfit[sl] || []), ...pieces];
+      if (inner.outfit[NAKED_KEY]) outfit[NAKED_KEY] = true;
       warnings.push(...inner.warnings); errors.push(...inner.errors);
       continue;
     }
-    const pieces = cleanPieces(value);
-    if (pieces === null) { errors.push(`"${key}" must be a text or a list of texts.`); continue; }
-    if (pieces.length) outfit[slot] = [...(outfit[slot] || []), ...pieces];
+    const got = cleanPieces(value);
+    if (got === null) { errors.push(`"${key}" must be a text or a list of texts.`); continue; }
+    if (got.pieces.length) outfit[slot] = [...(outfit[slot] || []), ...got.pieces];
+    if (got.states.length) outfit[STATES] = [...new Set([...(outfit[STATES] || []), ...got.states])];
+    if (got.naked) outfit[NAKED_KEY] = true;
+    if (CLOTHING_SLOT_SET.has(slot)) { clothingSlots += 1; if (got.nothing && !got.pieces.length) nothingIn.push(slot); }
   }
+  // "nothing" in every clothing slot the Kin gave ({"topwear":["nothing"],"bottomwear":["nothing"]}) means naked; a
+  // lone "nothing" next to real clothes is taken as "not mentioned".
+  if (nothingIn.length && nothingIn.length === clothingSlots) outfit[NAKED_KEY] = true;
   return { outfit, warnings, errors };
 }
 
@@ -360,6 +399,12 @@ export function joinNatural(list) {
   return `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
 }
 
+const STATES = '_states'; // "barefoot", "shirtless": how the Kin is, not a piece
+const NAKED_KEY = '_naked';
+const CLOTHING_SLOT_SET = new Set(['headwear', 'topwear', 'bottomwear', 'footwear', 'topunderwear', 'bottomunderwear', 'clothing']);
+// A top that also covers the legs: underpants under it are not mentioned.
+const ONE_PIECE = /\b(dress|gown|jumpsuit|romper|playsuit|overalls|robe|bathrobe|kimono|onesie|nightgown|nightie|nightdress|sundress|towel|pyjamas|pajamas|pjs)\b/i;
+
 const LOOSE_SLOTS = new Set(['clothing', 'accessories']); // no layers: keep the order the Kin gave
 const inOrder = (outfit, order) => order.flatMap((slot) =>
   // inside a real slot the Kin lists innermost first; the sentence names the outermost piece first
@@ -367,14 +412,26 @@ const inOrder = (outfit, order) => order.flatMap((slot) =>
 
 /**
  * The sentence: "Wearing a leather jacket, a perfumed white shirt and blue jeans, with glasses."
- * Underwear is only mentioned when there is nothing else to say about clothing.
+ * Underwear is mentioned where nothing covers it: a bra with no top, underpants with no trousers, skirt or dress
+ * (real test: "a purple shirt" alone hid that the Kin wore no trousers). A piece in two slots is said once.
+ * "Not wearing anything" for a Kin that says it is naked; "barefoot" or "shirtless" after the pieces.
  */
 export function describeOutfit(outfit) {
-  let clothing = inOrder(outfit, CLOTHING_ORDER);
-  const accessories = inOrder(outfit, ACCESSORY_ORDER);
-  if (!clothing.length) clothing = inOrder(outfit, UNDERWEAR_ORDER);
-  if (!clothing.length && !accessories.length) return NOT_DESCRIBED.outfit;
-  if (!clothing.length) return `Accessories: ${joinNatural(accessories)}.`;
-  const text = `Wearing ${joinNatural(clothing)}${accessories.length ? `, with ${joinNatural(accessories)}` : ''}.`;
-  return capitalizeFirst(text);
+  const tops = [...(outfit.topwear || []), ...(outfit.clothing || [])];
+  const coversTop = tops.length > 0;
+  const coversBottom = (outfit.bottomwear || []).length > 0 || (outfit.clothing || []).length > 0 || tops.some((p) => ONE_PIECE.test(p));
+  const order = ['headwear', 'topwear', ...(coversTop ? [] : ['topunderwear']), 'bottomwear', ...(coversBottom ? [] : ['bottomunderwear']), 'footwear', 'footunderwear', 'clothing'];
+  const once = (list) => list.filter((p, i) => list.findIndex((q) => q.toLowerCase() === p.toLowerCase()) === i);
+  const clothing = once(inOrder(outfit, order));
+  const accessories = once(inOrder(outfit, ACCESSORY_ORDER));
+  // "barefoot" with shoes or socks is a contradiction: the pieces win.
+  const footed = (outfit.footwear || []).length > 0 || (outfit.footunderwear || []).length > 0;
+  const states = (outfit[STATES] || []).filter((s) => !(s === 'barefoot' && footed));
+  const extra = (s) => `${s}${states.length ? `, ${joinNatural(states)}` : ''}.`;
+  const withAcc = accessories.length ? `, with ${joinNatural(accessories)}` : '';
+  if (!clothing.length && outfit[NAKED_KEY]) return extra(`Not wearing anything${withAcc}`);
+  if (!clothing.length && !accessories.length && !states.length) return NOT_DESCRIBED.outfit;
+  if (!clothing.length && !accessories.length) return capitalizeFirst(`${joinNatural(states)}.`);
+  if (!clothing.length) return extra(`Accessories: ${joinNatural(accessories)}`);
+  return capitalizeFirst(extra(`Wearing ${joinNatural(clothing)}${withAcc}`));
 }

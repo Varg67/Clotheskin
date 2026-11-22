@@ -537,3 +537,13 @@ test('the run writes its version to status.json each time it saves; the screen n
   assert.equal(versionMismatch(normalizeStatus({ runVersion: '0.3.9', kins: {} })), '0.3.9');
   assert.equal(versionMismatch(normalizeStatus({ kins: {} })), null, 'a file from before 0.4.0 says nothing');
 });
+
+test('a Kin that undresses: "Not wearing anything" replaces the last known clothes', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', intervalS: 900 } });
+  k.answers.reading.push(JSON.stringify({ location: 'in the bathroom', topwear: ['a white shirt'], bottomwear: ['jeans'] }));
+  await tick(k);
+  k.advance(20);
+  k.answers.reading.splice(0, Infinity, JSON.stringify({ location: 'in the shower', clothing: ['naked'] }));
+  await tick(k);
+  assert.equal(k.entry().reading.outfit, 'Not wearing anything.');
+});

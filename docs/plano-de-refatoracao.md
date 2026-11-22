@@ -131,6 +131,18 @@ O gargalo não é CPU: é **tempo de execução cobrado em créditos**. O Kindro
 | A resposta a `{ kin: "kins" }` traz `current` quando a tela é aberta do chat de um Kin | Fora do escopo da refatoração (é recurso novo), mas a separação da tela na Fase 4 deve deixar fácil usar `current` para escolher o Kin. |
 | A entrada de uma ação traz `"kin":"<id>"` no topo | Já tratado (`program.js:70`). |
 
+### 2.2 Como o app chega ao Kindroid (instalação por links)
+
+A instalação real não usa `kin send`: os links *raw* do GitHub vão, com um prompt, para o agente do Kindroid Apps, que copia os arquivos para dentro do programa. Consequências:
+
+| Fato | Consequência |
+| --- | --- |
+| O programa precisa de **22 dos 68 arquivos** do repositório (~160 KB): `kin.json`, `package.json`, `package-lock.json`, `main.js`, `run/kin.js`, `run/program.js`, 9 arquivos de `src/core/`, os 5 de `screen/` e os 2 de `sample/` | O resto (`dev/`, `tests/`, `scripts/`, `docs/`, `tools/`, configs de lint e tipos, `server.mjs`, README) **não vai** para o Kindroid. Isso confirma a decisão do §2.1: ferramentas de desenvolvimento nunca entram na lista. |
+| Cada arquivo copiado é uma chance de o agente esquecer ou alterar um | A lista **não pode ser mantida à mão**: é gerada seguindo os imports a partir de `main.js` e de `screen/index.html` (ver 0.10). Uma refatoração que cria um módulo novo em `src/core/` aumenta a lista automaticamente. |
+| `screen/app.js` tem 66 KB; se o agente reescrever o arquivo em vez de baixá-lo, pode truncar ou "corrigir" o código | Cada arquivo vai com seu SHA-256; o prompt pede ao agente que confira os hashes depois de copiar (se ele tiver um terminal). A tela e o run mostram um **identificador de build** curto, que a pessoa compara com o do prompt. A minificação (O5) fica **descartada**: linhas gigantes são as mais fáceis de corromper numa cópia. |
+| O GitHub serve os links *raw* de um branch com cache de alguns minutos, e o branch padrão hoje é `claude/zealous-heisenberg-mn7vjm` | Os links apontam para um **commit** (`raw.githubusercontent.com/Varg67/Clotheskin/<sha>/...`), não para um branch: nada de versão misturada nem cache velho, e a refatoração nos branches de trabalho não afeta o que está instalado até ser enviada de propósito. |
+| `screen/app.js` e `kin.json` são gerados | O prompt só é gerado se `npm run check` passar naquele commit (arquivos gerados em dia). |
+
 **Portão de cada commit:** `npm test` verde · `npm run build` sem diferença no git · `npm run test:e2e` 17/17 · lint e typecheck sem erros (a partir da Fase 0).
 
 ---
@@ -139,7 +151,7 @@ O gargalo não é CPU: é **tempo de execução cobrado em créditos**. O Kindro
 
 Cada fase é um conjunto pequeno de commits revisáveis; nenhuma mistura "mudar comportamento" com "mover código".
 
-### Fase 0 — Rede de segurança (antes de mexer em qualquer coisa) — **feita**, exceto a CI (0.9)
+### Fase 0 — Rede de segurança (antes de mexer em qualquer coisa) — **feita**, exceto a CI (0.9) e o pacote de instalação (0.10)
 
 O que ficou pronto: `tools/` (ESLint 10, TypeScript 6, `@types/node` 22, fora do lockfile da raiz), `eslint.config.mjs`, `jsconfig.json`, `tools/run.mjs` e os scripts `npm run tools | lint | typecheck | test:coverage | test:perf | build:check | check`; testes `tests/run-cost.test.js`, `tests/regressions.test.js` e `tests/perf/parsing.test.js`. `npm run check` passa: lint com 0 erros e 25 avisos (5 de código morto, que viram erro na Fase 2; 20 de tamanho e complexidade, que viram erro na Fase 4), 158 testes verdes e 6 pendentes (`todo`: B1, B2, B3 e o O1 nos três casos), cobertura de 99,9 % das linhas com limite mínimo aplicado, desempenho dentro do orçamento (2 pendentes: os dois casos do B4) e arquivos gerados em dia. O `typecheck` roda, mas só entra no `check` depois da Fase 1: hoje acusa 19 erros, todos de anotação (§1.4, mais `scripts/build-screen.mjs:46` e `scripts/real-kin-scenarios.mjs:138`).
 
@@ -154,6 +166,7 @@ O que ficou pronto: `tools/` (ESLint 10, TypeScript 6, `@types/node` 22, fora do
 | 0.7 | **Testes de regressão para B1–B4 escritos primeiro** (falham hoje; marcados `todo` até a Fase 1): mensagem do run quando `kin kins` falha; falta de tempo não conta como falha do servidor; `describeReading({})` não quebra; entrada de 200 KB processada em < 100 ms. |
 | 0.8 | Teste de desempenho `tests/perf.test.js` (ver §4.2) e teste de **custo por run** (contar chamadas `kin` por cenário). |
 | 0.9 | CI no GitHub Actions: Node 22, `npm ci`, `npm run check`, e2e com Chromium; artefato com capturas em caso de falha. |
+| 0.10 | **Pacote de instalação** (§2.2): `scripts/build-install.mjs` segue os imports a partir de `main.js` e `screen/index.html` e acrescenta `kin.json`, `package*.json` e `sample/`. `npm run install-prompt` (só depois de `npm run check` passar e do commit estar no GitHub) imprime o prompt para o agente do Kindroid: os links *raw* fixados no commit, o tamanho e o SHA-256 de cada arquivo, a instrução de copiar byte a byte sem editar e de conferir os hashes, e o identificador de build. Um teste garante que a lista cobre todo import do run e da tela (nenhum arquivo esquecido) e que nada de `tools/`, `dev/`, `tests/` ou `scripts/` entra nela. O identificador de build é um hash curto do conteúdo dos arquivos da lista, mostrado no rodapé das configurações da tela e no `kin end` de uma ação. |
 
 ### Fase 1 — Correções e tratamento de erros
 
@@ -221,7 +234,11 @@ Os nomes de arquivo respeitam o bundler (imports nomeados relativos). Os testes 
 - `announcer.js`: as duas regiões `aria-live`.
 - `app.js` só monta, assina o canal e agenda o polling; devolve `{ render, update, dispose }`.
 
-**4.4 Critérios de saída da Fase 4:** nenhuma função com complexidade > 12 ou > 4 parâmetros (regras viram `error`); nenhuma função com mais de 60 linhas; `src/screen` com cobertura unitária ≥ 80 % nos módulos puros.
+**4.4 Arquivos que vão para o Kindroid (§2.2).** A tela é empacotada num arquivo só, então dividir `src/screen/` não muda nada na instalação. Já cada módulo novo em `src/core/` é **um arquivo a mais para o agente copiar**: a divisão de `outfit.js` em 7 arquivos levaria a lista de 22 para 28. Duas saídas (decisão 5 no §6):
+- (a) dividir `src/core/` com moderação (`outfit.js` → 3 arquivos: vocabulário, limpeza das frases, leitura), mantendo a lista em ~24;
+- (b) empacotar também o run num arquivo gerado, como já é feito com a tela, e enviar só ele, o que deixa a lista em ~12 arquivos fixos, seja qual for a estrutura interna. Custa um gerador a mais e deixa o código do run publicado como gerado (legível, como `screen/app.js`).
+
+**4.5 Critérios de saída da Fase 4:** nenhuma função com complexidade > 12 ou > 4 parâmetros (regras viram `error`); nenhuma função com mais de 60 linhas; `src/screen` com cobertura unitária ≥ 80 % nos módulos puros.
 
 ### Fase 5 — Clean Code e tipagem
 
@@ -240,13 +257,13 @@ Os nomes de arquivo respeitam o bundler (imports nomeados relativos). Os testes 
 | O2 | Quando os dois arquivos forem necessários, lê-los em paralelo (`Promise.all`) | −1 latência de chamada por início com leitura devida | teste com `kin` fake com atraso fixo |
 | O3 | Limite de tamanho da resposta (1.4) e regex com âncora/limite em `normalizeLoose` | elimina o pior caso quadrático (243 ms → < 10 ms em 128 KB) | `tests/perf.test.js` |
 | O4 | Tela: manter o "não renderiza se `status.json` não mudou"; medir o `render()` completo no e2e (`performance.now`) e falhar acima de 16 ms | renderização sem travar a rolagem | e2e |
-| O5 | (Opcional) minificar `screen/app.js` no build | 66 KB → ~25 KB; só vale se o carregamento no app for lento | medir no Kindroid real primeiro |
+| ~~O5~~ | ~~Minificar `screen/app.js`~~ — **descartado** (§2.2): o agente do Kindroid copia os arquivos, e linhas gigantes são as mais fáceis de corromper | — | — |
 
 Não otimizar o que já é rápido (`parseReading`, fusos): o custo está nas chamadas ao Kindroid.
 
 ### Fase 7 — Fechamento
 
-1. Atualizar a tabela de layout do `README.md` com os novos módulos e os comandos `check`, `lint`, `typecheck`, `test:perf`.
+1. Atualizar a tabela de layout do `README.md` com os novos módulos. Trocar a seção "Send it to Kindroid" (`kin send`) pelo método real: `npm run install-prompt` e o envio dos links ao agente do Kindroid Apps (§2.2).
 2. Regras de complexidade e de cobertura viram bloqueantes no CI.
 3. Rodar o roteiro com o Kin real (`docs/real-kin-test-script.md`) como teste de aceitação final.
 
@@ -290,6 +307,7 @@ Não otimizar o que já é rápido (`parseReading`, fusos): o custo está nas ch
 | Mudar textos da tela sem querer (o roteiro do Kin real depende deles) | `build --check` do roteiro falha se qualquer frase mudar; snapshots das frases nos testes |
 | Regressão sutil na leitura de respostas "quase JSON" | os testes `what-if`/`polaris-what-if`/ambiguidade ficam intocados durante a Fase 4 e são a rede de segurança |
 | Mudança no formato de `status.json` | `v: 1` mantido; teste que carrega o `sample/status.json` e um arquivo antigo |
+| O agente do Kindroid esquecer ou alterar um arquivo ao copiar | lista gerada a partir dos imports, links fixados num commit, SHA-256 por arquivo e identificador de build visível na tela (0.10) |
 | Divisão grande demais num commit só | um commit por passo; nenhum commit mistura mover código e mudar comportamento |
 
 ## 6. Decisões pendentes (para você)
@@ -298,6 +316,8 @@ Não otimizar o que já é rápido (`parseReading`, fusos): o custo está nas ch
 2. **Formatação:** reformatar tudo de uma vez com Prettier (um commit só, grande e mecânico) ou só aplicar o limite de colunas nos trechos tocados?
 3. **CI:** criar o workflow do GitHub Actions neste repositório?
 4. **Idioma:** manter código, comentários e mensagens em inglês (como hoje) e só a documentação de testes em português?
+5. **Arquivos do run (§4.4):** (a) dividir `src/core/` com moderação, ou (b) empacotar o run num arquivo gerado, como a tela? Recomendo (a) agora e (b) só se a cópia pelo agente se mostrar pouco confiável.
+6. **Instalação (§2.2):** o agente do Kindroid baixa cada link (cópia exata) ou lê e reescreve o conteúdo? E ele tem um terminal para conferir SHA-256? Isso decide se a conferência de hashes vai no prompt ou fica só o identificador de build na tela.
 
 ## 7. Ordem sugerida e tamanho
 

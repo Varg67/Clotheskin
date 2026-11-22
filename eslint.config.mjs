@@ -47,11 +47,11 @@ const RULES = {
   'no-console': 'off', // the run logs on stderr through the log it is given; scripts print on purpose
   'prefer-const': 'error',
   'no-shadow': 'error',
-  // size and shape (warn for now; errors once the structure phase is done)
-  'complexity': ['warn', 12],
-  'max-params': ['warn', 4],
-  'max-depth': ['warn', 4],
-  'max-lines-per-function': ['warn', { max: 60, skipComments: true, skipBlankLines: true }],
+  // size and shape: a function that grows past these is split (refactoring plan, phase 4)
+  'complexity': ['error', 12],
+  'max-params': ['error', 4],
+  'max-depth': ['error', 4],
+  'max-lines-per-function': ['error', { max: 60, skipComments: true, skipBlankLines: true }],
 };
 
 export default [

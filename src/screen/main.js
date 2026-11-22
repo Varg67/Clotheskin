@@ -41,46 +41,50 @@ export function boot() {
     }
   }
 
-  /** The "Could not reach Kindroid" card: the alert is built once; later attempts only change the button and the text. */
-  function notConnected(why) {
-    let trying = false;
-    let givenUp = false;
-    const text = h('p', { class: 'muted' }, why);
-    const button = h('button', { type: 'button', class: 'btn primary', 'data-key': 'connect-retry', onClick: () => attempt() });
-    const paint = () => {
-      button.setAttribute('aria-busy', String(trying));
-      button.replaceChildren(...(trying ? [spinner(), 'Trying…'] : [icon('refresh', { size: 18 }), 'Try again']));
-      if (givenUp) text.textContent = 'Clotheskin stopped trying by itself. Press Try again, or close and reopen the app.';
-    };
-    root.replaceChildren(h('section', { class: 'card empty', role: 'alert', 'data-testid': 'not-connected' },
-      h('div', { class: 'empty-art' }, icon('alert', { size: 40 })),
-      h('h1', { class: 'not-connected-title' }, 'Could not reach Kindroid'),
-      text, channel ? button : null));
-    paint();
-    if (!channel) return;
-
-    async function attempt() {
-      if (trying || started) return;
-      trying = true; paint();
-      const c = await connect(5000);
-      trying = false;
-      if (c) { await start(c.kins); return; }
-      paint();
-    }
-    const until = Date.now() + RETRY_FOR_MS;
-    const timer = setInterval(() => {
-      if (started) { clearInterval(timer); return; }
-      if (Date.now() > until) { clearInterval(timer); givenUp = true; paint(); return; }
-      attempt();
-    }, RETRY_EVERY_MS);
-  }
-
+  const link = { root, channel, connect, start, isStarted: () => started };
   if (!channel) {
-    notConnected('Clotheskin is a Kindroid app: open it from Apps in Kindroid. To try it on your computer, run npm start and open the page it prints.');
+    notConnected(link, 'Clotheskin is a Kindroid app: open it from Apps in Kindroid. To try it on your computer, run npm start and open the page it prints.');
     return;
   }
   connect().then((c) => {
     if (c) start(c.kins);
-    else notConnected('The page around Clotheskin did not answer. It keeps trying by itself for a few minutes; if it keeps failing, close and reopen the app. Kindroid may be busy or under maintenance.');
+    else notConnected(link, 'The page around Clotheskin did not answer. It keeps trying by itself for a few minutes; if it keeps failing, close and reopen the app. Kindroid may be busy or under maintenance.');
   });
+}
+
+/**
+ * The "Could not reach Kindroid" card. It keeps trying by itself for a few minutes, and Try again tries at once. The
+ * alert is built once; later attempts only change the button and the text.
+ */
+function notConnected({ root, channel, connect, start, isStarted }, why) {
+  let trying = false;
+  let givenUp = false;
+  const text = h('p', { class: 'muted' }, why);
+  const button = h('button', { type: 'button', class: 'btn primary', 'data-key': 'connect-retry', onClick: () => attempt() });
+  const paint = () => {
+    button.setAttribute('aria-busy', String(trying));
+    button.replaceChildren(...(trying ? [spinner(), 'Trying…'] : [icon('refresh', { size: 18 }), 'Try again']));
+    if (givenUp) text.textContent = 'Clotheskin stopped trying by itself. Press Try again, or close and reopen the app.';
+  };
+  root.replaceChildren(h('section', { class: 'card empty', role: 'alert', 'data-testid': 'not-connected' },
+    h('div', { class: 'empty-art' }, icon('alert', { size: 40 })),
+    h('h1', { class: 'not-connected-title' }, 'Could not reach Kindroid'),
+    text, channel ? button : null));
+  paint();
+  if (!channel) return;
+
+  async function attempt() {
+    if (trying || isStarted()) return;
+    trying = true; paint();
+    const c = await connect(5000);
+    trying = false;
+    if (c) { await start(c.kins); return; }
+    paint();
+  }
+  const until = Date.now() + RETRY_FOR_MS;
+  const timer = setInterval(() => {
+    if (isStarted()) { clearInterval(timer); return; }
+    if (Date.now() > until) { clearInterval(timer); givenUp = true; paint(); return; }
+    attempt();
+  }, RETRY_EVERY_MS);
 }

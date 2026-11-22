@@ -4,9 +4,7 @@ import { isMainModule, writeOrCheck } from './lib/generated.mjs';
 import { SCENARIOS, expected, STEPS, SHORTEST_INTERVAL } from './real-kin-scenarios.mjs';
 import { CHAT_DAYS } from './build-manifest.mjs';
 
-export function renderScript() {
-  const out = [];
-  out.push(`# Roteiro do primeiro teste com um Kin de verdade
+const intro = () => `# Roteiro do primeiro teste com um Kin de verdade
 
 Este arquivo é gerado por \`node scripts/build-test-script.mjs\`. As frases "O cartão deve mostrar" são calculadas pelo código do app a partir da resposta que um Kin bem-comportado daria, então acompanham o app.
 
@@ -24,11 +22,13 @@ Este arquivo é gerado por \`node scripts/build-test-script.mjs\`. As frases "O 
 - **Erro em vermelho** no cartão: aperte **Try again** uma vez e anote o texto. Se houver algo entre parênteses, é o texto do próprio Kindroid: **copie exatamente**.
 - **A automação roda na nuvem do Kindroid**, não no seu PC: o Kindroid inicia o app a cada 15 minutos. Fechar o painel ou desligar o PC não para as leituras; só impede você de vê-las até reabrir.
 
-## Passos de leitura`);
-  for (const s of SCENARIOS) {
-    const e = expected(s);
-    const rows = [['Location', e.location], ['Pose and action', e.doing], ['Outfit', e.outfit], ...(e.hair ? [['Hair', e.hair]] : []), ...(e.makeup ? [['Makeup', e.makeup]] : [])];
-    out.push(`
+## Passos de leitura`;
+
+/** One reading step: what to write, what the Kin should do, and the card's sentences computed by the app's code. */
+function scenarioSection(s) {
+  const e = expected(s);
+  const rows = [['Location', e.location], ['Pose and action', e.doing], ['Outfit', e.outfit], ...(e.hair ? [['Hair', e.hair]] : []), ...(e.makeup ? [['Makeup', e.makeup]] : [])];
+  return `
 ### ${s.id}. ${s.title}
 
 **Você escreve:** ${s.say}
@@ -44,16 +44,18 @@ ${rows.map(([k, v]) => `| ${k} | ${v} |`).join('\n')}
 **Confira:**
 ${s.checks.map((c) => `- ${c}`).join('\n')}
 
-**Se falhar:** ${s.ifWrong}`);
-  }
-  out.push(`
+**Se falhar:** ${s.ifWrong}`;
+}
+
+const stepsIntro = () => `
 ## A noite, a automação e as falhas
 
 Estes passos verificam o que roda sozinho e o que acontece **quando algo dá errado**. Também servem para **coletar o texto real dos erros** do \`kin\`: o app só reconhece "arquivo ainda não existe" por um "404" e "manutenção" pelas palavras maintenance/downtime/outage, e esses textos foram supostos. Vale em todas as falhas: **as últimas frases boas continuam no cartão** e nenhum botão fica travado.
 
-Para a automação, use a régua em **${SHORTEST_INTERVAL}** durante o teste e volte para um intervalo maior depois: cada leitura é uma pergunta ao Kin.`);
-  for (const f of STEPS) {
-    out.push(`
+Para a automação, use a régua em **${SHORTEST_INTERVAL}** durante o teste e volte para um intervalo maior depois: cada leitura é uma pergunta ao Kin.`;
+
+/** One step of the night, the automation or a provoked failure. */
+const stepSection = (f) => `
 ### ${f.id}. ${f.title}
 
 **Como provocar:** ${f.provoke}
@@ -63,9 +65,9 @@ Para a automação, use a régua em **${SHORTEST_INTERVAL}** durante o teste e v
 **Confira:**
 ${f.checks.map((c) => `- ${c}`).join('\n')}
 
-**Anote:** ${f.record}`);
-  }
-  out.push(`
+**Anote:** ${f.record}`;
+
+const closing = () => `
 ## Medidas a anotar (uma vez)
 
 - **Tempo** entre apertar **Update status** e as frases aparecerem. Anote 3 leituras.
@@ -88,8 +90,10 @@ ${f.checks.map((c) => `- ${c}`).join('\n')}
 | Passo | Resultado (OK / parcial / falhou) | Tipo | Resposta do Kin ou **texto real do erro** (cole) | Cartão (cole as frases ou o aviso) |
 |---|---|---|---|---|
 ${[...SCENARIOS, ...STEPS].map((s) => `| ${s.id} |  |  |  |  |`).join('\n')}
-`);
-  return `${out.join('\n')}\n`;
+`;
+
+export function renderScript() {
+  return `${[intro(), ...SCENARIOS.map(scenarioSection), stepsIntro(), ...STEPS.map(stepSection), closing()].join('\n')}\n`;
 }
 
 if (isMainModule(import.meta.url)) writeOrCheck('docs/real-kin-test-script.md', renderScript());

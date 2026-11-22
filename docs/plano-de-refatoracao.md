@@ -168,7 +168,14 @@ O que ficou pronto: `tools/` (ESLint 10, TypeScript 6, `@types/node` 22, fora do
 | 0.9 | CI no GitHub Actions: Node 22, `npm ci`, `npm run check`, e2e com Chromium; artefato com capturas em caso de falha. |
 | 0.10 | **Pacote de instalação** (§2.2): `scripts/build-install.mjs` segue os imports a partir de `main.js` e `screen/index.html` e acrescenta `kin.json`, `package*.json` e `sample/`. `npm run install-prompt` (só depois de `npm run check` passar e do commit estar no GitHub) imprime o prompt para o agente do Kindroid: os links *raw* fixados no commit, o tamanho e o SHA-256 de cada arquivo, a instrução de copiar byte a byte sem editar e de conferir os hashes, e o identificador de build. Um teste garante que a lista cobre todo import do run e da tela (nenhum arquivo esquecido) e que nada de `tools/`, `dev/`, `tests/` ou `scripts/` entra nela. O identificador de build é um hash curto do conteúdo dos arquivos da lista, mostrado no rodapé das configurações da tela e no `kin end` de uma ação. |
 
-### Fase 1 — Correções e tratamento de erros
+### Fase 1 — Correções e tratamento de erros — **feita**
+
+Resultado: B1–B5 corrigidos, cada um com teste de regressão ativo; `npm run check` agora inclui o `typecheck` (0 erros); 165 testes verdes, 3 pendentes (só o O1, Fase 6); desempenho 10/10; e2e 17/17; o roteiro do Kin real não mudou nenhuma frase. O que saiu diferente do planejado:
+- **1.4:** acima de 20.000 caracteres a resposta **ainda é lida se for JSON estrito** (um `JSON.parse`, linear); só a busca e o reparo deixam de rodar. Recusar tudo quebraria um comportamento já testado (`what-if.test.js`: JSON válido de 1 MB é lido e cortado). O `maxBuffer` do `kin ask` **não** foi reduzido: estourá-lo viraria uma "falha do Kindroid" em vez de uma resposta inválida do Kin. Pior caso no limite: ~50 ms (antes, sem teto, ~210 ms com 60 KB).
+- **1.5:** a mensagem para entrada que não é JSON ficou a mesma; JSON que não é objeto tem mensagem própria.
+- **1.7:** o `dispose()` da tela foi **descartado**: ninguém o chamaria (a tela vive enquanto a moldura existe), então seria código morto novo. Ficou só a tipagem de `channel.wait`.
+- **1.8:** além do `getTime()`, `isDue`/`startDueFor` agora tratam uma data ilegível como "agora": antes, `isDue` ficava falso para sempre (nada mais seria lido) e `startDueFor` lançava `RangeError` na tela.
+- **Tipos:** os resultados de parse são uniões discriminadas (`ok: true | ok: false`), conferidas com `ok === false` onde o resultado é usado depois. Sem `strictNullChecks`, `!ok` não estreita o tipo. Ligar `strictNullChecks` traz 31 erros, a maioria sobre o estado da tela, e fica para a Fase 5, quando `!ok` volta a funcionar. Tipos importados no JSDoc usam `@import`, porque o bundler recusa (com razão) `import(`.
 
 | Passo | Entrega |
 | --- | --- |

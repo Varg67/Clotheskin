@@ -5,6 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runProgram } from '../run/program.js';
 import { fakeKindroid, READING } from './support/fake-kindroid.js';
+import { ACTION } from '../src/core/state.js';
 
 const tick = (k) => runProgram({ event: { trigger: 'schedule' }, kin: k.kin, clock: k.clock, retryAfterMs: 0 });
 const calls = (k) => k.calls.map((c) => c.slice(0, 2).join(' '));
@@ -50,9 +51,26 @@ test('cost: the morning is the dream question, kin tell and one save', async () 
 });
 
 for (const [name, settings] of [['stopped', { autoState: 'stopped', kinId: 'k1' }], ['paused', { autoState: 'paused', kinId: 'k1' }], ['with no Kin', { autoState: 'running' }]]) {
-  test(`cost: a start while ${name} reads settings.json only`, { todo: 'refactoring plan, phase 6 (O1): today it also reads status.json' }, async () => {
+  test(`cost: a start while ${name} reads settings.json only`, async () => {
     const k = fakeKindroid({ settings });
     await tick(k);
     assert.deepEqual(calls(k), ['get settings.json']);
   });
 }
+
+test('time: Update status reads its two files at once, not one after the other', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1' } });
+  k.answers.reading.push(READING('sitting on the bed', 'reading a book'));
+  const get = k.kin.get;
+  let inFlight = 0;
+  let most = 0;
+  k.kin.get = async (path) => {
+    inFlight += 1; most = Math.max(most, inFlight);
+    await new Promise((r) => setTimeout(r, 20)); // a kin call takes a while
+    inFlight -= 1;
+    return get(path);
+  };
+  await runProgram({ event: { trigger: 'action', action: ACTION, input: { kin: 'k1' } }, kin: k.kin, clock: k.clock, retryAfterMs: 0 });
+  assert.equal(most, 2, 'settings.json and status.json are read together');
+  assert.deepEqual(calls(k).slice(0, 2), ['get settings.json', 'get status.json']);
+});

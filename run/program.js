@@ -41,6 +41,7 @@ const MIN_ASK_MS = 15000; // a question with less time than this left waits for 
  * @typedef {{ ok: true, text: string } | { ok: false, kind: ErrorKind, error: string }} AskResult
  * @typedef {{ kind?: ErrorKind, error: string, length?: number }} Outcome  what went wrong in a step
  * @typedef {{ ok: boolean, message: string }} Result  what the run ends with (kin end [--failed] message)
+ * @typedef {{ clock?: () => Date, log?: (line: string) => void, retryAfterMs?: number, budgetMs?: number }} Options
  */
 /** @import { Settings, Status, Entry } from '../src/core/state.js' */
 /** @import { ErrorKind } from '../src/core/schedule.js' */
@@ -63,16 +64,63 @@ const failed = (message) => ({ ok: false, message: oneLine(message) });
  * @returns {Promise<Result>}
  */
 export async function runProgram({ event, kin, ...options }) {
-  const files = await readFiles(kin);
-  if (!files.ok) return failed(`Could not read the app's files, so nothing was changed: ${files.error}`);
-  return dispatch(context(kin, files.settings, options), files.status, event);
+  const trigger = event && event.trigger;
+  if (trigger === 'schedule') return startScheduled(kin, options);
+  if (trigger === 'action' && event.action === ACTION) return startAction(kin, options, event);
+  return failed(`Nothing to do for ${trigger === 'action' ? `the action "${event.action}"` : `the trigger "${trigger}"`}.`);
 }
+
+/**
+ * The 15-minute start reads settings.json first, and status.json only when the automatic update runs for a Kin.
+ * Kindroid starts the program 96 times a day even while it is stopped, and every kin call is running time (credits):
+ * a start while stopped or paused, or with no Kin, is one call.
+ * @param {KinApi} kin
+ * @param {Options} options
+ * @returns {Promise<Result>}
+ */
+async function startScheduled(kin, options) {
+  const settings = await readFile(kin, SETTINGS_FILE, normalizeSettings);
+  if (!settings.ok) return cannotRead(settings.error);
+  const idle = idleReason(settings.value);
+  if (idle) return ok(idle);
+  const status = await readFile(kin, STATUS_FILE, normalizeStatus);
+  if (!status.ok) return cannotRead(status.error);
+  return scheduled(context(kin, settings.value, options), status.value);
+}
+
+/**
+ * The screen's action needs both files, so both are read at once.
+ * @param {KinApi} kin
+ * @param {Options} options
+ * @param {any} event
+ * @returns {Promise<Result>}
+ */
+async function startAction(kin, options, event) {
+  const [settings, status] = await Promise.all([
+    readFile(kin, SETTINGS_FILE, normalizeSettings),
+    readFile(kin, STATUS_FILE, normalizeStatus),
+  ]);
+  if (!settings.ok) return cannotRead(settings.error);
+  if (!status.ok) return cannotRead(status.error);
+  return onAction(context(kin, settings.value, options), status.value, event);
+}
+
+/** Why the automatic update does nothing at all now (stopped, paused, no Kin), or null when it runs. */
+function idleReason(settings) {
+  if (settings.autoState === AUTO.STOPPED) return 'Automatic update is stopped.';
+  if (settings.autoState === AUTO.PAUSED) return 'Automatic update is paused.';
+  if (!settings.kinId) return 'No Kin is selected.';
+  return null;
+}
+
+/** @returns {Result} */
+const cannotRead = (error) => failed(`Could not read the app's files, so nothing was changed: ${error}`);
 
 /**
  * What every step gets: the kin functions, the clock, the log, the settings and the run's deadline (from now).
  * @param {KinApi} kin
  * @param {Settings} settings
- * @param {{ clock?: () => Date, log?: (line: string) => void, retryAfterMs?: number, budgetMs?: number }} options
+ * @param {Options} options
  * @returns {Ctx}
  */
 function context(kin, settings, { clock = () => new Date(), log = () => {}, retryAfterMs = RETRY_AFTER_MS, budgetMs = RUN_BUDGET_MS }) {
@@ -80,29 +128,17 @@ function context(kin, settings, { clock = () => new Date(), log = () => {}, retr
 }
 
 /**
- * The trigger to its step: the 15-minute start, or the screen's action.
- * @param {Ctx} ctx
- * @param {Status} status
- * @param {any} event
- * @returns {Promise<Result>|Result}
- */
-function dispatch(ctx, status, event) {
-  const trigger = event && event.trigger;
-  if (trigger === 'schedule') return scheduled(ctx, status);
-  if (trigger === 'action' && event.action === ACTION) return onAction(ctx, status, event);
-  return failed(`Nothing to do for ${trigger === 'action' ? `the action "${event.action}"` : `the trigger "${trigger}"`}.`);
-}
-
-/** settings.json and status.json, normalised; { ok: false, error } when either could not be read. */
-/**
+ * One of the program's files, normalised; { ok: false, error } when it exists but could not be read (never thrown:
+ * the two reads of an action go at once).
+ * @template T
  * @param {KinApi} kin
- * @returns {Promise<{ ok: true, settings: Settings, status: Status } | { ok: false, error: string }>}
+ * @param {string} path
+ * @param {(raw: string|null) => T} normalize
+ * @returns {Promise<{ ok: true, value: T } | { ok: false, error: string }>}
  */
-async function readFiles(kin) {
+async function readFile(kin, path, normalize) {
   try {
-    const settings = normalizeSettings(await kin.get(SETTINGS_FILE));
-    const status = normalizeStatus(await kin.get(STATUS_FILE));
-    return { ok: true, settings, status };
+    return { ok: true, value: normalize(await kin.get(path)) };
   } catch (e) {
     return { ok: false, error: errorMessage(e) };
   }
@@ -110,12 +146,15 @@ async function readFiles(kin) {
 
 // ---------------------------------------------------------------- triggers
 
+/**
+ * The 15-minute start, while the automatic update runs for a Kin: does what is due (a reading, or the dream question).
+ * @param {Ctx} ctx
+ * @param {Status} status
+ * @returns {Promise<Result>}
+ */
 async function scheduled(ctx, status) {
   const { settings, clock } = ctx;
-  if (settings.autoState === AUTO.STOPPED) return ok('Automatic update is stopped.');
-  if (settings.autoState === AUTO.PAUSED) return ok('Automatic update is paused.');
-  if (!settings.kinId) return ok('No Kin is selected.');
-
+  if (!settings.kinId) return ok('No Kin is selected.'); // idleReason said so already; this tells the types
   const entry = afterStop(status.kins[settings.kinId] || normalizeEntry(), settings); // Stop forgot the night before it
   const at = plannedAt(entry, settings);
   if (!isDue(at, clock())) return ok(`Nothing due before ${at}.`); // most starts end here, without asking anything

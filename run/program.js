@@ -85,7 +85,9 @@ async function attachedKin(ctx, id, entry) {
   let kins;
   try { kins = await ctx.kin.kins(); } catch (e) {
     const who = { id, name: entry.name || id };
-    return { ok: false, result: await fail(ctx, who, { ...entry, lastRunAt: ctx.clock().toISOString() }, { kind: 'server', error: `Could not list the Kins: ${e.message}` }, ctx.clock(), entry) };
+    const now = ctx.clock();
+    const outcome = { kind: 'server', error: `Could not list the Kins: ${e.message}` };
+    return { ok: false, result: await fail(ctx, { who, entry: { ...entry, lastRunAt: now.toISOString() }, outcome, now, base: entry }) };
   }
   const kin = kins.find((k) => k.id === id);
   if (!kin) return { ok: false, result: failed('The selected Kin is not attached to Clotheskin any more.') };
@@ -101,9 +103,13 @@ async function read(ctx, who, entry) {
   const e = { ...entry, name: who.name, lastRunAt: now.toISOString() };
 
   const answer = await ask(ctx, who, buildOutfitPrompt({ name: who.name }));
-  if (!answer.ok) return fail(ctx, who, e, answer, now, null, entry);
+  if (!answer.ok && answer.kind === 'time') return postpone(ctx, { who, entry: e, now, base: entry, note: 'The reading waits for the next start of the app.' });
+  if (!answer.ok) return fail(ctx, { who, entry: e, outcome: answer, now, base: entry });
   const parsed = parseReading(answer.text);
-  if (!parsed.ok) return fail(ctx, who, e, { kind: 'answer', error: `${parsed.error} Nothing was changed.`, length: answer.text.length }, now, null, entry);
+  if (!parsed.ok) {
+    const outcome = { kind: 'answer', error: `${parsed.error} Nothing was changed.`, length: answer.text.length };
+    return fail(ctx, { who, entry: e, outcome, now, base: entry });
+  }
   const reading = describeReading(parsed);
   // Hair and makeup are kept only when the Kin described them (the card shows those rows only then).
   if (!parsed.hair) reading.hair = null;
@@ -124,13 +130,18 @@ async function read(ctx, who, entry) {
   await save(ctx, who.id, e, entry);
   const s = await ask(ctx, who, buildFollowUpPrompt(SLEEP_PROMPT, { name: who.name, now: describeNow(now, settings.tz) }));
   if (!s.ok && s.kind === 'time') {
-    const later = { ...succeeded(e), retryAt: new Date(now.getTime() + TICK_S * 1000).toISOString(), note: 'The sleep question waits for the next start of the app.' };
-    await save(ctx, who.id, later, e);
-    return ok(`${line} The sleep question waits for the next start.`);
+    const note = 'The sleep question waits for the next start of the app.';
+    return postpone(ctx, { who, entry: succeeded(e), now, base: e, note, message: `${line} The sleep question waits for the next start.` });
   }
-  if (!s.ok) return fail(ctx, who, e, s, now, `The sleep question could not be asked (${s.error}). It is asked again at the next update.`, e);
+  if (!s.ok) {
+    const note = `The sleep question could not be asked (${s.error}). It is asked again at the next update.`;
+    return fail(ctx, { who, entry: e, outcome: s, now, note, base: e });
+  }
   const p = parseSleepAnswer(s.text);
-  if (!p.ok) return fail(ctx, who, e, { kind: 'answer', error: p.error }, now, `The sleep question did not get a clear answer (${p.error}) It is asked again at the next update.`, e);
+  if (!p.ok) {
+    const note = `The sleep question did not get a clear answer (${p.error}) It is asked again at the next update.`;
+    return fail(ctx, { who, entry: e, outcome: { kind: 'answer', error: p.error }, now, note, base: e });
+  }
   const plan = p.sleeping ? planSleep(p.wakeAt, now, settings.tz) : null;
   await save(ctx, who.id, succeeded({ ...e, sleptOn: mark, sleep: plan ? { wakeAt: plan.wakeAt.toISOString(), until: plan.until.toISOString() } : null }), e);
   if (plan) return ok(`${line} Asleep until ${p.wakeAt}.`);
@@ -143,7 +154,12 @@ async function wake(ctx, who, entry) {
   const now = clock();
   const e = { ...entry, name: who.name, lastRunAt: now.toISOString() };
   const d = await ask(ctx, who, buildFollowUpPrompt(DREAM_PROMPT, { name: who.name, now: describeNow(now, settings.tz) }));
-  if (!d.ok) return fail(ctx, who, e, d, now, `The dream question could not be asked (${d.error}). It is asked again at the next update.`, entry); // the night goes on
+  // the night goes on in both cases below
+  if (!d.ok && d.kind === 'time') return postpone(ctx, { who, entry: e, now, base: entry, note: 'The dream question waits for the next start of the app.' });
+  if (!d.ok) {
+    const note = `The dream question could not be asked (${d.error}). It is asked again at the next update.`;
+    return fail(ctx, { who, entry: e, outcome: d, now, note, base: entry });
+  }
   const p = parseDreamAnswer(d.text);
   let told = '';
   if (p.ok) {
@@ -189,8 +205,11 @@ function succeeded(e) {
   return { ...e, failures: 0, serverFailures: 0, errorKind: null, error: null, note: null, retryAt: null };
 }
 
-/** Records a failure: errors in a row slow the next try down; only Kindroid errors count towards the server warning. */
-async function fail(ctx, who, e, outcome, now, note, base) {
+/**
+ * Records a failure: errors in a row slow the next try down; only Kindroid errors count towards the server warning.
+ * `entry` is what this run would save, `base` the entry it started from (see save), `note` the words for the person.
+ */
+async function fail(ctx, { who, entry: e, outcome, now, note = null, base }) {
   const kind = errorKind(outcome.error, outcome.kind || 'server');
   if (kind === 'answer' && outcome.length !== undefined) ctx.log(`answer not usable (${outcome.length} characters)`);
   const failures = e.failures + 1;
@@ -205,6 +224,15 @@ async function fail(ctx, who, e, outcome, now, note, base) {
   };
   await save(ctx, who.id, next, base);
   return failed(note || next.error);
+}
+
+/**
+ * The run's own time ran out before a question could be asked: nothing failed (no error is counted, nothing slows
+ * down), the step is tried again at the next start of the program.
+ */
+async function postpone(ctx, { who, entry, now, note, base, message = note }) {
+  await save(ctx, who.id, { ...entry, retryAt: new Date(now.getTime() + TICK_S * 1000).toISOString(), note }, base);
+  return ok(message);
 }
 
 /**

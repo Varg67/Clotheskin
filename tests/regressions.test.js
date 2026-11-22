@@ -8,7 +8,7 @@ import { fakeKindroid, READING } from './support/fake-kindroid.js';
 
 const tick = (k) => runProgram({ event: { trigger: 'schedule' }, kin: k.kin, clock: k.clock, retryAfterMs: 0 });
 
-test('B1: when Kindroid cannot list the Kins, the run says so (not "[object Object]")', { todo: 'refactoring plan, phase 1.1' }, async () => {
+test('B1: when Kindroid cannot list the Kins, the run says so (not "[object Object]")', async () => {
   const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1' } });
   k.kin.kins = async () => { throw new Error('kin kins failed: 503 Service Unavailable'); };
   const r = await tick(k);
@@ -17,7 +17,7 @@ test('B1: when Kindroid cannot list the Kins, the run says so (not "[object Obje
   assert.match(r.message, /Could not list the Kins/);
 });
 
-test('B2: running out of the run\'s own time is not counted as a Kindroid failure', { todo: 'refactoring plan, phase 1.2' }, async () => {
+test('B2: running out of the run\'s own time is not counted as a Kindroid failure', async () => {
   const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1' } });
   k.answers.reading.push(READING('lying in bed', 'sleeping'));
   k.answers.sleep.push('{"sleeping":true,"wake_at":"07:30"}');
@@ -29,6 +29,22 @@ test('B2: running out of the run\'s own time is not counted as a Kindroid failur
   assert.equal(e.failures, 0);
   assert.equal(e.serverFailures, 0);
   assert.ok(e.sleep, 'the night goes on');
+  assert.equal(e.retryAt, new Date(k.clock().getTime() + 15 * 60000).toISOString(), 'the dream question waits for the next start');
+  assert.match(e.note, /waits for the next start/);
+});
+
+test('B2: a reading with no time left waits for the next start, without an error and without losing the last reading', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1' } });
+  k.answers.reading.push(READING('sitting on the bed', 'reading a book'));
+  await tick(k);
+  const before = k.entry();
+  k.advance(30);
+  const r = await runProgram({ event: { trigger: 'action', action: ACTION, input: { kin: 'k1' } }, kin: k.kin, clock: k.clock, retryAfterMs: 0, budgetMs: 20000 });
+  assert.equal(r.ok, true, r.message);
+  const e = k.entry();
+  assert.deepEqual([e.failures, e.serverFailures, e.errorKind, e.error], [0, 0, null, null]);
+  assert.deepEqual(e.reading, before.reading);
+  assert.deepEqual(k.asks(), ['reading'], 'no question was started');
 });
 
 test('B3: describing a reading never throws on a partial result', { todo: 'refactoring plan, phase 1.3' }, () => {

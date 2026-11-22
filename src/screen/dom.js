@@ -4,16 +4,19 @@
 /** Hyperscript: h('button', { class, onClick, ... }, ...children). Handlers use onXxx; the rest are attributes. */
 export function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs || {})) {
-    if (v === undefined || v === null || v === false) continue;
-    if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
-    else if (k === 'class') el.className = v;
-    else if (k === 'value') el.value = v;
-    else if (k === 'checked' || k === 'disabled' || k === 'open') el[k] = true; // undefined/false were skipped above
-    else el.setAttribute(k, v === true ? '' : String(v));
-  }
+  for (const [k, v] of Object.entries(attrs || {})) if (v !== undefined && v !== null && v !== false) setAttribute(el, k, v);
   append(el, children);
   return el;
+}
+
+const FLAGS = new Set(['checked', 'disabled', 'open']); // set as properties (undefined and false never get here)
+
+function setAttribute(el, k, v) {
+  if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
+  else if (k === 'class') el.className = v;
+  else if (k === 'value') el.value = v;
+  else if (FLAGS.has(k)) el[k] = true;
+  else el.setAttribute(k, v === true ? '' : String(v));
 }
 
 function append(el, children) {

@@ -9,7 +9,7 @@
     "build": "node scripts/build-screen.mjs && node scripts/build-manifest.mjs && node scripts/build-test-script.mjs",
     "build:check": "node scripts/build-screen.mjs --check && node scripts/build-manifest.mjs --check && node scripts/build-test-script.mjs --check",
     "test": "node --test \"tests/*.test.js\"",
-    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include=\"src/core/**\" --test-coverage-include=\"run/**\" --test-coverage-lines=95 --test-coverage-branches=85 --test-coverage-functions=90 \"tests/*.test.js\"",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include=\"src/core/**\" --test-coverage-include=\"run/**\" --test-coverage-include=\"src/screen/texts.js\" --test-coverage-include=\"src/screen/store.js\" --test-coverage-lines=95 --test-coverage-branches=85 --test-coverage-functions=90 \"tests/*.test.js\"",
     "test:perf": "node --test \"tests/perf/*.test.js\"",
     "test:e2e": "node tests/e2e/screen.cjs",
     "tools": "npm ci --prefix tools --no-audit --no-fund",

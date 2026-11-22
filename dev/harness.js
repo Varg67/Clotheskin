@@ -6,6 +6,7 @@
 // Browser tests drive it through window.dev (tests/e2e/screen.cjs).
 import { runProgram } from '/run/program.js';
 import { DEMO_SCENES } from '/dev/scenes.js';
+import { promptKind } from '/src/core/prompt.js';
 
 const STORE = 'clotheskin-dev';
 const frame = document.getElementById('frame');
@@ -31,13 +32,12 @@ function log(...entry) {
 }
 
 // ---------------------------------------------------------------- the stand-in Kin and `kin` for the run
-const kindOf = (prompt) => (/are you asleep right now/.test(prompt) ? 'sleep' : /what did you dream/.test(prompt) ? 'dream' : 'reading');
 const kin = {
   async get(path) { log('kin files get', path); return state.files.has(path) ? state.files.get(path) : null; },
   async put(path, text) { log('kin files put', path); state.files.set(path, text); persist(); },
   async kins() { log('kin kins'); return attached(); },
   async ask(prompt, { kin: id } = {}) {
-    const kind = kindOf(prompt);
+    const kind = promptKind(prompt);
     log('kin ask', kind, id);
     await new Promise((r) => setTimeout(r, 150));
     const mode = $('kindroid').value;

@@ -1,5 +1,5 @@
 // All user-visible dates are English, in the user's own time zone, regardless of browser locale.
-import { deviceTimeZone as userTimeZone } from './time.js';
+import { deviceTimeZone as userTimeZone, zonedParts, dayAfter } from './time.js';
 
 const LOCALE = 'en-US';
 
@@ -15,20 +15,14 @@ let rtf;
 
 const valid = (iso) => typeof iso === 'string' && Number.isFinite(Date.parse(iso));
 
-/** The calendar day of a moment in a time zone, as [year, month, day]. */
-function calendarDay(x, timeZone) {
-  const parts = fmt('day', timeZone, { year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(x);
-  const get = (t) => Number(parts.find((p) => p.type === t).value);
-  return [get('year'), get('month'), get('day')];
-}
-const sameDay = (a, b) => a.every((v, i) => v === b[i]);
+const sameDay = (a, b) => a.y === b.y && a.m === b.m && a.d === b.d;
 
 /** "10:05 PM" today, "Nov 20, 10:05 PM" another day. A broken date (corrupt file) is "unknown time", never a crash. */
 export function formatClock(iso, { timeZone = userTimeZone(), now = new Date() } = {}) {
   if (!valid(iso)) return 'unknown time';
   const d = new Date(iso);
   const time = fmt('time', timeZone, { hour: 'numeric', minute: '2-digit' }).format(d);
-  if (sameDay(calendarDay(d, timeZone), calendarDay(now, timeZone))) return time;
+  if (sameDay(zonedParts(d, timeZone), zonedParts(now, timeZone))) return time;
   return `${fmt('date', timeZone, { month: 'short', day: 'numeric' }).format(d)}, ${time}`;
 }
 
@@ -49,9 +43,6 @@ export function formatRelative(iso, now = new Date()) {
  */
 export function formatWhen(iso, { timeZone = userTimeZone(), now = new Date() } = {}) {
   if (!valid(iso)) return 'unknown time';
-  const [y, m, d] = calendarDay(now, timeZone);
-  const next = new Date(Date.UTC(y, m - 1, d + 1));
-  const tomorrow = [next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate()];
-  if (sameDay(calendarDay(new Date(iso), timeZone), tomorrow)) return `${formatClock(iso, { timeZone, now: new Date(iso) })} tomorrow`;
+  if (sameDay(zonedParts(new Date(iso), timeZone), dayAfter(zonedParts(now, timeZone)))) return `${formatClock(iso, { timeZone, now: new Date(iso) })} tomorrow`;
   return formatClock(iso, { timeZone, now });
 }

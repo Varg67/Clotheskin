@@ -104,3 +104,12 @@ test('text helpers: a sentence gets one period and a capital; cuts happen at a w
   assert.equal(stripWrapping('**"in the kitchen"**'), 'in the kitchen');
   assert.equal(stripWrapping('(at home)'), 'at home');
 });
+
+test('an unknown time zone reads as UTC, also once its formatter is cached', () => {
+  const d = new Date('2026-11-20T22:05:00Z');
+  for (let i = 0; i < 2; i += 1) {
+    assert.deepEqual(zonedParts(d, 'Not/AZone'), zonedParts(d, 'UTC'));
+    assert.deepEqual(zonedParts(d, undefined), zonedParts(d, 'UTC'));
+  }
+  assert.equal(zonedParts(d, 'America/Sao_Paulo').h, 19, 'a real zone is not mixed up with the fallback');
+});

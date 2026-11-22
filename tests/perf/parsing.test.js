@@ -74,5 +74,5 @@ test('perf: wake-up times for a year in 10 time zones (daylight-saving changes i
   const ms = once(() => {
     for (const z of zones) for (let d = 0; d < 365; d += 1) nextWallTime({ h: 7, m: 30 }, new Date(Date.UTC(2026, 0, 1) + d * 864e5), z);
   });
-  assert.ok(ms < 8000, `${ms.toFixed(0)} ms for 3,650 wake-up times`);
+  assert.ok(ms < 2000, `${ms.toFixed(0)} ms for 3,650 wake-up times`); // ~200 ms since the zone check is cached (was ~2 s)
 });

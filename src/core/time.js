@@ -16,13 +16,15 @@ export function deviceTimeZone() {
   try { return safeTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone); } catch { return 'UTC'; }
 }
 
-/** { y, m, d, h, min, weekday } of a moment on the wall clock of a zone. */
+/**
+ * { y, m, d, h, min, s, weekday } of a moment on the wall clock of a zone (an unknown zone is UTC). The formatter is
+ * kept per zone as given, so the zone is checked (a formatter made and thrown away) only the first time.
+ */
 export function zonedParts(date, tz) {
-  const zone = safeTimeZone(tz);
-  let f = partFormats.get(zone);
+  let f = partFormats.get(tz);
   if (!f) {
-    f = new Intl.DateTimeFormat(LOCALE, { timeZone: zone, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric', weekday: 'long' });
-    partFormats.set(zone, f);
+    f = new Intl.DateTimeFormat(LOCALE, { timeZone: safeTimeZone(tz), hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric', weekday: 'long' });
+    partFormats.set(tz, f);
   }
   const p = {};
   for (const { type, value } of f.formatToParts(date)) p[type] = value;
@@ -43,14 +45,17 @@ export function zonedTime({ y, m, d, h, min }, tz) {
   return new Date(exact.length ? Math.min(...exact) : Math.max(...candidates));
 }
 
+/** The calendar day after { y, m, d } (month and year ends included), whatever the length of that day in a zone. */
+export function dayAfter({ y, m, d }) {
+  const next = new Date(Date.UTC(y, m - 1, d + 1));
+  return { y: next.getUTCFullYear(), m: next.getUTCMonth() + 1, d: next.getUTCDate() };
+}
+
 /** The next moment, after `now`, when the wall clock of the zone shows h:m. */
 export function nextWallTime({ h, m }, now, tz) {
   const today = zonedParts(now, tz);
   let at = zonedTime({ y: today.y, m: today.m, d: today.d, h, min: m }, tz);
-  if (at <= now) {
-    const next = new Date(Date.UTC(today.y, today.m - 1, today.d + 1)); // the next calendar day, whatever its length
-    at = zonedTime({ y: next.getUTCFullYear(), m: next.getUTCMonth() + 1, d: next.getUTCDate(), h, min: m }, tz);
-  }
+  if (at <= now) at = zonedTime({ ...dayAfter(today), h, min: m }, tz);
   return at;
 }
 

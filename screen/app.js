@@ -8,7 +8,7 @@ function __req(p) { if (!(p in __mods)) { if (!__defs[p]) throw new Error('missi
 
 __def("src/core/format.js", function () {
 // All user-visible dates are English, in the user's own time zone, regardless of browser locale.
-const { deviceTimeZone: userTimeZone } = __req("src/core/time.js");
+const { deviceTimeZone: userTimeZone, zonedParts, dayAfter } = __req("src/core/time.js");
 
 const LOCALE = 'en-US';
 
@@ -24,20 +24,14 @@ let rtf;
 
 const valid = (iso) => typeof iso === 'string' && Number.isFinite(Date.parse(iso));
 
-/** The calendar day of a moment in a time zone, as [year, month, day]. */
-function calendarDay(x, timeZone) {
-  const parts = fmt('day', timeZone, { year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(x);
-  const get = (t) => Number(parts.find((p) => p.type === t).value);
-  return [get('year'), get('month'), get('day')];
-}
-const sameDay = (a, b) => a.every((v, i) => v === b[i]);
+const sameDay = (a, b) => a.y === b.y && a.m === b.m && a.d === b.d;
 
 /** "10:05 PM" today, "Nov 20, 10:05 PM" another day. A broken date (corrupt file) is "unknown time", never a crash. */
 function formatClock(iso, { timeZone = userTimeZone(), now = new Date() } = {}) {
   if (!valid(iso)) return 'unknown time';
   const d = new Date(iso);
   const time = fmt('time', timeZone, { hour: 'numeric', minute: '2-digit' }).format(d);
-  if (sameDay(calendarDay(d, timeZone), calendarDay(now, timeZone))) return time;
+  if (sameDay(zonedParts(d, timeZone), zonedParts(now, timeZone))) return time;
   return `${fmt('date', timeZone, { month: 'short', day: 'numeric' }).format(d)}, ${time}`;
 }
 
@@ -58,10 +52,7 @@ function formatRelative(iso, now = new Date()) {
  */
 function formatWhen(iso, { timeZone = userTimeZone(), now = new Date() } = {}) {
   if (!valid(iso)) return 'unknown time';
-  const [y, m, d] = calendarDay(now, timeZone);
-  const next = new Date(Date.UTC(y, m - 1, d + 1));
-  const tomorrow = [next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate()];
-  if (sameDay(calendarDay(new Date(iso), timeZone), tomorrow)) return `${formatClock(iso, { timeZone, now: new Date(iso) })} tomorrow`;
+  if (sameDay(zonedParts(new Date(iso), timeZone), dayAfter(zonedParts(now, timeZone)))) return `${formatClock(iso, { timeZone, now: new Date(iso) })} tomorrow`;
   return formatClock(iso, { timeZone, now });
 }
 return { formatClock, formatRelative, formatWhen };
@@ -582,13 +573,15 @@ function deviceTimeZone() {
   try { return safeTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone); } catch { return 'UTC'; }
 }
 
-/** { y, m, d, h, min, weekday } of a moment on the wall clock of a zone. */
+/**
+ * { y, m, d, h, min, s, weekday } of a moment on the wall clock of a zone (an unknown zone is UTC). The formatter is
+ * kept per zone as given, so the zone is checked (a formatter made and thrown away) only the first time.
+ */
 function zonedParts(date, tz) {
-  const zone = safeTimeZone(tz);
-  let f = partFormats.get(zone);
+  let f = partFormats.get(tz);
   if (!f) {
-    f = new Intl.DateTimeFormat(LOCALE, { timeZone: zone, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric', weekday: 'long' });
-    partFormats.set(zone, f);
+    f = new Intl.DateTimeFormat(LOCALE, { timeZone: safeTimeZone(tz), hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric', weekday: 'long' });
+    partFormats.set(tz, f);
   }
   const p = {};
   for (const { type, value } of f.formatToParts(date)) p[type] = value;
@@ -609,14 +602,17 @@ function zonedTime({ y, m, d, h, min }, tz) {
   return new Date(exact.length ? Math.min(...exact) : Math.max(...candidates));
 }
 
+/** The calendar day after { y, m, d } (month and year ends included), whatever the length of that day in a zone. */
+function dayAfter({ y, m, d }) {
+  const next = new Date(Date.UTC(y, m - 1, d + 1));
+  return { y: next.getUTCFullYear(), m: next.getUTCMonth() + 1, d: next.getUTCDate() };
+}
+
 /** The next moment, after `now`, when the wall clock of the zone shows h:m. */
 function nextWallTime({ h, m }, now, tz) {
   const today = zonedParts(now, tz);
   let at = zonedTime({ y: today.y, m: today.m, d: today.d, h, min: m }, tz);
-  if (at <= now) {
-    const next = new Date(Date.UTC(today.y, today.m - 1, today.d + 1)); // the next calendar day, whatever its length
-    at = zonedTime({ y: next.getUTCFullYear(), m: next.getUTCMonth() + 1, d: next.getUTCDate(), h, min: m }, tz);
-  }
+  if (at <= now) at = zonedTime({ ...dayAfter(today), h, min: m }, tz);
   return at;
 }
 
@@ -628,7 +624,7 @@ function describeNow(now, tz) {
   const p = zonedParts(now, tz);
   return `${clockText(p.h, p.min)} on ${p.weekday}`;
 }
-return { safeTimeZone, deviceTimeZone, zonedParts, zonedTime, nextWallTime, clockText, describeNow };
+return { safeTimeZone, deviceTimeZone, zonedParts, zonedTime, dayAfter, nextWallTime, clockText, describeNow };
 });
 
 __def("src/screen/app.js", function () {

@@ -67,7 +67,7 @@ test('what if the Kin answers with text that looks like HTML or a script? It sta
 
 test('what if the Kin name contains template markers or $ signs? They are not expanded', () => {
   const p = buildOutfitPrompt({ name: '{{recent_chat}} $& $1 {{name}}' });
-  assert.match(p, /^You are \{\{recent_chat\}\} \$& \$1 \{\{name\}\}\./);
+  assert.match(p, /^Task: you are \{\{recent_chat\}\} \$& \$1 \{\{name\}\}\./m);
   assert.ok(!p.includes('RECENT CHAT'));
 });
 

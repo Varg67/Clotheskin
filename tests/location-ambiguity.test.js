@@ -136,7 +136,7 @@ test('the prompt pins down the location ideas', () => {
     [/never guess/, 'no guessing'],
     [/Describe only yourself/, 'not the person'],
     [/shows the format only; never copy its values/, 'do not copy the example'],
-    [/if the chat says nothing about any of this, reply \{\}/, 'empty answer allowed'],
+    [/leave that key out, and \{\} is a correct answer/, 'empty answer allowed'],
   ];
   for (const [re, why] of must) assert.match(p, re, why);
 });

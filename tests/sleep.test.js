@@ -52,10 +52,11 @@ test('the dream answer: a short summary and how much is remembered; no dream is 
 
 test('the follow-up prompts are English, ask for one-line JSON, give the person\'s clock and stay short', () => {
   const s = buildFollowUpPrompt(SLEEP_PROMPT, { name: 'Isa', now: '23:10 on Friday' });
-  assert.match(s, /^You are Isa\. It is now 23:10 on Friday/);
+  assert.match(s, /^\[DIRECTIVE — OUT OF CHARACTER\./);
+  assert.match(s, /^You are Isa\. It is now 23:10 on Friday/m);
   assert.match(s, /"sleeping":true,"wake_at":"HH:MM"/);
   assert.match(s, /\{"sleeping":false\}/);
   const d = buildFollowUpPrompt(DREAM_PROMPT, { name: 'Isa', now: '07:20 on Saturday' });
   assert.match(d, /"remembered":"<all\|most\|some\|little\|nothing>"/);
-  for (const p of [s, d]) { assert.match(p, /English only/); assert.ok(p.length < KIN_ASK_LIMIT); assert.ok(!/\{\{/.test(p)); }
+  for (const p of [s, d]) { assert.match(p, /English only/); assert.match(p, /\n\[END DIRECTIVE\] Your whole reply is one line of minified JSON/); assert.ok(p.length < KIN_ASK_LIMIT); assert.ok(!/\{\{/.test(p)); }
 });

@@ -110,7 +110,9 @@ test('English only: the rule comes first in the question and covers values too, 
   const p = buildOutfitPrompt({ name: 'Isa' });
   const line = p.split('\n')[1];
   assert.match(line, /^English only: every key and value in English, even when the chat is in Portuguese; translate it \("na cozinha" -> "in the kitchen"\)\.$/);
-  assert.ok(p.length < 2600, `the question costs input tokens on every reading: ${p.length} characters`);
+  // 2,800: the directive's frame (out of character, start and end) costs ~200 characters; it is what makes a roleplay
+  // model answer with the JSON instead of in character (real test, Nov 2026).
+  assert.ok(p.length < 2800, `the question costs input tokens on every reading: ${p.length} characters`);
 });
 
 test('English only: Portuguese keys or values are noticed, names of places are not', () => {

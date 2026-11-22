@@ -391,3 +391,50 @@ test('the Kin is never told its dream unless the person turned it on (the defaul
   assert.equal(k.entry().dream.dream, 'A train');
   assert.equal(k.tells().length, 0);
 });
+
+// ---------------------------------------------------------------- the correction (real test, Nov 2026)
+
+const ROLEPLAY_PT = '*sorri e ajeita o cabelo* Ah, eu tô na cozinha, sentada à mesa conversando com o Ari. Por quê?';
+const askPrompts = (k) => k.calls.filter((c) => c[0] === 'ask').map((c) => c[3]);
+
+test('an answer in roleplay (in Portuguese) is asked once more in the same run, with an out-of-character correction', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1' } });
+  k.answers.reading.push(ROLEPLAY_PT, AWAKE);
+  const r = await tick(k);
+  assert.equal(r.ok, true);
+  assert.deepEqual(k.asks(), ['reading', 'reading']);
+  const [first, second] = askPrompts(k);
+  assert.match(first, /^\[DIRECTIVE — OUT OF CHARACTER\./);
+  assert.match(second, /^\[DIRECTIVE — OUT OF CHARACTER\] Your previous reply to this directive could not be used/);
+  assert.ok(second.endsWith(first), 'the correction carries the whole question: it does not rely on the Kin remembering');
+  assert.equal(k.entry().reading.doing, 'Sitting on the bed, reading a book.');
+  assert.equal(k.entry().error, null);
+});
+
+test('two answers in roleplay: the reading fails as the Kin\'s error (no server warning), the last reading stays, one more ask only', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1' } });
+  k.answers.reading.push(AWAKE);
+  await tick(k);
+  k.answers.reading.splice(0, Infinity, ROLEPLAY_PT);
+  k.advance(60);
+  const r = await tick(k);
+  assert.equal(r.ok, false);
+  assert.deepEqual(k.asks(), ['reading', 'reading', 'reading'], 'the first reading, then the bad answer and its one correction');
+  const e = k.entry();
+  assert.equal(e.errorKind, 'answer');
+  assert.equal(e.serverFailures, 0);
+  assert.equal(e.reading.doing, 'Sitting on the bed, reading a book.', 'nothing lost');
+});
+
+test('the sleep and dream questions get the same correction', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', ...SAO_PAULO } });
+  k.answers.reading.push(ASLEEP);
+  k.answers.sleep.push('*boceja* Vou dormir até as sete e meia, amor.', '{"sleeping":true,"wake_at":"07:30"}');
+  await tick(k);
+  assert.deepEqual(k.asks(), ['reading', 'sleep', 'sleep']);
+  assert.ok(k.entry().sleep, 'the night was planned from the corrected answer');
+  k.at(k.entry().sleep.until);
+  k.answers.dream.push('*se espreguiça* Sonhei com o mar...', '{"dream":"I was swimming in a warm sea","remembered":"most"}');
+  await tick(k);
+  assert.equal(k.entry().dream.dream, 'I was swimming in a warm sea');
+});

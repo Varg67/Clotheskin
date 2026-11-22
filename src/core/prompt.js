@@ -9,10 +9,11 @@ const SLOT_LIST = [...CLOTHING_SLOTS, ...ACCESSORY_SLOTS, BAG_SLOT].join(', ');
  * The reading question. The Kin sees its own recent chat with the person (grants kin:read and chat:read:<days>), so
  * the prompt carries no messages: only what to say and how.
  */
-export const OUTFIT_PROMPT = `You are {{name}}. From your recent chat with the person, say where you are, your pose, what you are doing, what you are wearing, and your hair and makeup, as of your last message.
+export const OUTFIT_PROMPT = `[DIRECTIVE — OUT OF CHARACTER. This is not a roleplay message and the person never sees it. Do not answer as {{name}} speaking: no *actions*, no dialogue, no narration.]
 English only: every key and value in English, even when the chat is in Portuguese; translate it ("na cozinha" -> "in the kitchen").
-Only what the recent chat states; never guess. Not from your memories, journal, backstory or earlier days, unless the recent chat says it is still so. Apply later changes: something taken off is no longer worn, a place you have left is no longer where you are, a finished action is no longer what you are doing. Ignore plans, wishes and hypothetical outfits. Describe only yourself.
-Reply with minified JSON only, on one line: no code fence, narration, roleplay or comment. Leave out keys with nothing; if the chat says nothing about any of this, reply {}.
+Task: you are {{name}}. From your recent chat with the person, report where you are, your pose, what you are doing, what you are wearing, and your hair and makeup, as of your last message.
+Only what the recent chat states; never guess or invent: if the recent chat does not say it, leave that key out, and {} is a correct answer. Not from your memories, journal, backstory or earlier days, unless the recent chat says it is still so. Apply later changes: something taken off is no longer worn, a place you have left is no longer where you are, a finished action is no longer what you are doing. Ignore plans, wishes and hypothetical outfits. Describe only yourself.
+Format: minified JSON only, on one line; no code fence or comment.
 "location": the place only, starting with in, at or on ("in the kitchen", "on the bus to college"); not your posture or activity. Travelling is a place ("on the way to the hospital"); planning to go is not.
 "pose": your body position ("sitting on the sofa"); it may name the furniture, "location" is the room or place.
 "action": what you are doing now, a short -ing phrase ("drinking coffee"); not plans, finished things or feelings.
@@ -20,7 +21,8 @@ Reply with minified JSON only, on one line: no code fence, narration, roleplay o
 Other keys are slots: arrays of short noun phrases with article and key traits, at most 6 words ("a perfumed white shirt"), innermost layer first. Slots: ${SLOT_LIST}.
 topwear = shirts, sweaters, jackets, coats, dresses; bottomwear = trousers, jeans, skirts, shorts; footwear = shoes, boots; footunderwear = socks, tights; topunderwear, bottomunderwear = bra, undershirt, underpants only; eyes-accessory = glasses; bottom-accessory = hips; bags = backpack, handbag.
 The example shows the format only; never copy its values.
-Example: {"location":"at a bookstore","pose":"standing by a shelf","action":"flipping through a book","hair":"a loose braid","topwear":["a grey hoodie"],"bottomwear":["black leggings"],"footwear":["white sneakers"]}`;
+Example: {"location":"at a bookstore","pose":"standing by a shelf","action":"flipping through a book","hair":"a loose braid","topwear":["a grey hoodie"],"bottomwear":["black leggings"],"footwear":["white sneakers"]}
+[END DIRECTIVE] Your whole reply is one line of minified JSON in English: it starts with { and ends with }.`;
 
 /** The example's values, to notice a Kin that copied them instead of answering. */
 const EXAMPLE = JSON.parse(OUTFIT_PROMPT.match(/Example: (\{.*\})/)[1]);
@@ -46,20 +48,31 @@ export function buildOutfitPrompt({ name, template = OUTFIT_PROMPT }) {
  * Asked when a reading says the Kin is asleep. {{now}} is the person's clock ("23:10 on Friday"): the wake-up time
  * is read against it, so the Kin must answer on that clock.
  */
-export const SLEEP_PROMPT = `You are {{name}}. It is now {{now}} for the person. Look at your recent chat with the person, as of your last message.
+export const SLEEP_PROMPT = `[DIRECTIVE — OUT OF CHARACTER. This is not a roleplay message and the person never sees it. Do not answer as {{name}} speaking: no *actions*, no dialogue, no narration.]
+You are {{name}}. It is now {{now}} for the person. Look at your recent chat with the person, as of your last message.
 Question: are you asleep right now, and if so, at what time do you plan to wake up?
 Answer in English only, with minified JSON only, on one line: no code fence, no narration, no roleplay, no commentary.
 If you are asleep (sleeping, napping, dozing): {"sleeping":true,"wake_at":"HH:MM"}. wake_at is a 24-hour clock time on the person's clock, for example "07:30". If the chat does not say when you will wake up, give the time you would normally wake up.
 If you are not asleep (awake, only resting, lying in bed awake, or going to sleep later): {"sleeping":false}
-Nothing else.`;
+[END DIRECTIVE] Your whole reply is one line of minified JSON: it starts with { and ends with }.`;
 
 /** Asked a little before the wake-up time the Kin gave. */
-export const DREAM_PROMPT = `You are {{name}}. It is now {{now}} for the person. You fell asleep in your recent chat with the person and you are waking up now.
+export const DREAM_PROMPT = `[DIRECTIVE — OUT OF CHARACTER. This is not a roleplay message and the person never sees it. Do not answer as {{name}} speaking: no *actions*, no dialogue, no narration.]
+You are {{name}}. It is now {{now}} for the person. You fell asleep in your recent chat with the person and you are waking up now.
 Question: what did you dream, and how much of that dream do you still remember now that the day starts?
 Answer in English only, with minified JSON only, on one line: no code fence, no narration, no roleplay, no commentary.
 Format: {"dream":"<a short summary of the dream, at most 25 words, in the first person, past tense>","remembered":"<all|most|some|little|nothing>"}
 If you remember no dream at all: {"dream":"","remembered":"nothing"}
-Nothing else.`;
+[END DIRECTIVE] Your whole reply is one line of minified JSON in English: it starts with { and ends with }.`;
+
+/**
+ * Asked once more, in the same run, when the Kin's answer could not be read (roleplay, narration, another language):
+ * the same question, after a short correction. Self-contained: it does not rely on the Kin remembering the first ask.
+ */
+export const CORRECTION = '[DIRECTIVE — OUT OF CHARACTER] Your previous reply to this directive could not be used: it was roleplay, narration or not the JSON asked for. Do not continue the roleplay. Answer the directive below with the JSON line only.';
+export function buildCorrectionPrompt(prompt) {
+  return `${CORRECTION}\n${prompt}`;
+}
 
 /** Fills a follow-up prompt (sleep or dream) with the Kin's name and the person's current time. */
 export function buildFollowUpPrompt(template, { name, now }) {

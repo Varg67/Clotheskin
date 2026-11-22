@@ -8,7 +8,7 @@
 //
 // Files (src/core/state.js): settings.json is the screen's, status.json is the run's. The run reads both, changes
 // only its Kin's entry, re-reads status.json just before writing, and never writes over a file it could not read.
-import { buildOutfitPrompt, buildFollowUpPrompt, SLEEP_PROMPT, DREAM_PROMPT, KIN_ASK_LIMIT } from '../src/core/prompt.js';
+import { buildOutfitPrompt, buildFollowUpPrompt, buildCorrectionPrompt, SLEEP_PROMPT, DREAM_PROMPT, KIN_ASK_LIMIT } from '../src/core/prompt.js';
 import { parseReading, describeReading } from '../src/core/outfit.js';
 import { looksAsleep, sentenceMark, planSleep, parseSleepAnswer, parseDreamAnswer, describeDream, dreamFact, DREAM_TTL_HOURS } from '../src/core/sleep.js';
 import { retryDelay, errorKind, isDue, TICK_S } from '../src/core/schedule.js';
@@ -111,9 +111,8 @@ async function read(ctx, who, entry) {
   const now = clock();
   const e = { ...entry, name: who.name, lastRunAt: now.toISOString() };
 
-  const answer = await ask(ctx, who, buildOutfitPrompt({ name: who.name }));
+  const { answer, parsed } = await askAndParse(ctx, who, buildOutfitPrompt({ name: who.name }), parseReading);
   if (!answer.ok) return fail(ctx, who, e, answer, now, null, entry);
-  const parsed = parseReading(answer.text);
   if (!parsed.ok) return fail(ctx, who, e, { kind: 'answer', error: `${parsed.error} Nothing was changed.`, length: answer.text.length }, now, null, entry);
   const reading = describeReading(parsed);
   // Hair and makeup are kept only when the Kin described them (the card shows those rows only then).
@@ -133,14 +132,14 @@ async function read(ctx, who, entry) {
 
   // The reading is kept before the sleep question: if the run is cut short, it is not lost.
   await save(ctx, who.id, e, entry);
-  const s = await ask(ctx, who, buildFollowUpPrompt(SLEEP_PROMPT, { name: who.name, now: describeNow(now, settings.tz) }));
+  const { answer: s, parsed: sleepAnswer } = await askAndParse(ctx, who, buildFollowUpPrompt(SLEEP_PROMPT, { name: who.name, now: describeNow(now, settings.tz) }), parseSleepAnswer);
   if (!s.ok && s.kind === 'time') {
     const later = { ...succeeded(e), retryAt: new Date(now.getTime() + TICK_S * 1000).toISOString(), note: 'The sleep question waits for the next start of the app.' };
     await save(ctx, who.id, later, e);
     return ok(`${line} The sleep question waits for the next start.`);
   }
   if (!s.ok) return fail(ctx, who, e, s, now, `The sleep question could not be asked (${s.error}). It is asked again at the next update.`, e);
-  const p = parseSleepAnswer(s.text);
+  const p = sleepAnswer;
   if (!p.ok) return fail(ctx, who, e, { kind: 'answer', error: p.error }, now, `The sleep question did not get a clear answer (${p.error}) It is asked again at the next update.`, e);
   const plan = p.sleeping ? planSleep(p.wakeAt, now, settings.tz) : null;
   await save(ctx, who.id, succeeded({ ...e, sleptOn: mark, sleep: plan ? { wakeAt: plan.wakeAt.toISOString(), until: plan.until.toISOString() } : null }), e);
@@ -153,9 +152,9 @@ async function wake(ctx, who, entry) {
   const { settings, clock, log } = ctx;
   const now = clock();
   const e = { ...entry, name: who.name, lastRunAt: now.toISOString() };
-  const d = await ask(ctx, who, buildFollowUpPrompt(DREAM_PROMPT, { name: who.name, now: describeNow(now, settings.tz) }));
+  const { answer: d, parsed: dreamAnswer } = await askAndParse(ctx, who, buildFollowUpPrompt(DREAM_PROMPT, { name: who.name, now: describeNow(now, settings.tz) }), parseDreamAnswer);
   if (!d.ok) return fail(ctx, who, e, d, now, `The dream question could not be asked (${d.error}). It is asked again at the next update.`, entry); // the night goes on
-  const p = parseDreamAnswer(d.text);
+  const p = dreamAnswer;
   let told = '';
   if (p.ok) {
     e.dream = { dream: p.dream, remembered: p.remembered, at: now.toISOString() };
@@ -194,6 +193,23 @@ async function ask(ctx, who, prompt) {
       await sleepMs(ctx.retryAfterMs);
     }
   }
+}
+
+/**
+ * Asks, then reads the answer with `parse`. An answer that cannot be read (roleplay, narration, another language) is
+ * asked once more in the same run, after a short out-of-character correction, if there is time; a roleplay model
+ * often gets it right the second time (real test, Nov 2026). Returns { answer, parsed }: parsed is undefined only
+ * when the question could not be asked at all (answer.ok false).
+ */
+async function askAndParse(ctx, who, prompt, parse) {
+  const first = await ask(ctx, who, prompt);
+  if (!first.ok) return { answer: first };
+  const parsed = parse(first.text);
+  if (parsed.ok) return { answer: first, parsed };
+  ctx.log(`answer not usable (${first.text.length} characters): asking once more, with a correction`);
+  const again = await ask(ctx, who, buildCorrectionPrompt(prompt));
+  if (!again.ok) return { answer: first, parsed }; // no time or Kindroid failed: the first answer's error stands
+  return { answer: again, parsed: parse(again.text) };
 }
 
 function succeeded(e) {

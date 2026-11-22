@@ -6,15 +6,17 @@ import { parseReading } from '../src/core/outfit.js';
 
 test('the prompt demands English-only, concise, one-line JSON and pins down the ambiguous ideas', () => {
   const p = buildOutfitPrompt({ name: 'Isa' });
-  assert.match(p, /^You are Isa\./);
+  assert.match(p, /^\[DIRECTIVE — OUT OF CHARACTER\. This is not a roleplay message/);
+  assert.match(p, /\n\[END DIRECTIVE\] Your whole reply is one line of minified JSON in English: it starts with \{ and ends with \}\.$/);
+  assert.match(p, /^Task: you are Isa\./m);
   assert.match(p, /English only: every key and value in English, even when the chat is in Portuguese; translate it/);
   assert.match(p, /short noun phrases with article and key traits, at most 6 words/);
   assert.match(p, /minified JSON only, on one line/);
   assert.match(p, /Apply later changes: something taken off is no longer worn/);
   assert.match(p, /Ignore plans, wishes and hypothetical outfits/);
   assert.match(p, /never guess/);
-  assert.match(p, /if the chat says nothing about any of this, reply \{\}/);
-  assert.match(p, /say where you are, your pose, what you are doing, what you are wearing, and your hair and makeup/);
+  assert.match(p, /if the recent chat does not say it, leave that key out, and \{\} is a correct answer/);
+  assert.match(p, /report where you are, your pose, what you are doing, what you are wearing, and your hair and makeup/);
   assert.match(p, /"location": the place only, starting with in, at or on/);
   assert.match(p, /not your posture or activity/);
   assert.match(p, /planning to go is not/);
@@ -39,8 +41,8 @@ test('the example inside the prompt has the valid format, but sent back unchange
 
 test('the prompt carries no chat: the Kin sees its own (chat:read); a name with $& or braces is inserted as written', () => {
   const p = buildOutfitPrompt({ name: 'Isa $& {{name}}' });
-  assert.ok(!/RECENT CHAT|\{\{/.test(p.replace('{{name}}', '')));
-  assert.match(p, /^You are Isa \$& \{\{name\}\}\./);
+  assert.ok(!/RECENT CHAT|\{\{/.test(p.replaceAll('{{name}}', '')));
+  assert.match(p, /^Task: you are Isa \$& \{\{name\}\}\./m);
 });
 
 test('the question is small: far below the 8,000 character limit, even with a long name', () => {

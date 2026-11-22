@@ -27,7 +27,7 @@ Built from Kindroid's guide for coding tools ("Making things for a Kin with your
 - **The sleep cycle.**
   - **Falling asleep.** When the pose and action say the Kin is asleep ("Lying in bed, sleeping."), the run asks whether it is and when it plans to wake up. The question gives the person's clock ("It is now 23:10 on Friday"), and the answer is JSON: `{"sleeping":true,"wake_at":"07:30"}`.
   - **The night.** Nothing is asked until about 10 minutes before the wake-up time.
-  - **The dream.** Then the run asks `{"dream":"…","remembered":"all|most|some|little|nothing"}`. The screen shows the answer as **Last dream**. Unless the person turned it off, the run also tells the Kin with `kin tell --key dream --ttl 24`; with "Let my Kin bring the dream up by itself" turned on, it adds `--reach-out soon`.
+  - **The dream.** Then the run asks `{"dream":"…","remembered":"all|most|some|little|nothing"}`. The screen shows the answer as **Last dream**. Only if the person ticked "Tell my Kin its dream" (off by default, on the screen's **Dreams** card, not inside Settings) does the run also tell the Kin with `kin tell --key dream --ttl 24`; with "Let my Kin bring the dream up by itself" turned on, it adds `--reach-out soon`.
   - **The next morning.** The chat usually stays still overnight, so the same "asleep" sentence does not start a new night. A wake-up time less than 15 minutes or more than 14 hours away is not believed, and the readings go on.
   - **Waking up early.** Reading the Kin by hand during its night and finding it awake ends the night.
 - **Errors.**
@@ -45,7 +45,7 @@ Built from Kindroid's guide for coding tools ("Making things for a Kin with your
 ### What is stored, and what it costs
 
 - **Stored**, in the program's folder in Kindroid: `settings.json` (your choices) and `status.json`.
-  - `status.json` holds, per Kin: the last reading (the three sentences), when it last ran, errors, the night's times, and the last dream summary.
+  - `status.json` holds, per Kin: the last reading (the three sentences), when it last ran, errors, the night's times, and the last dream summary. The dream is erased from the file after 24 hours (as long as the screen shows it), and Stop erases the night and the dream: every start does this, even while stopped, so within 15 minutes.
   - Never the chat. For the night, only a fingerprint (hash) of the "asleep" sentence, never the sentence.
   - The screen keeps nothing in the browser.
 - **Credits.** Kindroid starts the program every 15 minutes, **even while it is stopped**, and running time uses the person's credits. Each start that has nothing due is a short run: it reads two files and ends. The Kin is asked only when an update is due: once per interval, plus the sleep and dream questions. The screen says this under the ruler.
@@ -109,26 +109,23 @@ npm run try -- action    # the screen's Update status
 
 ## Send it to Kindroid
 
-```bash
-export KIN_TOKEN=kk_...  KIN_PROGRAM=clotheskin
-git add -A && git commit -m "Clotheskin"
-node kin.mjs send .
-```
+What worked: the Workshop agent fetches each file from GitHub's raw URLs (`raw.githubusercontent.com/<owner>/Clotheskin/<branch>/<path>`), so nothing is retyped or "improved" on the way. The files Kindroid runs are the ones `npm run pack` puts in `dist/clotheskin.tar.gz`: `kin.json`, `package.json`, `main.js`, `run/`, `src/core/`, `screen/` and `sample/`. `COMO-INSTALAR.md` (in Portuguese) has the message for the agent.
 
 Then, in Kindroid: Apps → **Waiting for you** → Allow. It reads your Kin's chat, so it always waits for you. To have it follow a Kin, open the app's settings → **Kins** and tick the Kin. Open the screen, pick the Kin of your roleplay, and press **Start**.
 
-## Still to confirm on the first real run
+## Confirmed in Kindroid (November 2026)
 
-Everything above is tested against the guide and the dev harness, not yet inside Kindroid.
+1. **Saving.** `kin files put <path>` takes the body on stdin (as Kin Bank and Planner do); a missing file is `kin: 404 …` on stderr.
+2. **`kin ask`** prints the Kin's answer on stdout, and the questions do not show up in the Kin's chat.
+3. **The grants** `kin:read` and `chat:read:2`, the **schedule trigger** every 15 minutes, and the one **action** are accepted. A start with nothing due ends with "Nothing to do yet: next update around 3:27 AM." in the Workshop log.
+4. **The screen** loads in the panel and reads and writes its files.
+5. **The Kin's answers.** A roleplay model sometimes answers the first readings in character, in the chat's language. So every question is framed as an out-of-character directive (`[DIRECTIVE — OUT OF CHARACTER …]` … `[END DIRECTIVE]`), and an answer that cannot be read is asked once more in the same run with a short correction.
+6. **What the chat leaves out.** When the recent chat says nothing about the outfit (or the place, the hair…), the card keeps the last known sentence, marked "seen 2:40 AM", instead of "No outfit described".
+7. **The App Library review** asked for two things, both done: the Kin is told its dream only if the person turns it on (off by default, on the screen's **Dreams** card), and the dream is erased from `status.json` after a day or after Stop, as the screen says.
 
-1. **`kin ask` output.** It prints the Kin's answer on stdout, as plain text: Aurora Alert reads it that way. The Kin answers with JSON rather than in character.
-2. **`kin files get` for a missing file.** It fails with a "404" or "not found" message (Bunny & Fox BBS checks for `404`). Any other failure is treated as "could not read", and nothing is written over.
-3. **`kin kins` format.** It prints `id<TAB>name`, one per line.
-4. **The screen's single `app.js`.** It loads in the frame (also on phones and older Safari, 14.1+), and the screen re-sends its handshake until the page answers.
-5. **The App Library picture.** The picture is taken with the `sample/` files answered and no Kin list. The screen shows the sample after 1.5 s and saves nothing.
-6. **Questions stay out of the chat.** The `kin ask` questions do not show up in the Kin's chat or memory.
-7. **The run's container clock.** The run does not rely on its clock zone: wake-up times use the time zone the screen saved.
-8. **Only the root lockfile is installed.** A run installs the root `package-lock.json` (no packages) and never `tools/package-lock.json`. The first real run's time shows it: a start with nothing due should end in seconds.
+8. **Telling the Kin its look** (off by default, on the screen's **Current look** card): after a reading, the run tells the Kin its outfit, hair and makeup with `kin tell --key look-outfit|look-hair|look-makeup --ttl 12`, so it stays consistent in the roleplay. Only what the Kin said just now (never a sentence kept from an earlier reading), only when it changed, and again before the 12 hours run out. A refused or failed note waits an hour and is shown on the card. `status.json` keeps only a fingerprint and the time of what was told. Scenarios: `tests/look.test.js`.
+
+Still to watch: whether `kin tell` needs a grant of its own, and whether a note under the same `--key` replaces the last one; the night and the dream with a real Kin over a whole night, and several Kins in one account.
 
 ## Limits
 

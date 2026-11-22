@@ -10,7 +10,7 @@ export function buildManifest() {
   return {
     kin: 1,
     name: 'Clotheskin',
-    purpose: 'Shows where your Kin is, what it is doing and what it is wearing, from its recent chat. Follows its nights and tells it the dream it remembers, if you allow it.',
+    purpose: 'Shows where your Kin is, what it is doing and what it is wearing, from its recent chat. Follows its nights and, if you allow it, tells it the dream it remembers and its current look.',
     // Every 15 minutes, on the person's clock. Each start checks whether a reading is due (settings.json) and most
     // end at once; the interval the person picks (15 min to 4 h) decides how often the Kin is actually asked.
     triggers: [{ on: 'schedule', cron: '*/15 * * * *', tz: 'user' }],

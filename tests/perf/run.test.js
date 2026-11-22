@@ -1,7 +1,7 @@
 // The time Kindroid pays for at every start of the program (96 a day): the real entry, `node main.js`, with a stand-in
 // `kin` that runs as a process of its own, as inside Kindroid (tests/support/fake-kin-cli.mjs). Budgets are generous:
 // they catch a start that became much slower (a heavy import, a call too many), not a slow machine.
-// Measured on the baseline (docs/plano-de-refatoracao.md, phase 6): ~110 ms stopped, ~150 ms with nothing due.
+// Measured (docs/plano-de-refatoracao.md, phase 6 and the merge of the other line): ~110-150 ms per start.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -29,9 +29,10 @@ function start(settings) {
   return runs.sort((a, b) => a.ms - b.ms)[2];
 }
 
-test('perf: a start while stopped is two kin calls (settings.json, kin end) and ends quickly', () => {
+// Every start reads both files, at once, even while stopped: an old dream must be erased within one start.
+test('perf: a start while stopped is three kin calls (the two files at once, kin end) and ends quickly', () => {
   const r = start({ autoState: 'stopped', kinId: 'k1' });
-  assert.equal(r.calls, 2);
+  assert.equal(r.calls, 3);
   assert.ok(r.ms < 1500, `${r.ms.toFixed(0)} ms`);
 });
 

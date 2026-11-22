@@ -37,8 +37,17 @@ test('cost: falling asleep adds the sleep question and one more save', async () 
   assert.deepEqual(calls(k), [...READ, 'ask sleep', 'get status.json', 'put status.json']);
 });
 
-test('cost: the morning is the dream question, kin tell and one save', async () => {
-  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1' } });
+test('cost: the morning is the dream question and one save; kin tell only when the person turned it on', async () => {
+  const quiet = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1' } });
+  quiet.answers.reading.push(READING('lying in bed', 'sleeping'));
+  quiet.answers.sleep.push('{"sleeping":true,"wake_at":"07:30"}');
+  quiet.answers.dream.push('{"dream":"I was flying over the sea","remembered":"most"}');
+  await tick(quiet);
+  quiet.at('2026-11-21T07:25:00-03:00');
+  fresh(quiet);
+  await tick(quiet);
+  assert.deepEqual(calls(quiet), ['get settings.json', 'get status.json', 'kins', 'ask dream', 'get status.json', 'put status.json'], 'off by default');
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', tellDream: true } });
   k.answers.reading.push(READING('lying in bed', 'sleeping'));
   k.answers.sleep.push('{"sleeping":true,"wake_at":"07:30"}');
   k.answers.dream.push('{"dream":"I was flying over the sea","remembered":"most"}');
@@ -50,15 +59,25 @@ test('cost: the morning is the dream question, kin tell and one save', async () 
     ['get settings.json', 'get status.json', 'kins', 'ask dream', 'tell', 'get status.json', 'put status.json']);
 });
 
+// Every start reads status.json too, even while stopped: a dream older than a day, and the night and dream from before
+// Stop, are erased within one start, as the screen says (App Library review). Nothing is written when nothing is old.
 for (const [name, settings] of [['stopped', { autoState: 'stopped', kinId: 'k1' }], ['paused', { autoState: 'paused', kinId: 'k1' }], ['with no Kin', { autoState: 'running' }]]) {
-  test(`cost: a start while ${name} reads settings.json only`, async () => {
+  test(`cost: a start while ${name} reads the two files and writes nothing`, async () => {
     const k = fakeKindroid({ settings });
     await tick(k);
-    assert.deepEqual(calls(k), ['get settings.json']);
+    assert.deepEqual(calls(k), ['get settings.json', 'get status.json']);
   });
 }
 
-test('time: Update status reads its two files at once, not one after the other', async () => {
+test('cost: a start while stopped erases a dream older than a day: one more read and one save', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'stopped', kinId: 'k1' } });
+  k.files.set('status.json', JSON.stringify({ kins: { k1: { name: 'Isa', lastRunAt: '2026-11-19T07:30:00Z', dream: { dream: 'An old dream', remembered: 'all', at: '2026-11-19T07:30:00Z' } } } }));
+  await tick(k);
+  assert.deepEqual(calls(k), ['get settings.json', 'get status.json', 'get status.json', 'put status.json']);
+  assert.equal(k.entry().dream, null);
+});
+
+test('time: a start reads its two files at once, not one after the other', async () => {
   const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1' } });
   k.answers.reading.push(READING('sitting on the bed', 'reading a book'));
   const get = k.kin.get;

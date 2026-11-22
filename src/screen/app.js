@@ -7,6 +7,9 @@ import { createStore } from './store.js';
 import { createAnnouncer } from './announcer.js';
 import { renderCard } from './views/card.js';
 import { renderSettings } from './views/settings.js';
+import { renderLook, renderDreams } from './views/choices.js';
+import { icon } from './icons.js';
+import { versionMismatchText } from './texts.js';
 import { formatRelative } from '../core/format.js';
 
 const POLL_MS = 60000; // status.json is read again every minute while the screen is visible
@@ -46,10 +49,13 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
     const v = { S: store.S, store, ui, now, at: { settings: store.S.settings, now } };
     const hadFocus = root.contains(document.activeElement);
     keepFocus(root, () => {
+      const mismatch = versionMismatchText(store.S.status);
       root.replaceChildren(
         h('header', { class: 'app-head' }, h('h1', {}, 'Clotheskin'), h('p', {}, 'Where your Kin is, what it is doing and what it is wearing')),
+        ...(mismatch ? [h('div', { class: 'banner warn', role: 'alert', 'data-testid': 'version-mismatch' }, icon('alert', { size: 18 }), h('span', { class: 'banner-text' }, mismatch))] : []),
         renderCard(v),
-        ...(store.selectedKin() ? [renderSettings(v)] : []), // replaceChildren would show a null as the text "null"
+        // replaceChildren would show a null as the text "null"
+        ...(store.selectedKin() ? [renderLook(v), renderDreams(v), renderSettings(v)] : []),
       );
     });
     // The focused control is gone (a banner closed, Wake now done, the Kin detached): the keyboard stays in the app.

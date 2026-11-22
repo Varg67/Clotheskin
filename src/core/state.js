@@ -7,8 +7,9 @@
 // damaged or hand-edited file can never break the screen or the run, it only falls back to defaults.
 import { snapInterval, retryDelay, errorKind, DEFAULT_INTERVAL_S, ERRORS_BEFORE_WARNING, ERROR, TICK_S } from './schedule.js';
 import { safeTimeZone } from './time.js';
-import { REMEMBERED } from './sleep.js';
+import { REMEMBERED, DREAM_TTL_HOURS, sentenceMark } from './sleep.js';
 import { oneLine } from './text.js';
+import { NOT_DESCRIBED, APP_VERSION, BARE_FACE_SENTENCE } from './constants.js';
 /** @import { ErrorKind } from './schedule.js' */
 
 /**
@@ -22,10 +23,13 @@ import { oneLine } from './text.js';
  * @property {string} theme
  * @property {boolean} tellDream tell the Kin its dream (kin tell), so it can remember it during the day
  * @property {boolean} reachOut and let it bring the dream up by itself (kin tell --reach-out)
+ * @property {boolean} tellLook tell the Kin its outfit, hair and makeup when they change (kin tell)
  * @property {string|null} stoppedAt when Stop was last pressed (ISO time)
  *
- * The card's sentences of the last reading. Hair and makeup only when the Kin described them.
- * @typedef {{ location: string, doing: string, outfit: string, hair: string|null, makeup: string|null, at: string|null }} StoredReading
+ * The card's sentences of the last reading. Hair and makeup only when the Kin described them. A sentence the last
+ * answer said nothing about is the last known one, and `seen` says when it was last said (see carryOver).
+ * @typedef {{ location: string, doing: string, outfit: string, hair: string|null, makeup: string|null, at: string|null,
+ *   seen: Object<string, string> }} StoredReading
  * @typedef {{ wakeAt: string, until: string }} Night  when the Kin wakes up, and from when the dream question is due
  * @typedef {{ dream: string|null, remembered: string, at: string }} StoredDream
  *
@@ -43,8 +47,13 @@ import { oneLine } from './text.js';
  * @property {Night|null} sleep
  * @property {string|null} sleptOn the fingerprint of the "asleep" sentence of the last night
  * @property {StoredDream|null} dream
+ * @property {Object<string, { mark: string, at: string }>} told what the Kin was told of its look, per field: a
+ *   fingerprint and when (never the sentence)
+ * @property {string|null} lookFailedAt telling the look failed: not tried again for LOOK_RETRY_HOURS
+ * @property {string|null} lookError why, shown on the Current look card
  *
- * @typedef {{ v: 1, kins: Object<string, Entry> }} Status
+ * @typedef {{ v: 1, runVersion: string|null, kins: Object<string, Entry> }} Status  runVersion: the version of the run
+ *   that last saved the file (APP_VERSION), or null before 0.4.0
  */
 
 export const SETTINGS_FILE = 'settings.json';
@@ -65,8 +74,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
   intervalS: DEFAULT_INTERVAL_S, // how often the automatic update reads, in seconds (15 min to 4 h)
   tz: 'UTC', // the person's IANA time zone (wake-up times are on their clock)
   theme: 'warm',
-  tellDream: true, // tell the Kin its dream (kin tell), so it can remember it during the day
+  tellDream: false, // tell the Kin its dream (kin tell), so it can remember it during the day: only if the person turns it on
   reachOut: false, // and let it bring the dream up by itself (kin tell --reach-out)
+  tellLook: false, // tell the Kin its outfit, hair and makeup when they change (kin tell): only if the person turns it on
   stoppedAt: null, // when Stop was last pressed: any night, dream or slowing down from before it is forgotten
 });
 
@@ -92,8 +102,31 @@ export function normalizeSettings(raw) {
     theme: Object.prototype.hasOwnProperty.call(THEMES, String(o.theme)) ? o.theme : DEFAULT_SETTINGS.theme,
     tellDream: typeof o.tellDream === 'boolean' ? o.tellDream : DEFAULT_SETTINGS.tellDream,
     reachOut: typeof o.reachOut === 'boolean' ? o.reachOut : DEFAULT_SETTINGS.reachOut,
+    tellLook: typeof o.tellLook === 'boolean' ? o.tellLook : DEFAULT_SETTINGS.tellLook,
     stoppedAt: iso(o.stoppedAt),
   };
+}
+
+/** The sentences of a reading, each kept until the Kin says something new about it. */
+const READING_FIELDS = ['location', 'doing', 'outfit', 'hair', 'makeup'];
+/** @returns {Object<string, string>} */
+const seenOf = (o) => Object.fromEntries(READING_FIELDS.filter((k) => o && iso(o[k])).map((k) => [k, String(iso(o[k]))]));
+/** Whether a sentence says something (not empty, not the "nothing described" sentence). */
+const said = (k, v) => typeof v === 'string' && v.trim() !== '' && v !== NOT_DESCRIBED[k];
+
+/**
+ * The new reading on top of the last one: what the Kin's answer said nothing about (no outfit in the recent chat,
+ * say) keeps the last known sentence, with the time it was last seen (`seen`), instead of an empty card. Only the
+ * Kin saying something new about it replaces it.
+ */
+export function carryOver(fresh, prev, now) {
+  const at = now.toISOString();
+  const r = { ...fresh, at, seen: {} };
+  for (const k of READING_FIELDS) {
+    if (said(k, fresh[k])) r.seen[k] = at;
+    else if (prev && said(k, prev[k])) { r[k] = prev[k]; r.seen[k] = (prev.seen && prev.seen[k]) || prev.at || at; }
+  }
+  return r;
 }
 
 const objectOr = (v) => (v && typeof v === 'object' ? v : null);
@@ -104,7 +137,10 @@ function normalizeReading(given) {
   const r = objectOr(given);
   const outfit = r && sentence(r.outfit, 600);
   if (!r || !outfit) return null;
-  return { location: sentence(r.location, 300) || '', doing: sentence(r.doing, 300) || '', outfit, hair: sentence(r.hair, 200), makeup: sentence(r.makeup, 200), at: iso(r.at) };
+  return {
+    location: sentence(r.location, 300) || '', doing: sentence(r.doing, 300) || '', outfit,
+    hair: sentence(r.hair, 200), makeup: sentence(r.makeup, 200), at: iso(r.at), seen: seenOf(r.seen),
+  };
 }
 
 /** The night: when the Kin wakes up, and from when the dream question is due. Both times, or no night. */
@@ -144,11 +180,43 @@ export function normalizeEntry(e = {}) {
     sleep: normalizeSleep(e.sleep),
     sleptOn: typeof e.sleptOn === 'string' && /^[0-9a-f]{8}$/.test(e.sleptOn) ? e.sleptOn : null,
     dream: normalizeDream(e.dream),
+    told: toldOf(e.told),
+    lookFailedAt: iso(e.lookFailedAt),
+    lookError: str(e.lookError, 300),
   };
 }
 
+// ---- telling the Kin its current look (settings.tellLook)
+/** How long a told look lasts in the Kin (kin tell --ttl): a look older than that is no longer true anyway. */
+export const LOOK_TTL_HOURS = 12;
+/** After a failed kin tell (Kindroid down, or the note refused), the look is not told again for this long. */
+export const LOOK_RETRY_HOURS = 1;
+const LOOK_FIELDS = ['outfit', 'hair', 'makeup'];
+const LOOK_FACT_MAX = 300;
+/** @returns {Object<string, { mark: string, at: string }>} */
+const toldOf = (o) => Object.fromEntries(LOOK_FIELDS.filter((k) => o && o[k] && /^[0-9a-f]{8}$/.test(o[k].mark) && iso(o[k].at))
+  .map((k) => [k, { mark: String(o[k].mark), at: String(iso(o[k].at)) }]));
+
 /**
- * status.json (text or object) -> { v, kins: { id: entry } }.
+ * What to tell the Kin of its look after a reading: [{ field, key, fact, mark }]. Only what the Kin said just now
+ * (`fresh`, never a sentence kept from an earlier reading: an old or wrong sentence must not become the Kin's truth),
+ * and only when it changed since it was last told, or that telling is about to expire. `when` is the person's clock.
+ */
+export function lookFacts({ fresh, told, now, when }) {
+  const out = [];
+  for (const field of LOOK_FIELDS) {
+    const v = fresh && fresh[field];
+    if (!said(field, v)) continue;
+    const mark = sentenceMark(v);
+    const last = told && told[field];
+    if (last && last.mark === mark && now.getTime() - Date.parse(last.at) < (LOOK_TTL_HOURS - 1) * 3600e3) continue;
+    out.push({ field, key: `look-${field}`, fact: oneLine(`Your ${field} right now (${when}): ${v[0].toLowerCase()}${v.slice(1)}`, LOOK_FACT_MAX), mark });
+  }
+  return out;
+}
+
+/**
+ * status.json (text or object) -> { v, runVersion, kins: { id: entry } }.
  * @returns {Status}
  */
 export function normalizeStatus(raw) {
@@ -158,7 +226,8 @@ export function normalizeStatus(raw) {
   if (o.kins && typeof o.kins === 'object') {
     for (const [id, e] of Object.entries(o.kins)) if (str(id, 120)) kins[id] = normalizeEntry(e && typeof e === 'object' ? e : {});
   }
-  return { v: 1, kins };
+  // runVersion: the version of the run that last saved the file (APP_VERSION), or null before 0.4.0.
+  return { v: 1, runVersion: str(o.runVersion, 20), kins };
 }
 
 /**
@@ -168,7 +237,29 @@ export function normalizeStatus(raw) {
  */
 export function afterStop(entry, settings) {
   if (!entry || !settings.stoppedAt || (entry.lastRunAt && entry.lastRunAt > settings.stoppedAt)) return entry;
-  return { ...succeeded(entry), sleep: null, sleptOn: null, dream: null };
+  return { ...succeeded(entry), sleep: null, sleptOn: null, dream: null, told: {}, lookFailedAt: null, lookError: null };
+}
+
+/**
+ * What status.json may still hold: a dream is kept for DREAM_TTL_HOURS (as long as the screen shows it) and never
+ * past Stop. Returns { status, changed }; the run writes the file back only when something was removed, so a dream
+ * is erased within one 15-minute start of expiring or of Stop.
+ * @param {Status} status
+ * @param {Settings} settings
+ * @param {Date} now
+ * @returns {{ status: Status, changed: boolean }}
+ */
+export function forgetOld(status, settings, now) {
+  /** @type {Object<string, Entry>} */
+  const kins = {};
+  let changed = false;
+  for (const [id, entry] of Object.entries(status.kins)) {
+    let e = afterStop(entry, settings);
+    if (e.dream && (!e.dream.at || now.getTime() - Date.parse(e.dream.at) >= DREAM_TTL_HOURS * 3600e3)) e = { ...e, dream: null };
+    if (JSON.stringify(e) !== JSON.stringify(entry)) changed = true;
+    kins[id] = e;
+  }
+  return { status: { ...status, kins }, changed };
 }
 
 /**
@@ -251,10 +342,21 @@ export function mergeConcurrent({ current, start, next }) {
   return { entry, concurrent: true, theirs };
 }
 
-/** A stored reading as one text: "In the kitchen. Standing, making coffee. Wearing a grey hoodie." ('' for none). */
+/**
+ * A stored reading as one text: "In the kitchen. Standing, making coffee. Wearing a grey hoodie." ('' for none). A bare
+ * face is kept but not said.
+ */
 export function readingText(reading) {
   if (!reading) return '';
-  return [reading.location, reading.doing, reading.outfit, reading.hair, reading.makeup].filter(Boolean).join(' ');
+  return [reading.location, reading.doing, reading.outfit, reading.hair, shownMakeup(reading.makeup)].filter(Boolean).join(' ');
+}
+
+/** The makeup sentence to show, or null: none known, or a bare face (kept, not shown). */
+export const shownMakeup = (makeup) => (makeup && makeup !== BARE_FACE_SENTENCE ? makeup : null);
+
+/** The run's version when it differs from the screen's (some files were updated and others not), or null. */
+export function versionMismatch(status) {
+  return status.runVersion && status.runVersion !== APP_VERSION ? status.runVersion : null;
 }
 
 /** A warning about Kindroid itself for a Kin's entry, or null. */

@@ -2,10 +2,10 @@
 // status, a warning or a problem, and the automatic update. Without a Kin: connecting, none attached, or the picker.
 import { h } from '../dom.js';
 import { icon, spinner, poseIcon, hairIcon } from '../icons.js';
-import { warningOf, AUTO } from '../../core/state.js';
+import { warningOf, shownMakeup, AUTO } from '../../core/state.js';
 import { describeDream } from '../../core/sleep.js';
 import { formatClock, formatRelative } from '../../core/format.js';
-import { warningText, problemText, visibleDream } from '../texts.js';
+import { warningText, problemText, visibleDream, seenAt } from '../texts.js';
 import { avatar, renderKinList } from './kinList.js';
 import { renderAutomation } from './automation.js';
 
@@ -20,7 +20,7 @@ export function renderCard(v) {
     v.S.picking ? h('div', { class: 'card-body' }, renderKinList(v, null)) : null,
     h('div', { class: 'card-body' },
       h('h2', { class: 'section-title' }, 'Current status'),
-      renderFacts(entry.reading, visibleDream(entry, v.now)),
+      renderFacts(entry.reading, visibleDream(entry, v.now), v.now),
       renderUpdate(v, entry.reading, busy),
       renderBanner(v, { kin, entry, busy }),
       renderAutomation(v, entry, busy)));
@@ -49,21 +49,27 @@ function renderTop(v, kin) {
       icon(v.S.picking ? 'close' : 'users', { size: 20 })) : null);
 }
 
-/** One row of the reading: an icon, a label, and the sentence (or what to say when there is none yet). */
-function fact({ iconName, label, testid, value, empty = '' }) {
+/**
+ * One row of the reading: an icon, a label, and the sentence (or what to say when there is none yet). `seen`: for a
+ * sentence kept from an earlier reading (the Kin said nothing new about it), when it was last seen.
+ */
+function fact({ iconName, label, testid, value, empty = '', seen = null }) {
   return h('div', { class: `fact${value ? '' : ' empty'}` },
     h('span', { class: 'row-icon' }, icon(iconName, { size: 24 })),
-    h('span', { class: 'fact-text' }, h('span', { class: 'row-label' }, label), h('span', { class: 'fact-value', 'data-testid': testid }, value || empty)));
+    h('span', { class: 'fact-text' },
+      h('span', { class: 'row-label' }, label, seen ? h('span', { class: 'seen', 'data-testid': `${testid}-seen` }, ` · seen ${seen}`) : null),
+      h('span', { class: 'fact-value', 'data-testid': testid }, value || empty)));
 }
 
-/** Hair, makeup and the dream have a row only when there is something to say. */
-function renderFacts(r, dream) {
+/** Hair, makeup and the dream have a row only when there is something to say (a bare face is kept, not shown). */
+function renderFacts(r, dream, now) {
+  const seen = (field) => seenAt(r, field, now);
   return h('div', { class: 'facts' },
-    fact({ iconName: 'pin', label: 'Location', testid: 'location', value: r && r.location, empty: 'No location read yet.' }),
-    fact({ iconName: r ? poseIcon(r.doing) : 'person', label: 'Pose and action', testid: 'doing', value: r && r.doing, empty: 'No pose or action read yet.' }),
-    fact({ iconName: 'hanger', label: 'Outfit', testid: 'outfit', value: r && r.outfit, empty: 'No outfit read yet. Press Update status.' }),
-    r && r.hair ? fact({ iconName: hairIcon(r.hair), label: 'Hair', testid: 'hair', value: r.hair }) : null,
-    r && r.makeup ? fact({ iconName: 'makeup', label: 'Makeup', testid: 'makeup', value: r.makeup }) : null,
+    fact({ iconName: 'pin', label: 'Location', testid: 'location', value: r && r.location, empty: 'No location read yet.', seen: seen('location') }),
+    fact({ iconName: r ? poseIcon(r.doing) : 'person', label: 'Pose and action', testid: 'doing', value: r && r.doing, empty: 'No pose or action read yet.', seen: seen('doing') }),
+    fact({ iconName: 'hanger', label: 'Outfit', testid: 'outfit', value: r && r.outfit, empty: 'No outfit read yet. Press Update status.', seen: seen('outfit') }),
+    r && r.hair ? fact({ iconName: hairIcon(r.hair), label: 'Hair', testid: 'hair', value: r.hair, seen: seen('hair') }) : null,
+    r && shownMakeup(r.makeup) ? fact({ iconName: 'makeup', label: 'Makeup', testid: 'makeup', value: r.makeup, seen: seen('makeup') }) : null,
     dream ? fact({ iconName: 'moon', label: 'Last dream', testid: 'dream', value: describeDream(dream) }) : null);
 }
 

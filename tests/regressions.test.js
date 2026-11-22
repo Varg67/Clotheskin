@@ -81,3 +81,17 @@ test('a failure that is not an Error (a string, null) is still told in words, ne
     assert.match(k.entry().error, new RegExp(`Could not list the Kins: ${String(thrown)}`));
   }
 });
+
+test('B7: a Kin that groups its clothes and says it wears nothing is read, not a crash (0.6.0 threw "pieces is not iterable")', () => {
+  for (const answer of [{ outfit: { topwear: ['naked'] } }, { clothing: { topwear: ['nothing'], bottomwear: ['nothing'] }, footwear: ['barefoot'] }]) {
+    const p = parseReading(JSON.stringify(answer));
+    assert.equal(p.ok, true, p.ok ? '' : p.error);
+    assert.match(describeReading(p).outfit, /^Not wearing anything/);
+  }
+});
+
+test('a pose written as a list with a full stop inside ends with one full stop, not two', () => {
+  const p = parseReading(JSON.stringify({ pose: ['Lying in bed reading.', 'watching TV and laughing'] }));
+  assert.equal(p.ok, true);
+  assert.equal(describeReading(p).doing, 'Lying in bed reading.');
+});

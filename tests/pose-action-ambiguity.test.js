@@ -180,3 +180,89 @@ test('the cleaners keep their contract: null for nothing, undefined for a wrong 
   assert.equal(describeDoing({}), NOD);
   assert.equal(describeDoing({ pose: null, action: 'reading' }), 'Reading.');
 });
+
+// ---- What the Kin says is not what it does (real test, Nov 2026)
+
+test('speech is not an action: "asking Ari to check whether Marina is in the kitchen" is talking with Ari', () => {
+  assert.equal(doing({ pose: 'standing by the counter', action: 'asking Ari to check whether Marina is in the kitchen' }), 'Standing by the counter, talking with Ari.');
+  assert.equal(act('telling you that dinner is ready'), 'Talking with you.');
+  assert.equal(act('asking her sister to come down'), 'Talking with her sister.');
+  assert.equal(act('reminding Ari not to forget the keys'), 'Talking with Ari.');
+});
+
+test('a speech clause after the action goes; the action stays', () => {
+  assert.equal(act('ordering pizza and asking Ariel to stop shouting at Marina'), 'Ordering pizza.');
+  assert.equal(act('drinking coffee while yelling at the TV'), 'Drinking coffee.');
+  assert.equal(act('cooking, telling Marina about her day'), 'Cooking.');
+});
+
+test('short actions that only look like speech stay as they are', () => {
+  for (const a of ['asking for help', 'telling a story', 'talking with Ari', 'saying goodbye to Ari', 'watching TV and laughing', 'singing along to the radio'])
+    assert.equal(act(a), `${a[0].toUpperCase()}${a.slice(1)}.`, a);
+});
+
+test('the prompt limits the action to 5 words and rules out what the Kin says and what others do', () => {
+  const p = buildOutfitPrompt({ name: 'Isa' });
+  assert.match(p, /"action": what you are doing now, a short -ing phrase of at most 5 words \("drinking coffee", "talking with Ari"\); not what you say or what others do/);
+});
+
+// ---- Real-test review (Nov 2026): what a roleplay Kin writes in "pose" and "action"
+
+test('a subject in front: "I am", and the third person with the Kin\'s own name', () => {
+  assert.equal(doing({ pose: 'I am sitting on the bed', action: "I'm reading" }), 'Sitting on the bed, reading.');
+  assert.equal(doing({ pose: 'Bia is sitting on the bed', action: 'Bia is reading a book' }), 'Sitting on the bed, reading a book.');
+  assert.equal(doing({ pose: "Bia's lying on the couch" }), 'Lying on the couch.');
+});
+
+test('other verb forms become the -ing form: "sits", "cook", "sat"', () => {
+  assert.equal(doing({ pose: 'sits on the sofa', action: 'drinks coffee' }), 'Sitting on the sofa, drinking coffee.');
+  assert.equal(doing({ pose: 'sat on the sofa', action: 'read a book' }), 'Sitting on the sofa, reading a book.');
+  assert.equal(act('cook dinner'), 'Cooking dinner.');
+  assert.equal(act('lies down'), 'Lying down.');
+  assert.equal(act('writes a letter'), 'Writing a letter.');
+  assert.equal(act('studies'), 'Studying.');
+  assert.equal(act('ate breakfast'), 'Ate breakfast.', 'a past action may be over: not turned into "eating"');
+  assert.equal(act('dishes in the sink'), 'Dishes in the sink.', 'not a verb: left alone');
+});
+
+test('labels, brackets, *roleplay* asides and a capital in the middle', () => {
+  assert.equal(doing({ pose: 'pose: sitting', action: 'action: reading' }), 'Sitting, reading.');
+  assert.equal(doing({ pose: 'sitting (on the sofa)', action: 'reading (a novel)' }), 'Sitting on the sofa, reading a novel.');
+  assert.equal(act('*smiles* cooking'), 'Cooking.');
+  assert.equal(act('*sleeps*'), 'Sleeping.');
+  assert.equal(doing({ pose: 'Sitting', action: 'Reading a book' }), 'Sitting, reading a book.');
+});
+
+test('"not mentioned", "the chat does not say", "same as before": nothing new (the last known one stays)', () => {
+  assert.equal(doing({ pose: 'not mentioned in the chat', action: 'the chat does not say' }), NOD);
+  assert.equal(doing({ pose: 'same as before' }), NOD);
+  assert.equal(doing({ pose: 'unchanged', action: 'unknown' }), NOD);
+});
+
+test('about the Kin only: a clause about someone else goes', () => {
+  assert.equal(doing({ pose: 'sitting on the sofa next to Ari, who is watching TV', action: 'watching TV' }), 'Sitting on the sofa next to Ari, watching TV.');
+  assert.equal(act('picking up the shards of a glass that Ari dropped'), 'Picking up the shards of a glass.');
+});
+
+test('short and not repeated: one inside the other, an activity in the pose, a "while" clause', () => {
+  assert.equal(doing({ pose: 'sitting', action: 'sitting on the sofa' }), 'Sitting on the sofa.');
+  assert.equal(doing({ pose: 'standing', action: 'standing' }), 'Standing.');
+  assert.equal(doing({ pose: 'leaning against the wall, arms crossed, looking at Ari with a smirk', action: 'smirking' }), 'Leaning against the wall, arms crossed, smirking.');
+  assert.equal(act('cooking dinner while humming a song and glancing at the clock'), 'Cooking dinner.');
+  assert.equal(doing({ pose: 'lying on the bed, curled up' }), 'Lying on the bed, curled up.', 'a posture after the comma stays');
+});
+
+test('a feeling is not an action: "happy", "a bit tired"', () => {
+  for (const f of ['happy', 'tired', 'a bit tired', 'nervous and excited', 'very sleepy']) assert.equal(act(f), NOD, f);
+  assert.equal(act('smiling'), 'Smiling.', 'an expression is an action');
+});
+
+test('the sleep cycle still sees sleep in other verb forms: "sleeps", "*sleeps*"', async () => {
+  const { looksAsleep } = await import('../src/core/sleep.js');
+  assert.ok(looksAsleep(doing({ pose: 'lies in bed', action: 'sleeps' })));
+  assert.ok(looksAsleep(doing({ action: '*sleeps*' })));
+});
+
+test('the prompt limits the pose to 6 words', () => {
+  assert.match(buildOutfitPrompt({ name: 'Isa' }), /"pose": your body position, at most 6 words \("sitting on the sofa"\)/);
+});

@@ -26,7 +26,8 @@ test('running: reads at once, then only when the interval has passed; moving the
   k.answers.reading.push(AWAKE);
   const first = await tick(k);
   assert.match(first.message, /^Isa: In the bedroom\. Sitting on the bed, reading a book\. Wearing pyjamas\.$/);
-  assert.deepEqual(k.entry().reading, { location: 'In the bedroom.', doing: 'Sitting on the bed, reading a book.', outfit: 'Wearing pyjamas.', hair: null, makeup: null, at: k.clock().toISOString() });
+  const t0 = k.clock().toISOString();
+  assert.deepEqual(k.entry().reading, { location: 'In the bedroom.', doing: 'Sitting on the bed, reading a book.', outfit: 'Wearing pyjamas.', hair: null, makeup: null, at: t0, seen: { location: t0, doing: t0, outfit: t0 } });
   assert.equal(k.entry().name, 'Isa');
   for (const m of [15, 15, 15]) { k.advance(m); await tick(k); }
   assert.deepEqual(k.asks(), ['reading'], '45 minutes with a 1-hour interval: nothing more');
@@ -48,7 +49,7 @@ test('a start a few seconds early still does what is due (cron jitter)', async (
 });
 
 test('the night: asleep -> sleep question on the person\'s clock -> nothing asked overnight -> dream (told to the Kin) -> readings again', async () => {
-  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', intervalS: 900, ...SAO_PAULO } });
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', intervalS: 900, ...SAO_PAULO, tellDream: true } });
   k.at('2026-11-20T23:10:00-03:00');
   k.answers.reading.push(ASLEEP);
   k.answers.sleep.push('{"sleeping":true,"wake_at":"07:30"}');
@@ -80,8 +81,8 @@ test('the night: asleep -> sleep question on the person\'s clock -> nothing aske
   assert.equal(k.entry().sleptOn, null, 'the chat moved on');
 });
 
-test('dream options: not told when the person turned it off; reach-out when they turned it on; a failed tell is not an error', async () => {
-  for (const [opts, expectTell] of [[{ tellDream: false }, 0], [{ reachOut: true }, 1]]) {
+test('dream options: not told by default or when the person turned it off; reach-out when they turned it on; a failed tell is not an error', async () => {
+  for (const [opts, expectTell] of [[{}, 0], [{ tellDream: false }, 0], [{ tellDream: true, reachOut: true }, 1]]) {
     const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', ...SAO_PAULO, ...opts } });
     k.files.set('status.json', JSON.stringify({ kins: { k1: { sleep: { wakeAt: '2026-11-21T10:30:00Z', until: '2026-11-21T10:20:00Z' } } } }));
     k.at('2026-11-21T10:20:00Z');
@@ -184,13 +185,19 @@ test('Wake now (the action with op "wake") asks the dream question at once', asy
   assert.equal(k.tells().length, 0, 'no dream: nothing to tell');
 });
 
-test('Stop forgets the night and the slowing down at once (stoppedAt), keeps the last reading; a stopped start writes nothing', async () => {
+test('Stop forgets the night and the slowing down at once (stoppedAt), keeps the last reading; a stopped start erases the old night and dream from the file once, then writes nothing', async () => {
   const k = fakeKindroid({ settings: { autoState: 'stopped', kinId: 'k1', stoppedAt: '2026-11-21T01:00:00Z' } });
   const reading = { location: 'In the bedroom.', doing: 'Lying in bed, sleeping.', outfit: 'Wearing pyjamas.', at: '2026-11-20T23:00:00.000Z' };
   k.files.set('status.json', JSON.stringify({ kins: { k1: { name: 'Isa', reading, lastRunAt: '2026-11-20T23:00:00Z', sleep: { wakeAt: '2026-11-21T10:30:00Z', until: '2026-11-21T10:20:00Z' }, sleptOn: '0000abcd', failures: 2, retryAt: '2026-11-21T00:00:00Z', dream: { dream: 'x', remembered: 'all', at: '2026-11-20T10:00:00Z' } } } }));
   k.at('2026-11-21T02:00:00Z');
   await tick(k);
-  assert.equal(k.puts(), 0, 'stopped: nothing to write');
+  assert.equal(k.puts(), 1, 'stopped: the night and the dream from before Stop are erased from the file');
+  assert.equal(k.entry().dream, null);
+  assert.equal(k.entry().sleep, null);
+  assert.equal(k.entry().reading.outfit, 'Wearing pyjamas.', 'the last reading stays');
+  k.advance(15);
+  await tick(k);
+  assert.equal(k.puts(), 1, 'stopped: nothing more to write');
   k.settings({ autoState: 'running' }); // Start, before any other start of the program
   k.answers.reading.push(ASLEEP);
   k.answers.sleep.push('{"sleeping":true,"wake_at":"07:30"}');
@@ -283,7 +290,7 @@ test('a bare 502/503 is tried again at once; maintenance is not', async () => {
 });
 
 test('two runs at once: a later run\'s finished night is not brought back by an earlier run that saves last', async () => {
-  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', tz: 'America/Sao_Paulo' } });
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', tz: 'America/Sao_Paulo', tellDream: true } });
   const night = { sleep: { wakeAt: '2026-11-21T10:30:00Z', until: '2026-11-21T10:20:00Z' }, sleptOn: '0000abcd', lastRunAt: '2026-11-21T00:00:00Z' };
   k.files.set('status.json', JSON.stringify({ kins: { k1: { name: 'Isa', ...night } } }));
   k.at('2026-11-21T04:00:00Z');
@@ -340,7 +347,7 @@ test('"asleep" with a wake-up time too far away is said so (not "not asleep afte
 });
 
 test('two runs at the same instant: the run that ended the night wins over one that only read "still asleep"', async () => {
-  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', tz: 'America/Sao_Paulo' } });
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', tz: 'America/Sao_Paulo', tellDream: true } });
   k.files.set('status.json', JSON.stringify({ kins: { k1: { name: 'Isa', lastRunAt: '2026-11-21T03:00:00Z', sleep: { wakeAt: '2026-11-22T10:30:00Z', until: '2026-11-22T10:20:00Z' }, sleptOn: '0000abcd' } } }));
   k.at('2026-11-22T10:15:00Z');
   let release;
@@ -359,4 +366,222 @@ test('two runs at the same instant: the run that ended the night wins over one t
   await tick(k);
   assert.equal(k.tells().length, 1, 'the dream is told once');
   assert.deepEqual(k.asks().filter((a) => a === 'dream'), ['dream'], 'and asked once');
+});
+
+test('a dream is erased from status.json after a day, by any start, even while stopped (the file keeps no more than the screen shows)', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'stopped', kinId: 'k1' } });
+  const dream = { dream: 'A train by the sea', remembered: 'some', at: '2026-11-20T10:00:00.000Z' };
+  k.files.set('status.json', JSON.stringify({ kins: { k1: { name: 'Isa', lastRunAt: '2026-11-20T10:00:00Z', dream } } }));
+  k.at('2026-11-21T09:00:00Z'); // 23 hours later: still shown, still kept
+  await tick(k);
+  assert.equal(k.puts(), 0);
+  assert.equal(k.entry().dream.dream, 'A train by the sea');
+  k.at('2026-11-21T10:00:00Z'); // a day later: erased
+  await tick(k);
+  assert.equal(k.puts(), 1);
+  assert.equal(k.entry().dream, null);
+  assert.ok(!k.files.get('status.json').includes('train'), 'nothing of the dream is left in the file');
+});
+
+test('the Kin is never told its dream unless the person turned it on (the default is off)', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1' } });
+  assert.equal(JSON.parse(k.files.get('settings.json')).tellDream, undefined);
+  k.files.set('status.json', JSON.stringify({ kins: { k1: { sleep: { wakeAt: '2026-11-21T10:30:00Z', until: '2026-11-21T10:20:00Z' } } } }));
+  k.at('2026-11-21T10:20:00Z');
+  k.answers.dream.push('{"dream":"A train","remembered":"some"}');
+  await tick(k);
+  assert.equal(k.entry().dream.dream, 'A train');
+  assert.equal(k.tells().length, 0);
+});
+
+// ---------------------------------------------------------------- the correction (real test, Nov 2026)
+
+const ROLEPLAY_PT = '*sorri e ajeita o cabelo* Ah, eu tô na cozinha, sentada à mesa conversando com o Ari. Por quê?';
+const askPrompts = (k) => k.calls.filter((c) => c[0] === 'ask').map((c) => c[3]);
+
+test('an answer in roleplay (in Portuguese) is asked once more in the same run, with an out-of-character correction', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1' } });
+  k.answers.reading.push(ROLEPLAY_PT, AWAKE);
+  const r = await tick(k);
+  assert.equal(r.ok, true);
+  assert.deepEqual(k.asks(), ['reading', 'reading']);
+  const [first, second] = askPrompts(k);
+  assert.match(first, /^\[DIRECTIVE — OUT OF CHARACTER\./);
+  assert.match(second, /^\[DIRECTIVE — OUT OF CHARACTER\] Your previous reply to this directive could not be used/);
+  assert.ok(second.endsWith(first), 'the correction carries the whole question: it does not rely on the Kin remembering');
+  assert.equal(k.entry().reading.doing, 'Sitting on the bed, reading a book.');
+  assert.equal(k.entry().error, null);
+});
+
+test('two answers in roleplay: the reading fails as the Kin\'s error (no server warning), the last reading stays, one more ask only', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1' } });
+  k.answers.reading.push(AWAKE);
+  await tick(k);
+  k.answers.reading.splice(0, Infinity, ROLEPLAY_PT);
+  k.advance(60);
+  const r = await tick(k);
+  assert.equal(r.ok, false);
+  assert.deepEqual(k.asks(), ['reading', 'reading', 'reading'], 'the first reading, then the bad answer and its one correction');
+  const e = k.entry();
+  assert.equal(e.errorKind, 'answer');
+  assert.equal(e.serverFailures, 0);
+  assert.equal(e.reading.doing, 'Sitting on the bed, reading a book.', 'nothing lost');
+});
+
+test('the sleep and dream questions get the same correction', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', ...SAO_PAULO } });
+  k.answers.reading.push(ASLEEP);
+  k.answers.sleep.push('*boceja* Vou dormir até as sete e meia, amor.', '{"sleeping":true,"wake_at":"07:30"}');
+  await tick(k);
+  assert.deepEqual(k.asks(), ['reading', 'sleep', 'sleep']);
+  assert.ok(k.entry().sleep, 'the night was planned from the corrected answer');
+  k.at(k.entry().sleep.until);
+  k.answers.dream.push('*se espreguiça* Sonhei com o mar...', '{"dream":"I was swimming in a warm sea","remembered":"most"}');
+  await tick(k);
+  assert.equal(k.entry().dream.dream, 'I was swimming in a warm sea');
+});
+
+test('a start with nothing due says when the next update is, on the person\'s clock (the line shows in Kindroid\'s log)', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', intervalS: 3600, ...SAO_PAULO } });
+  k.answers.reading.push(AWAKE);
+  k.at('2026-11-22T05:27:35Z'); // 02:27 in São Paulo
+  await tick(k);
+  k.advance(15);
+  const r = await tick(k);
+  assert.equal(r.message, 'Nothing to do yet: next update around 3:27 AM.');
+  assert.ok(!/\d{4}-\d\d-\d\dT/.test(r.message), 'no ISO timestamp');
+});
+
+// ---------------------------------------------------------------- the last known sentence (real test, Nov 2026)
+
+test('what the Kin says nothing about keeps the last known sentence, with when it was last seen', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', intervalS: 900 } });
+  k.answers.reading.push(JSON.stringify({ location: 'in the kitchen', pose: 'sitting at the table', action: 'talking with Ari', hair: 'long dark hair, loose', topwear: ['a purple shirt'] }));
+  await tick(k);
+  const t0 = k.clock().toISOString();
+  k.advance(20);
+  k.answers.reading.splice(0, Infinity, JSON.stringify({ location: 'in the living room', action: 'ordering pizza' })); // no outfit, no hair
+  await tick(k);
+  const t1 = k.clock().toISOString();
+  const r = k.entry().reading;
+  assert.equal(r.location, 'In the living room.');
+  assert.equal(r.doing, 'Ordering pizza.');
+  assert.equal(r.outfit, 'Wearing a purple shirt.', 'kept, not "No outfit described"');
+  assert.equal(r.hair, 'Long dark hair, loose.', 'kept');
+  assert.equal(r.at, t1);
+  assert.deepEqual(r.seen, { location: t1, doing: t1, outfit: t0, hair: t0 });
+  k.advance(20);
+  k.answers.reading.splice(0, Infinity, JSON.stringify({ topwear: ['a black dress'] })); // only the outfit changed
+  await tick(k);
+  const t2 = k.clock().toISOString();
+  assert.equal(k.entry().reading.outfit, 'Wearing a black dress.');
+  assert.equal(k.entry().reading.location, 'In the living room.');
+  assert.deepEqual(k.entry().reading.seen, { location: t1, doing: t1, outfit: t2, hair: t0 });
+});
+
+test('a pose kept from an earlier reading never starts a night: sleep is read from what the Kin says now', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', intervalS: 900, ...SAO_PAULO } });
+  k.answers.reading.push(ASLEEP);
+  k.answers.sleep.push('{"sleeping":false}'); // "lying in bed, sleeping" but not asleep after all: no night
+  await tick(k);
+  assert.deepEqual(k.asks(), ['reading', 'sleep']);
+  k.advance(20);
+  k.answers.reading.splice(0, Infinity, JSON.stringify({ topwear: ['a hoodie'] })); // nothing about the pose
+  await tick(k);
+  assert.deepEqual(k.asks(), ['reading', 'sleep', 'reading'], 'no sleep question from the kept pose');
+  assert.equal(k.entry().reading.doing, 'Lying in bed, sleeping.', 'still shown, as last seen');
+  assert.equal(k.entry().sleep, null);
+});
+
+test('an answer that says nothing about the pose is not "awake": Update status at night keeps the night', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', ...SAO_PAULO } });
+  const night = { sleep: { wakeAt: '2026-11-21T10:30:00.000Z', until: '2026-11-21T10:20:00.000Z' }, sleptOn: '0000abcd', lastRunAt: '2026-11-21T02:00:00Z' };
+  k.files.set('status.json', JSON.stringify({ kins: { k1: { name: 'Isa', ...night } } }));
+  k.at('2026-11-21T04:00:00Z');
+  k.answers.reading.push(JSON.stringify({ topwear: ['an oversized T-shirt'] })); // nothing about the pose
+  const r = await press(k);
+  assert.equal(r.ok, true);
+  assert.deepEqual(k.entry().sleep, night.sleep, 'the night goes on: the dream is still asked in the morning');
+  assert.equal(k.entry().sleptOn, '0000abcd');
+  assert.deepEqual(k.asks(), ['reading'], 'no sleep question');
+});
+
+test('after a night, an answer without a pose keeps the mark: the same still "asleep" chat does not start a second night', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', intervalS: 900, ...SAO_PAULO } });
+  k.answers.reading.push(ASLEEP);
+  k.answers.sleep.push('{"sleeping":true,"wake_at":"07:30"}');
+  k.at('2026-11-21T02:10:00Z'); // 23:10 in São Paulo
+  await tick(k);
+  k.at(k.entry().sleep.until);
+  k.answers.dream.push('{"dream":"A train","remembered":"some"}');
+  await tick(k); // woke up, dream asked
+  const mark = k.entry().sleptOn;
+  assert.ok(mark);
+  k.advance(20);
+  k.answers.reading.splice(0, Infinity, JSON.stringify({ topwear: ['pyjamas'] })); // nothing about the pose
+  await tick(k);
+  assert.equal(k.entry().sleptOn, mark, 'the mark stays');
+  k.advance(20);
+  k.answers.reading.splice(0, Infinity, ASLEEP); // the chat has not moved: the same "asleep" sentence
+  await tick(k);
+  assert.deepEqual(k.asks(), ['reading', 'sleep', 'dream', 'reading', 'reading'], 'no second sleep question');
+});
+
+test('the run writes its version to status.json each time it saves; the screen notices a run from another update', async () => {
+  const { APP_VERSION } = await import('../src/core/constants.js');
+  const { versionMismatch, normalizeStatus } = await import('../src/core/state.js');
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1' } });
+  k.answers.reading.push(AWAKE);
+  await tick(k);
+  assert.equal(k.status().runVersion, APP_VERSION);
+  assert.equal(versionMismatch(normalizeStatus(k.files.get('status.json'))), null);
+  assert.equal(versionMismatch(normalizeStatus({ runVersion: '0.3.9', kins: {} })), '0.3.9');
+  assert.equal(versionMismatch(normalizeStatus({ kins: {} })), null, 'a file from before 0.4.0 says nothing');
+});
+
+test('a Kin that undresses: "Not wearing anything" replaces the last known clothes', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', intervalS: 900 } });
+  k.answers.reading.push(JSON.stringify({ location: 'in the bathroom', topwear: ['a white shirt'], bottomwear: ['jeans'] }));
+  await tick(k);
+  k.advance(20);
+  k.answers.reading.splice(0, Infinity, JSON.stringify({ location: 'in the shower', clothing: ['naked'] }));
+  await tick(k);
+  assert.equal(k.entry().reading.outfit, 'Not wearing anything.');
+});
+
+test('a whole messy roleplay answer, every slip at once, reads as five short sentences about the Kin only', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1' } });
+  k.answers.reading.push('*smiles softly* Sure! ```json\n' + JSON.stringify({
+    location: 'Bia is in the kitchen with Ari and Marina',
+    pose: 'Bia is sitting at the table (on a stool)',
+    action: 'asking Ari to check whether Marina is home',
+    hair: 'Bia has long dark hair, which she keeps tucking behind her ear',
+    makeup: 'not mentioned in the chat',
+    topwear: ['wearing a purple shirt', 'a cardigan (taken off)'],
+    bottomunderwear: ['purple panties'],
+    footwear: ['barefoot'],
+  }) + '\n```');
+  const r = await tick(k);
+  assert.equal(r.message, 'Isa: In the kitchen. Sitting at the table on a stool, talking with Ari. Wearing a purple shirt and purple panties, barefoot. Long dark hair.');
+  assert.equal(k.entry().reading.makeup, null, '"not mentioned" is no makeup row');
+});
+
+test('no makeup: the row is hidden, but the bare face is kept, so an earlier lipstick never comes back', async () => {
+  const { BARE_FACE_SENTENCE } = await import('../src/core/constants.js');
+  const { describeReading, parseReading } = await import('../src/core/outfit.js');
+  assert.equal(describeReading(parseReading('{"makeup":"no makeup"}')).makeup, BARE_FACE_SENTENCE, 'the sentence the screen hides');
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', intervalS: 900 } });
+  k.answers.reading.push(JSON.stringify({ location: 'in the bathroom', makeup: 'red lipstick', topwear: ['a dress'] }));
+  let r = await tick(k);
+  assert.match(r.message, /Red lipstick\.$/);
+  k.advance(20);
+  k.answers.reading.splice(0, Infinity, JSON.stringify({ action: 'washing her face', makeup: 'no makeup' }));
+  r = await tick(k);
+  assert.ok(!/makeup|lipstick/i.test(r.message), r.message);
+  assert.equal(k.entry().reading.makeup, BARE_FACE_SENTENCE, 'kept');
+  k.advance(20);
+  k.answers.reading.splice(0, Infinity, JSON.stringify({ action: 'brushing her teeth' })); // nothing about makeup
+  r = await tick(k);
+  assert.equal(k.entry().reading.makeup, BARE_FACE_SENTENCE, 'still a bare face, not the old lipstick');
+  assert.ok(!/lipstick/i.test(r.message));
 });

@@ -4,14 +4,12 @@
 //
 // Lessons from the guide and from published programs (Aurora Alert, Bunny & Fox BBS):
 //  - output is read as UTF-8 text in one piece (execFile with encoding), so a character is never split between chunks;
-//  - stdin is closed at once, so a subcommand never waits for input;
+//  - stdin is closed at once, so a subcommand never waits for input; `files put` gets the body there (Kin Bank, Planner);
+//  - a missing file is "kin: 404 ..." on stderr (Kin Bank and Planner check /^kin: 404\b/);
 //  - a failure says which subcommand failed and the last line kin printed, not the whole command line;
 //  - `kin files get` of a missing file is "not found" (null), any other failure is an error: the caller must then
 //    not write over the file it could not read.
 import { execFile } from 'node:child_process';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { oneLine } from '../src/core/text.js';
 
 // kin end takes up to 4,000 characters, shown in the chat and given back to the Kin when an action started the run.
@@ -43,7 +41,12 @@ const NOT_FOUND = /\b404\b/;
 export function createKin({ bin = process.env.KIN_BIN || 'kin', defaultTimeoutMs = 30000 } = {}) {
   const viaNode = bin.endsWith('.mjs') || bin.endsWith('.js');
 
-  function call(args, { timeoutMs = defaultTimeoutMs } = {}) {
+  /**
+   * @param {string[]} args
+   * @param {{ timeoutMs?: number, input?: string|null }} [options] input: what kin reads on stdin (`files put` takes the body there)
+   * @returns {Promise<string>}
+   */
+  function call(args, { timeoutMs = defaultTimeoutMs, input = null } = {}) {
     const cmd = viaNode ? process.execPath : bin;
     const argv = viaNode ? [bin, ...args] : args;
     return new Promise((resolve, reject) => {
@@ -55,7 +58,7 @@ export function createKin({ bin = process.env.KIN_BIN || 'kin', defaultTimeoutMs
         reject(new KinError(timedOut ? `kin ${what} timed out after ${Math.round(timeoutMs / 1000)} s` : `kin ${what} failed: ${last}`, { code: err.code, stderr: String(stderr || ''), timedOut }));
       });
       child.stdin?.on('error', () => {}); // kin may exit before reading stdin
-      child.stdin?.end();
+      child.stdin?.end(input == null ? undefined : input); // `kin files put <path>` reads the body here
     });
   }
 
@@ -71,10 +74,11 @@ export function createKin({ bin = process.env.KIN_BIN || 'kin', defaultTimeoutMs
     /**
      * Tells the Kin a plain fact (rarely). `ttl` in hours; `reachOut` lets the Kin bring it up by itself.
      * @param {string} fact
-     * @param {{ kin?: string, key?: string, ttl?: number, reachOut?: boolean }} [options]
+     * @param {{ kin?: string, key?: string, ttl?: number, reachOut?: boolean, timeoutMs?: number }} [options]
      */
-    async tell(fact, { kin, key, ttl, reachOut = false } = {}) {
-      await call(['tell', ...(kin ? ['--kin', kin] : []), ...(key ? ['--key', key] : []), ...(ttl ? ['--ttl', String(ttl)] : []), ...(reachOut ? ['--reach-out', 'soon'] : []), fact]);
+    async tell(fact, { kin, key, ttl, reachOut = false, timeoutMs } = {}) {
+      const args = ['tell', ...(kin ? ['--kin', kin] : []), ...(key ? ['--key', key] : []), ...(ttl ? ['--ttl', String(ttl)] : []), ...(reachOut ? ['--reach-out', 'soon'] : []), fact];
+      await call(args, timeoutMs ? { timeoutMs } : {});
     },
     /** A file of the program's folder as text, or null when it does not exist yet. Any other failure throws. */
     async get(path) {
@@ -86,16 +90,9 @@ export function createKin({ bin = process.env.KIN_BIN || 'kin', defaultTimeoutMs
         throw e;
       }
     },
-    /** Saves text as a file of the program's folder (through /tmp: a shared program's folder is read-only). */
+    /** Saves text as a file of the program's folder: `kin files put <path>` with the body on stdin (as Kin Bank and Planner do). */
     async put(path, text) {
-      const dir = await mkdtemp(join(tmpdir(), 'clotheskin-'));
-      try {
-        const file = join(dir, 'body');
-        await writeFile(file, text);
-        await call(['files', 'put', path, file]);
-      } finally {
-        await rm(dir, { recursive: true, force: true });
-      }
+      await call(['files', 'put', path], { input: String(text) });
     },
     /** The Kins attached to the program: [{ id, name }] (kin kins prints one per line: id, a tab, the name). */
     async kins() {

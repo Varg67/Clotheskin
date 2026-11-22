@@ -31,10 +31,42 @@ const REFUSED = [
 
 const posix = (p) => p.split(sep).join('/');
 
+/**
+ * The sources' comments are for whoever reads the code; the screen's one file only runs. Lines that are only a comment
+ * (// or a block that starts its line) go; a comment after code on a line stays. Nothing inside a line is touched, so
+ * a regular expression such as /\*[^*]+\*\// cannot be mistaken for a comment. Keeps screen/app.js small for the
+ * Kindroid agent that copies it (a test holds it under 80,000 characters).
+ */
+export function stripCommentLines(code) {
+  const out = [];
+  let inBlock = false;
+  for (const line of code.split('\n')) {
+    if (inBlock) {
+      const end = line.indexOf('*/');
+      if (end === -1) continue;
+      inBlock = false;
+      const rest = line.slice(end + 2);
+      if (rest.trim()) out.push(rest);
+      continue;
+    }
+    if (/^\s*\/\//.test(line)) continue;
+    const block = line.match(/^\s*\/\*/);
+    if (block) {
+      const end = line.indexOf('*/', block[0].length);
+      if (end === -1) { inBlock = true; continue; }
+      const rest = line.slice(end + 2);
+      if (rest.trim()) out.push(rest);
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
 function transform(rel, code) {
   const deps = [];
   const names = [];
-  let out = code.replace(/^import\s*\{([^}]*)\}\s*from\s*'([^']+)';?[ \t]*$/gm, (m, list, spec) => {
+  let out = stripCommentLines(code).replace(/^import\s*\{([^}]*)\}\s*from\s*'([^']+)';?[ \t]*$/gm, (m, list, spec) => {
     if (!spec.startsWith('.')) throw new Error(`${rel}: only relative imports are bundled (${spec})`);
     const dep = posix(relative(ROOT, join(ROOT, dirname(rel), spec)));
     deps.push(dep);

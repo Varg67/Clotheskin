@@ -1,6 +1,6 @@
 {
   "name": "clotheskin",
-  "version": "0.2.0",
+  "version": "0.6.0",
   "description": "Kindroid app: where a Kin is, its pose and action and what it is wearing, read from its recent chat, with automatic updates and a sleep and dream cycle.",
   "type": "module",
   "private": true,
@@ -17,7 +17,8 @@
     "unused-exports": "node scripts/unused-exports.mjs",
     "typecheck": "node tools/run.mjs tsc -p jsconfig.json",
     "check": "npm run lint && npm run unused-exports && npm run typecheck && npm run test:coverage && npm run test:perf && npm run build:check",
-    "try": "node scripts/try-run.mjs"
+    "try": "node scripts/try-run.mjs",
+    "pack": "node scripts/pack.mjs"
   },
   "engines": {
     "node": ">=22"

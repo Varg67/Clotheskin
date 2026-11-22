@@ -135,6 +135,10 @@ const step = async (name, fn) => {
 
   await step('the night: asleep -> wake-up time -> nothing asked overnight -> the dream at 07:15 -> Last dream, told to the Kin', async () => {
     const t = await open({ kins: [{ id: 'kin-isa', name: 'Isa' }], scene: 'night', time: '2026-11-20T23:10:00-03:00' });
+    assert.equal(await t.key('tell-dream').isChecked(), false, 'off until the person turns it on');
+    assert.equal(await t.key('tell-dream').isVisible(), true, 'in plain sight, not inside Settings');
+    await t.key('tell-dream').check();
+    await t.until(async () => (await t.settings()).tellDream === true, 'tellDream saved');
     await t.key('auto-start').click();
     await t.until(async () => (await t.settings()).autoState === 'running', 'running');
     await t.dev(() => window.dev.tick());
@@ -308,6 +312,65 @@ const step = async (name, fn) => {
     await t.ctx.close(); await u.ctx.close();
   });
 
+  await step('what the Kin says nothing about keeps the last known sentence, marked with when it was seen', async () => {
+    const t = await open({ kins: [{ id: 'kin-isa', name: 'Isa' }] });
+    await t.key('update').click();
+    await t.until(async () => /leather jacket/.test(await t.text('outfit')), 'first reading');
+    assert.equal(await t.fr.locator('[data-testid="outfit-seen"]').count(), 0, 'fresh: no "seen" mark');
+    await t.page.clock.fastForward('20:00');
+    await t.dev(() => window.dev.answers({ reading: '{"location":"in the kitchen","action":"ordering pizza"}' }));
+    await t.key('update').click();
+    await t.until(async () => /kitchen/.test(await t.text('location')), 'second reading');
+    assert.match(await t.text('outfit'), /leather jacket/, 'the outfit is kept');
+    assert.equal(await t.text('outfit-seen'), ' · seen 10:00 PM');
+    assert.equal(await t.fr.locator('[data-testid="location-seen"]').count(), 0, 'the location is new');
+    await t.page.screenshot({ path: path.join(SHOTS, '10-kept-outfit.png') });
+    await t.ctx.close();
+  });
+
+  await step('Settings shows the version; a run from another update shows a warning to update all the files', async () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8'));
+    const t = await open({ kins: [{ id: 'kin-isa', name: 'Isa' }], files: { 'status.json': JSON.stringify({ runVersion: '0.3.0', kins: {} }) } });
+    await t.key('update').waitFor();
+    await t.key('settings-summary').click();
+    assert.equal(await t.text('version'), `Clotheskin ${pkg.version}`);
+    assert.match(await t.text('version-mismatch'), new RegExp(`the screen is ${pkg.version.replace(/\./g, '\\.')}, the automatic part is 0\\.3\\.0\\. Update all the files together\\.`));
+    await t.key('update').click();
+    await t.fr.locator('[data-testid="version-mismatch"]').waitFor({ state: 'detached' }); // the run saved: same version now
+    await t.ctx.close();
+  });
+
+  await step('no makeup: the makeup row is hidden; a lipstick shows it again', async () => {
+    const t = await open({ kins: [{ id: 'kin-isa', name: 'Isa' }] });
+    await t.dev(() => window.dev.answers({ reading: '{"location":"in the bathroom","topwear":["a dress"],"makeup":"no makeup"}' }));
+    await t.key('update').click();
+    await t.until(async () => /bathroom/.test(await t.text('location')), 'read');
+    assert.equal(await t.fr.locator('[data-testid="makeup"]').count(), 0, 'no makeup row');
+    await t.page.clock.fastForward('20:00');
+    await t.dev(() => window.dev.answers({ reading: '{"makeup":"red lipstick"}' }));
+    await t.key('update').click();
+    await t.until(async () => /lipstick/i.test(await t.text('makeup')), 'the row is back');
+    await t.ctx.close();
+  });
+
+  await step('Current look: off and in plain sight; ticking it saves the choice; a refused note is said, with when it is tried again', async () => {
+    const t = await open({ kins: [{ id: 'kin-isa', name: 'Isa' }] });
+    await t.key('update').waitFor();
+    assert.equal(await t.key('tell-look').isVisible(), true, 'not inside Settings');
+    assert.equal(await t.key('tell-look').isChecked(), false, 'off until the person turns it on');
+    await t.key('tell-look').check();
+    await t.until(async () => (await t.settings()).tellLook === true, 'tellLook saved');
+    await t.ctx.close();
+    const failedAt = '2026-11-20T21:50:00-03:00';
+    const u = await open({ kins: [{ id: 'kin-isa', name: 'Isa' }], files: {
+      'settings.json': JSON.stringify({ kinId: 'kin-isa', tellLook: true, tz: 'America/Sao_Paulo' }),
+      'status.json': JSON.stringify({ kins: { 'kin-isa': { name: 'Isa', lastRunAt: failedAt, lookFailedAt: failedAt, lookError: 'kin tell failed: not allowed' } } }),
+    } });
+    await u.until(async () => /did not take the last note/.test(await u.text('look-problem')), 'the problem is shown');
+    assert.equal(await u.text('look-problem'), 'Kindroid did not take the last note (kin tell failed: not allowed). Clotheskin tries again after 10:50 PM.');
+    await u.ctx.close();
+  });
+
   await step('a whole render of the card (a reading, three Kins, the list open and closed) takes well under a frame', async () => {
     const t = await open({ kins: [{ id: 'kin-isa', name: 'Isa' }, { id: 'kin-bea', name: 'Bea' }, { id: 'kin-alex', name: 'Alex' }] });
     await t.key('pick-kin-isa').click();
@@ -324,7 +387,6 @@ const step = async (name, fn) => {
     assert.ok(ms < 16, `${ms.toFixed(1)} ms per render (one frame at 60 Hz is 16 ms)`);
     await t.ctx.close();
   });
-
   await step('no page errors or console errors', async () => { assert.deepEqual(problems, []); });
 
   await browser.close(); server.close();

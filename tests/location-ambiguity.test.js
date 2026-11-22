@@ -93,13 +93,18 @@ test('a Portuguese place is shown as written, never with a wrong "In" in front',
 });
 
 // ---- 7. A place written as a bare noun
-test('bare nouns: articles and proper names get "In"; "home" gets "At"; other bare words are shown as is', () => {
+test('bare nouns: articles and proper names get "In"; common places get "In the"; "home" gets "At"; other bare words are shown as is', () => {
   assert.equal(where('the kitchen'), 'In the kitchen.');
   assert.equal(where('my room'), 'In my room.');
   assert.equal(where('a café'), 'In a café.');
   assert.equal(where('Alfenas'), 'In Alfenas.');
   assert.equal(where('home'), 'At home.');
-  assert.equal(where('kitchen'), 'Kitchen.', 'no invented preposition for an ordinary bare noun');
+  assert.equal(where('kitchen'), 'In the kitchen.', 'a common place');
+  assert.equal(where('Kitchen'), 'In the kitchen.', 'a common place with a capital is not a name');
+  assert.equal(where('Living room'), 'In the living room.');
+  assert.equal(where('work'), 'At work.');
+  assert.equal(where('bed'), 'In bed.');
+  assert.equal(where('downtown'), 'Downtown.', 'no invented preposition for any other bare word');
 });
 
 // ---- 8. Vague answers that are not a place
@@ -135,14 +140,15 @@ test('the prompt pins down the location ideas', () => {
   const must = [
     [/"location": the place only/, 'what location means'],
     [/starting with in, at or on/, 'shape'],
-    [/not your posture or activity/, 'no posture or activity'],
+    [/not your posture, activity or who is with you/, 'no posture, activity or company'],
+    [/the place only, at most 8 words/, 'short'],
     [/Travelling is a place/, 'travelling is a place'],
     [/planning to go is not/, 'a plan is not a move'],
     [/a place you have left is no longer where you are/, 'old places expire'],
     [/never guess/, 'no guessing'],
     [/Describe only yourself/, 'not the person'],
     [/shows the format only; never copy its values/, 'do not copy the example'],
-    [/if the chat says nothing about any of this, reply \{\}/, 'empty answer allowed'],
+    [/leave that key out, and \{\} is a correct answer/, 'empty answer allowed'],
   ];
   for (const [re, why] of must) assert.match(p, re, why);
 });
@@ -165,4 +171,56 @@ test('cleanLocation keeps its contract: null for nothing, undefined for a wrong 
   assert.equal(cleanLocation(5), undefined);
   assert.equal(cleanLocation({}), undefined);
   assert.equal(describeLocation(null), NONE);
+});
+
+// ---- Real-test review (Nov 2026): what a roleplay Kin writes in "location"
+
+test('a third-person answer with the Kin\'s own name: "Bia is in the kitchen"', () => {
+  assert.equal(where('Bia is in the kitchen'), 'In the kitchen.');
+  assert.equal(where('Isa Maria is at the hospital'), 'At the hospital.');
+  assert.equal(where('Paris is lovely'), 'In Paris is lovely.', 'only before a place: not a guess about names');
+});
+
+test('a label inside the value: "Location: in the kitchen"', () => {
+  assert.equal(where('Location: in the kitchen'), 'In the kitchen.');
+  assert.equal(where('location - living room'), 'In the living room.');
+  assert.equal(where('Current location: at home'), 'At home.');
+});
+
+test('brackets: an activity goes, anything else becomes a comma clause, never a broken bracket', () => {
+  assert.equal(where('in the kitchen (cooking)'), 'In the kitchen.');
+  assert.equal(where("kitchen (Ari's apartment)"), "In the kitchen, Ari's apartment.");
+  assert.equal(where('in the kitchen (cooking'), 'In the kitchen.');
+});
+
+test('who is there is not the place', () => {
+  assert.equal(where('in the kitchen with Ari and Marina'), 'In the kitchen.');
+  assert.equal(where('at dinner with you'), 'At dinner.');
+  assert.equal(where('in the car with my sister'), 'In the car.');
+  assert.equal(where('in a room with a view'), 'In a room with a view.', 'not a person');
+});
+
+test('"not specified", "unknown location", "the chat does not say", "same place": no new place (the last known one stays)', () => {
+  for (const v of ['not specified in the chat', 'unknown location', 'no location mentioned', 'the chat does not say', "the chat doesn't mention it", 'same place as before', 'the same', 'unchanged'])
+    assert.equal(where(v), 'No location described in the recent chat.', v);
+});
+
+test('places that end in -ing are not a posture: living room, waiting room, parking lot, a building', () => {
+  assert.equal(where('living room'), 'In the living room.');
+  assert.equal(where('the waiting room'), 'In the waiting room.');
+  assert.equal(where('parking lot'), 'In the parking lot.');
+  assert.equal(where('building'), 'In the building.');
+  assert.equal(where('sitting on the sofa'), 'On the sofa.', 'a posture before a place still goes');
+  assert.equal(where('standing'), 'No location described in the recent chat.', 'a posture alone is no place');
+});
+
+test('a clause after a proper name is not cut as an activity: "at Ari\'s house, Spring Street"', () => {
+  assert.equal(where("at Ari's house, Spring Street"), "At Ari's house, Spring Street.");
+  assert.equal(where('at the station, waiting for the train'), 'At the station.');
+});
+
+test('a long place is cut short, at a word', () => {
+  const r = where('in the kitchen of the small apartment that Ari and I share downtown near the river, by the window with the plants');
+  assert.ok(r.length <= 82, r);
+  assert.ok(r.endsWith('…'), r);
 });

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { Channel } from '../src/screen/channel.js';
-import { buildScreen } from '../scripts/build-screen.mjs';
+import { buildScreen, stripCommentLines } from '../scripts/build-screen.mjs';
 
 /** The page around the frame, speaking the guide's protocol; `deaf` ignores the first n messages (not listening yet). */
 function page({ deaf = 0, kins = [{ id: 'k1', name: 'Isa' }], actionDelay = () => 5 } = {}) {
@@ -91,4 +91,18 @@ test('the screen is one classic script that older Safari can run, and keeps no d
   const css = readFileSync(new URL('../screen/styles.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, ''); // rules, not comments
   assert.ok(!/color-mix\(|:has\(|@container/.test(css), 'no CSS newer than Safari 14');
   assert.match(css, /min-height: 100vh; min-height: 100dvh/, 'dvh has a fallback');
+});
+
+test('the screen carries none of the answer reader (outfit.js, prompt.js): only the run reads the Kin\'s answers', () => {
+  const app = readFileSync(new URL('../screen/app.js', import.meta.url), 'utf8');
+  for (const f of ['src/core/outfit.js', 'src/core/prompt.js']) assert.ok(!app.includes(`__def("${f}"`), `${f} is in the screen`);
+  assert.ok(app.length < 80000, `screen/app.js is ${app.length} characters`);
+});
+
+test('the screen\'s one file has no comment lines, and nothing inside a line of code is taken for a comment', () => {
+  const code = [
+    '// a line comment', '/**', ' * a block', ' */', 'const a = 1; // after code: kept',
+    '/** @type {number} */', 'const b = 2;', "const re = /\\*[^*]+\\*/g; const url = 'http://x';", '  /* a block on its line */ const c = 3;',
+  ].join('\n');
+  assert.equal(stripCommentLines(code), ["const a = 1; // after code: kept", 'const b = 2;', "const re = /\\*[^*]+\\*/g; const url = 'http://x';", ' const c = 3;'].join('\n'));
 });

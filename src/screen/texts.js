@@ -1,10 +1,11 @@
 // What the screen says, in plain words: pure functions of the saved data and the clock (no page), so they are tested
 // in Node. The views put these texts on the page; the store tells the changes to a screen reader.
 // `at` is { settings, now }: the person's settings and the moment of the render.
-import { plannedAt, warningOf, readingText, AUTO } from '../core/state.js';
+import { plannedAt, warningOf, readingText, versionMismatch, LOOK_RETRY_HOURS, AUTO } from '../core/state.js';
 import { startDueFor, ERROR } from '../core/schedule.js';
 import { describeDream, DREAM_TTL_HOURS } from '../core/sleep.js';
-import { formatRelative, formatWhen } from '../core/format.js';
+import { formatClock, formatRelative, formatWhen } from '../core/format.js';
+import { APP_VERSION } from '../core/constants.js';
 
 /** A time as the screen says it: "10:05 PM", "7:30 AM tomorrow", "Nov 20, 10:05 PM". */
 const when = (iso, now) => formatWhen(iso, { now });
@@ -80,4 +81,23 @@ export function changesToTell(a, b, { name, asked, at }) {
   const say = NEWS.map((tell) => tell(news)).filter(Boolean).join(' ');
   const newProblem = b.error && !warningOf(b) && (b.error !== a.error || b.lastRunAt !== a.lastRunAt);
   return { say, alert: newProblem ? problemText(b, name, at) : '' };
+}
+
+/** For a sentence kept from an earlier reading (the Kin said nothing new about it): when it was last seen, or null. */
+export function seenAt(reading, field, now) {
+  const seen = reading && reading.seen && reading.seen[field];
+  return seen && seen !== reading.at ? formatClock(seen, { now }) : null;
+}
+
+/** The last note of the look was refused or failed (while the option is on): what happened and when it is tried again. */
+export function lookProblemText(entry, at) {
+  if (!at.settings.tellLook || !entry || !entry.lookFailedAt || !entry.lookError) return null;
+  const again = new Date(Date.parse(entry.lookFailedAt) + LOOK_RETRY_HOURS * 3600e3).toISOString();
+  return `Kindroid did not take the last note (${entry.lookError}). Clotheskin tries again after ${formatClock(again, { now: at.now })}.`;
+}
+
+/** Some files are from another update than the screen (status.json says which version of the run saved it), or null. */
+export function versionMismatchText(status) {
+  const run = versionMismatch(status);
+  return run ? `Some of Clotheskin’s files are from another update: the screen is ${APP_VERSION}, the automatic part is ${run}. Update all the files together.` : null;
 }

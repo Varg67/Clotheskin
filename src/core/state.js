@@ -7,7 +7,7 @@
 // damaged or hand-edited file can never break the screen or the run, it only falls back to defaults.
 import { snapInterval, DEFAULT_INTERVAL_S, ERRORS_BEFORE_WARNING } from './schedule.js';
 import { safeTimeZone } from './time.js';
-import { REMEMBERED } from './sleep.js';
+import { REMEMBERED, DREAM_TTL_HOURS } from './sleep.js';
 import { oneLine } from './text.js';
 
 export const SETTINGS_FILE = 'settings.json';
@@ -25,7 +25,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   intervalS: DEFAULT_INTERVAL_S, // how often the automatic update reads, in seconds (15 min to 4 h)
   tz: 'UTC', // the person's IANA time zone (wake-up times are on their clock)
   theme: 'warm',
-  tellDream: true, // tell the Kin its dream (kin tell), so it can remember it during the day
+  tellDream: false, // tell the Kin its dream (kin tell), so it can remember it during the day: only if the person turns it on
   reachOut: false, // and let it bring the dream up by itself (kin tell --reach-out)
   stoppedAt: null, // when Stop was last pressed: any night, dream or slowing down from before it is forgotten
 });
@@ -97,6 +97,23 @@ export function normalizeStatus(raw) {
 export function afterStop(entry, settings) {
   if (!entry || !settings.stoppedAt || (entry.lastRunAt && entry.lastRunAt > settings.stoppedAt)) return entry;
   return { ...entry, sleep: null, sleptOn: null, dream: null, retryAt: null, failures: 0, serverFailures: 0, errorKind: null, error: null, note: null };
+}
+
+/**
+ * What status.json may still hold: a dream is kept for DREAM_TTL_HOURS (as long as the screen shows it) and never
+ * past Stop. Returns { status, changed }; the run writes the file back only when something was removed, so a dream
+ * is erased within one 15-minute start of expiring or of Stop.
+ */
+export function forgetOld(status, settings, now) {
+  const kins = {};
+  let changed = false;
+  for (const [id, entry] of Object.entries(status.kins)) {
+    let e = afterStop(entry, settings);
+    if (e.dream && (!e.dream.at || now - new Date(e.dream.at) >= DREAM_TTL_HOURS * 3600e3)) e = { ...e, dream: null };
+    if (JSON.stringify(e) !== JSON.stringify(entry)) changed = true;
+    kins[id] = e;
+  }
+  return { status: { ...status, kins }, changed };
 }
 
 /**

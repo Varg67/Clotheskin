@@ -280,23 +280,31 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
       h('p', { class: 'help cost' }, 'Kindroid starts Clotheskin every 15 minutes, even while it is stopped. Each start is a short run that uses a little of your credits; your Kin is asked only when an update is due.'));
   }
 
-  function renderSettings() {
+  // The dream choices, in plain sight (not inside Settings): nothing is told to the Kin unless the person ticks it.
+  function renderDreams() {
     const s = S.settings;
     const reachOn = s.tellDream && s.reachOut;
-    return h('details', { class: 'reader', open: S.settingsOpen ? '' : undefined, onToggle: (ev) => { S.settingsOpen = ev.currentTarget.open; } },
-      h('summary', { 'data-key': 'settings-summary' }, 'Settings'),
-      h('div', { class: 'reader-body' },
-        h('h3', { class: 'sub' }, 'Dreams'),
+    return h('section', { class: 'card dreams', 'aria-labelledby': 'dreams-title' },
+      h('div', { class: 'card-body' },
+        h('h2', { class: 'section-title', id: 'dreams-title' }, 'Dreams'),
+        h('p', { class: 'help' }, 'When your Kin wakes up, Clotheskin asks what it dreamt and shows it here for a day. Your Kin is not told its dream unless you turn this on.'),
         h('label', { class: 'check' }, h('input', { type: 'checkbox', 'data-key': 'tell-dream', checked: s.tellDream || undefined, onChange: (ev) => saveSettings({ tellDream: ev.target.checked }) }),
           h('span', {}, 'Tell my Kin its dream, so it can remember it during the day')),
         h('label', { class: `check${s.tellDream ? '' : ' off'}` }, h('input', { type: 'checkbox', 'data-key': 'reach-out', checked: reachOn || undefined, disabled: !s.tellDream || undefined, 'aria-describedby': s.tellDream ? undefined : 'reach-why', onChange: (ev) => saveSettings({ reachOut: ev.target.checked }) }),
-          h('span', {}, 'Let my Kin bring the dream up by itself', s.tellDream ? null : h('span', { class: 'why', id: 'reach-why' }, ' (needs the option above)'))),
+          h('span', {}, 'Let my Kin bring the dream up by itself', s.tellDream ? null : h('span', { class: 'why', id: 'reach-why' }, ' (needs the option above)')))));
+  }
+
+  function renderSettings() {
+    const s = S.settings;
+    return h('details', { class: 'reader', open: S.settingsOpen ? '' : undefined, onToggle: (ev) => { S.settingsOpen = ev.currentTarget.open; } },
+      h('summary', { 'data-key': 'settings-summary' }, 'Settings'),
+      h('div', { class: 'reader-body' },
         h('h3', { class: 'sub' }, 'Appearance'),
         h('label', { class: 'label', for: 'theme-pick' }, 'Theme'),
         h('select', { id: 'theme-pick', class: 'text-input', 'data-key': 'theme-pick', onChange: (ev) => { applyTheme(ev.target.value); saveSettings({ theme: ev.target.value }); } },
           ...Object.entries(THEMES).map(([id, text]) => h('option', { value: id, selected: s.theme === id ? '' : undefined }, text))),
         h('h3', { class: 'sub' }, 'How it works'),
-        h('p', { class: 'help' }, 'Your Kin looks at its recent chat with you and says where it is, how it is positioned, what it is doing, what it is wearing, and its hair and makeup; Clotheskin shows that as short sentences. When it is asleep, Clotheskin asks when it will wake up, lets it sleep, and asks about its dream in the morning. Only the last reading and the night’s times are kept, never the chat.')));
+        h('p', { class: 'help' }, 'Your Kin looks at its recent chat with you and says where it is, how it is positioned, what it is doing, what it is wearing, and its hair and makeup; Clotheskin shows that as short sentences. When it is asleep, Clotheskin asks when it will wake up, lets it sleep, and asks about its dream in the morning. Kept in the app’s files: the last reading, the night’s times and the last dream. The dream is erased after a day, and Stop erases the night and the dream within 15 minutes. The chat is never kept.')));
   }
 
   function applyTheme(id) {
@@ -318,6 +326,7 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
       const parts = [
         h('header', { class: 'app-head' }, h('h1', {}, 'Clotheskin'), h('p', {}, 'Where your Kin is, what it is doing and what it is wearing')),
         renderCard(),
+        selectedKin() ? renderDreams() : null,
         selectedKin() ? renderSettings() : null,
       ];
       root.replaceChildren(...parts.filter(Boolean)); // replaceChildren would show a null as the text "null"

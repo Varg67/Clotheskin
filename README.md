@@ -27,7 +27,7 @@ Built from Kindroid's guide for coding tools ("Making things for a Kin with your
 - **The sleep cycle.**
   - **Falling asleep.** When the pose and action say the Kin is asleep ("Lying in bed, sleeping."), the run asks whether it is and when it plans to wake up. The question gives the person's clock ("It is now 23:10 on Friday"), and the answer is JSON: `{"sleeping":true,"wake_at":"07:30"}`.
   - **The night.** Nothing is asked until about 10 minutes before the wake-up time.
-  - **The dream.** Then the run asks `{"dream":"…","remembered":"all|most|some|little|nothing"}`. The screen shows the answer as **Last dream**. Unless the person turned it off, the run also tells the Kin with `kin tell --key dream --ttl 24`; with "Let my Kin bring the dream up by itself" turned on, it adds `--reach-out soon`.
+  - **The dream.** Then the run asks `{"dream":"…","remembered":"all|most|some|little|nothing"}`. The screen shows the answer as **Last dream**. Only if the person ticked "Tell my Kin its dream" (off by default, on the screen's **Dreams** card, not inside Settings) does the run also tell the Kin with `kin tell --key dream --ttl 24`; with "Let my Kin bring the dream up by itself" turned on, it adds `--reach-out soon`.
   - **The next morning.** The chat usually stays still overnight, so the same "asleep" sentence does not start a new night. A wake-up time less than 15 minutes or more than 14 hours away is not believed, and the readings go on.
   - **Waking up early.** Reading the Kin by hand during its night and finding it awake ends the night.
 - **Errors.**
@@ -45,7 +45,7 @@ Built from Kindroid's guide for coding tools ("Making things for a Kin with your
 ### What is stored, and what it costs
 
 - **Stored**, in the program's folder in Kindroid: `settings.json` (your choices) and `status.json`.
-  - `status.json` holds, per Kin: the last reading (the three sentences), when it last ran, errors, the night's times, and the last dream summary.
+  - `status.json` holds, per Kin: the last reading (the three sentences), when it last ran, errors, the night's times, and the last dream summary. The dream is erased from the file after 24 hours (as long as the screen shows it), and Stop erases the night and the dream: every start does this, even while stopped, so within 15 minutes.
   - Never the chat. For the night, only a fingerprint (hash) of the "asleep" sentence, never the sentence.
   - The screen keeps nothing in the browser.
 - **Credits.** Kindroid starts the program every 15 minutes, **even while it is stopped**, and running time uses the person's credits. Each start that has nothing due is a short run: it reads two files and ends. The Kin is asked only when an update is due: once per interval, plus the sleep and dream questions. The screen says this under the ruler.

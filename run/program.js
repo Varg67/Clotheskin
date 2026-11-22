@@ -12,7 +12,7 @@ import { buildOutfitPrompt, buildFollowUpPrompt, SLEEP_PROMPT, DREAM_PROMPT, KIN
 import { parseReading, describeReading } from '../src/core/outfit.js';
 import { looksAsleep, sentenceMark, planSleep, parseSleepAnswer, parseDreamAnswer, describeDream, dreamFact, DREAM_TTL_HOURS } from '../src/core/sleep.js';
 import { retryDelay, errorKind, isDue, TICK_S } from '../src/core/schedule.js';
-import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, SETTINGS_FILE, STATUS_FILE, ACTION, OPS } from '../src/core/state.js';
+import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, forgetOld, SETTINGS_FILE, STATUS_FILE, ACTION, OPS } from '../src/core/state.js';
 import { describeNow } from '../src/core/time.js';
 import { oneLine } from '../src/core/text.js';
 
@@ -42,6 +42,17 @@ export async function runProgram({ event, kin, clock = () => new Date(), log = (
     return failed(`Could not read the app's files, so nothing was changed: ${e.message}`);
   }
   const ctx = { kin, clock, log, settings, retryAfterMs, deadline: Date.now() + budgetMs };
+  // Erase what may no longer be kept (a dream older than a day, anything from before Stop). Every start does this,
+  // even while stopped, so the file holds no more than the screen says.
+  if (forgetOld(status, settings, clock()).changed) {
+    try {
+      const fresh = forgetOld(normalizeStatus(await kin.get(STATUS_FILE)), settings, clock());
+      if (fresh.changed) { await kin.put(STATUS_FILE, JSON.stringify(fresh.status)); log('old dream or night erased'); }
+      status = fresh.status;
+    } catch (e) {
+      return failed(`Could not erase an old dream from the app's files: ${e.message}`);
+    }
+  }
 
   if (event?.trigger === 'schedule') return scheduled(ctx, status);
   if (event?.trigger === 'action' && event.action === ACTION) return onAction(ctx, status, event);

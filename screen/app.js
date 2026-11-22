@@ -367,7 +367,7 @@ __def("src/core/state.js", function () {
 // damaged or hand-edited file can never break the screen or the run, it only falls back to defaults.
 const { snapInterval, DEFAULT_INTERVAL_S, ERRORS_BEFORE_WARNING } = __req("src/core/schedule.js");
 const { safeTimeZone } = __req("src/core/time.js");
-const { REMEMBERED } = __req("src/core/sleep.js");
+const { REMEMBERED, DREAM_TTL_HOURS } = __req("src/core/sleep.js");
 const { oneLine } = __req("src/core/text.js");
 
 const SETTINGS_FILE = 'settings.json';
@@ -385,7 +385,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   intervalS: DEFAULT_INTERVAL_S, // how often the automatic update reads, in seconds (15 min to 4 h)
   tz: 'UTC', // the person's IANA time zone (wake-up times are on their clock)
   theme: 'warm',
-  tellDream: true, // tell the Kin its dream (kin tell), so it can remember it during the day
+  tellDream: false, // tell the Kin its dream (kin tell), so it can remember it during the day: only if the person turns it on
   reachOut: false, // and let it bring the dream up by itself (kin tell --reach-out)
   stoppedAt: null, // when Stop was last pressed: any night, dream or slowing down from before it is forgotten
 });
@@ -460,6 +460,23 @@ function afterStop(entry, settings) {
 }
 
 /**
+ * What status.json may still hold: a dream is kept for DREAM_TTL_HOURS (as long as the screen shows it) and never
+ * past Stop. Returns { status, changed }; the run writes the file back only when something was removed, so a dream
+ * is erased within one 15-minute start of expiring or of Stop.
+ */
+function forgetOld(status, settings, now) {
+  const kins = {};
+  let changed = false;
+  for (const [id, entry] of Object.entries(status.kins)) {
+    let e = afterStop(entry, settings);
+    if (e.dream && (!e.dream.at || now - new Date(e.dream.at) >= DREAM_TTL_HOURS * 3600e3)) e = { ...e, dream: null };
+    if (JSON.stringify(e) !== JSON.stringify(entry)) changed = true;
+    kins[id] = e;
+  }
+  return { status: { ...status, kins }, changed };
+}
+
+/**
  * When the next step for a Kin is planned: the end of its night, a retry after errors, or its last run plus the
  * current interval (so moving the ruler applies at once). null: at once.
  */
@@ -478,7 +495,7 @@ function warningOf(entry) {
   if (entry.errorKind === 'server' && entry.serverFailures >= ERRORS_BEFORE_WARNING) return { kind: 'server', failures: entry.serverFailures };
   return null;
 }
-return { SETTINGS_FILE, STATUS_FILE, RUN_STATES, THEMES, ACTION, OPS, DEFAULT_SETTINGS, normalizeSettings, normalizeEntry, normalizeStatus, afterStop, plannedAt, warningOf };
+return { SETTINGS_FILE, STATUS_FILE, RUN_STATES, THEMES, ACTION, OPS, DEFAULT_SETTINGS, normalizeSettings, normalizeEntry, normalizeStatus, afterStop, forgetOld, plannedAt, warningOf };
 });
 
 __def("src/core/text.js", function () {
@@ -855,23 +872,31 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
       h('p', { class: 'help cost' }, 'Kindroid starts Clotheskin every 15 minutes, even while it is stopped. Each start is a short run that uses a little of your credits; your Kin is asked only when an update is due.'));
   }
 
-  function renderSettings() {
+  // The dream choices, in plain sight (not inside Settings): nothing is told to the Kin unless the person ticks it.
+  function renderDreams() {
     const s = S.settings;
     const reachOn = s.tellDream && s.reachOut;
-    return h('details', { class: 'reader', open: S.settingsOpen ? '' : undefined, onToggle: (ev) => { S.settingsOpen = ev.currentTarget.open; } },
-      h('summary', { 'data-key': 'settings-summary' }, 'Settings'),
-      h('div', { class: 'reader-body' },
-        h('h3', { class: 'sub' }, 'Dreams'),
+    return h('section', { class: 'card dreams', 'aria-labelledby': 'dreams-title' },
+      h('div', { class: 'card-body' },
+        h('h2', { class: 'section-title', id: 'dreams-title' }, 'Dreams'),
+        h('p', { class: 'help' }, 'When your Kin wakes up, Clotheskin asks what it dreamt and shows it here for a day. Your Kin is not told its dream unless you turn this on.'),
         h('label', { class: 'check' }, h('input', { type: 'checkbox', 'data-key': 'tell-dream', checked: s.tellDream || undefined, onChange: (ev) => saveSettings({ tellDream: ev.target.checked }) }),
           h('span', {}, 'Tell my Kin its dream, so it can remember it during the day')),
         h('label', { class: `check${s.tellDream ? '' : ' off'}` }, h('input', { type: 'checkbox', 'data-key': 'reach-out', checked: reachOn || undefined, disabled: !s.tellDream || undefined, 'aria-describedby': s.tellDream ? undefined : 'reach-why', onChange: (ev) => saveSettings({ reachOut: ev.target.checked }) }),
-          h('span', {}, 'Let my Kin bring the dream up by itself', s.tellDream ? null : h('span', { class: 'why', id: 'reach-why' }, ' (needs the option above)'))),
+          h('span', {}, 'Let my Kin bring the dream up by itself', s.tellDream ? null : h('span', { class: 'why', id: 'reach-why' }, ' (needs the option above)')))));
+  }
+
+  function renderSettings() {
+    const s = S.settings;
+    return h('details', { class: 'reader', open: S.settingsOpen ? '' : undefined, onToggle: (ev) => { S.settingsOpen = ev.currentTarget.open; } },
+      h('summary', { 'data-key': 'settings-summary' }, 'Settings'),
+      h('div', { class: 'reader-body' },
         h('h3', { class: 'sub' }, 'Appearance'),
         h('label', { class: 'label', for: 'theme-pick' }, 'Theme'),
         h('select', { id: 'theme-pick', class: 'text-input', 'data-key': 'theme-pick', onChange: (ev) => { applyTheme(ev.target.value); saveSettings({ theme: ev.target.value }); } },
           ...Object.entries(THEMES).map(([id, text]) => h('option', { value: id, selected: s.theme === id ? '' : undefined }, text))),
         h('h3', { class: 'sub' }, 'How it works'),
-        h('p', { class: 'help' }, 'Your Kin looks at its recent chat with you and says where it is, how it is positioned, what it is doing, what it is wearing, and its hair and makeup; Clotheskin shows that as short sentences. When it is asleep, Clotheskin asks when it will wake up, lets it sleep, and asks about its dream in the morning. Only the last reading and the night’s times are kept, never the chat.')));
+        h('p', { class: 'help' }, 'Your Kin looks at its recent chat with you and says where it is, how it is positioned, what it is doing, what it is wearing, and its hair and makeup; Clotheskin shows that as short sentences. When it is asleep, Clotheskin asks when it will wake up, lets it sleep, and asks about its dream in the morning. Kept in the app’s files: the last reading, the night’s times and the last dream. The dream is erased after a day, and Stop erases the night and the dream within 15 minutes. The chat is never kept.')));
   }
 
   function applyTheme(id) {
@@ -893,6 +918,7 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
       const parts = [
         h('header', { class: 'app-head' }, h('h1', {}, 'Clotheskin'), h('p', {}, 'Where your Kin is, what it is doing and what it is wearing')),
         renderCard(),
+        selectedKin() ? renderDreams() : null,
         selectedKin() ? renderSettings() : null,
       ];
       root.replaceChildren(...parts.filter(Boolean)); // replaceChildren would show a null as the text "null"

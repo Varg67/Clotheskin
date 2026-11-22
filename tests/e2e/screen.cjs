@@ -135,6 +135,10 @@ const step = async (name, fn) => {
 
   await step('the night: asleep -> wake-up time -> nothing asked overnight -> the dream at 07:15 -> Last dream, told to the Kin', async () => {
     const t = await open({ kins: [{ id: 'kin-isa', name: 'Isa' }], scene: 'night', time: '2026-11-20T23:10:00-03:00' });
+    assert.equal(await t.key('tell-dream').isChecked(), false, 'off until the person turns it on');
+    assert.equal(await t.key('tell-dream').isVisible(), true, 'in plain sight, not inside Settings');
+    await t.key('tell-dream').check();
+    await t.until(async () => (await t.settings()).tellDream === true, 'tellDream saved');
     await t.key('auto-start').click();
     await t.until(async () => (await t.settings()).autoState === 'running', 'running');
     await t.dev(() => window.dev.tick());

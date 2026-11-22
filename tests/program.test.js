@@ -47,7 +47,7 @@ test('a start a few seconds early still does what is due (cron jitter)', async (
 });
 
 test('the night: asleep -> sleep question on the person\'s clock -> nothing asked overnight -> dream (told to the Kin) -> readings again', async () => {
-  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', intervalS: 900, ...SAO_PAULO } });
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', intervalS: 900, ...SAO_PAULO, tellDream: true } });
   k.at('2026-11-20T23:10:00-03:00');
   k.answers.reading.push(ASLEEP);
   k.answers.sleep.push('{"sleeping":true,"wake_at":"07:30"}');
@@ -79,8 +79,8 @@ test('the night: asleep -> sleep question on the person\'s clock -> nothing aske
   assert.equal(k.entry().sleptOn, null, 'the chat moved on');
 });
 
-test('dream options: not told when the person turned it off; reach-out when they turned it on; a failed tell is not an error', async () => {
-  for (const [opts, expectTell] of [[{ tellDream: false }, 0], [{ reachOut: true }, 1]]) {
+test('dream options: not told by default or when the person turned it off; reach-out when they turned it on; a failed tell is not an error', async () => {
+  for (const [opts, expectTell] of [[{}, 0], [{ tellDream: false }, 0], [{ tellDream: true, reachOut: true }, 1]]) {
     const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', ...SAO_PAULO, ...opts } });
     k.files.set('status.json', JSON.stringify({ kins: { k1: { sleep: { wakeAt: '2026-11-21T10:30:00Z', until: '2026-11-21T10:20:00Z' } } } }));
     k.at('2026-11-21T10:20:00Z');
@@ -183,13 +183,19 @@ test('Wake now (the action with op "wake") asks the dream question at once', asy
   assert.equal(k.tells().length, 0, 'no dream: nothing to tell');
 });
 
-test('Stop forgets the night and the slowing down at once (stoppedAt), keeps the last reading; a stopped start writes nothing', async () => {
+test('Stop forgets the night and the slowing down at once (stoppedAt), keeps the last reading; a stopped start erases the old night and dream from the file once, then writes nothing', async () => {
   const k = fakeKindroid({ settings: { autoState: 'stopped', kinId: 'k1', stoppedAt: '2026-11-21T01:00:00Z' } });
   const reading = { location: 'In the bedroom.', doing: 'Lying in bed, sleeping.', outfit: 'Wearing pyjamas.', at: '2026-11-20T23:00:00.000Z' };
   k.files.set('status.json', JSON.stringify({ kins: { k1: { name: 'Isa', reading, lastRunAt: '2026-11-20T23:00:00Z', sleep: { wakeAt: '2026-11-21T10:30:00Z', until: '2026-11-21T10:20:00Z' }, sleptOn: '0000abcd', failures: 2, retryAt: '2026-11-21T00:00:00Z', dream: { dream: 'x', remembered: 'all', at: '2026-11-20T10:00:00Z' } } } }));
   k.at('2026-11-21T02:00:00Z');
   await tick(k);
-  assert.equal(k.puts(), 0, 'stopped: nothing to write');
+  assert.equal(k.puts(), 1, 'stopped: the night and the dream from before Stop are erased from the file');
+  assert.equal(k.entry().dream, null);
+  assert.equal(k.entry().sleep, null);
+  assert.equal(k.entry().reading.outfit, 'Wearing pyjamas.', 'the last reading stays');
+  k.advance(15);
+  await tick(k);
+  assert.equal(k.puts(), 1, 'stopped: nothing more to write');
   k.settings({ autoState: 'running' }); // Start, before any other start of the program
   k.answers.reading.push(ASLEEP);
   k.answers.sleep.push('{"sleeping":true,"wake_at":"07:30"}');
@@ -282,7 +288,7 @@ test('a bare 502/503 is tried again at once; maintenance is not', async () => {
 });
 
 test('two runs at once: a later run\'s finished night is not brought back by an earlier run that saves last', async () => {
-  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', tz: 'America/Sao_Paulo' } });
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', tz: 'America/Sao_Paulo', tellDream: true } });
   const night = { sleep: { wakeAt: '2026-11-21T10:30:00Z', until: '2026-11-21T10:20:00Z' }, sleptOn: '0000abcd', lastRunAt: '2026-11-21T00:00:00Z' };
   k.files.set('status.json', JSON.stringify({ kins: { k1: { name: 'Isa', ...night } } }));
   k.at('2026-11-21T04:00:00Z');
@@ -339,7 +345,7 @@ test('"asleep" with a wake-up time too far away is said so (not "not asleep afte
 });
 
 test('two runs at the same instant: the run that ended the night wins over one that only read "still asleep"', async () => {
-  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', tz: 'America/Sao_Paulo' } });
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', tz: 'America/Sao_Paulo', tellDream: true } });
   k.files.set('status.json', JSON.stringify({ kins: { k1: { name: 'Isa', lastRunAt: '2026-11-21T03:00:00Z', sleep: { wakeAt: '2026-11-22T10:30:00Z', until: '2026-11-22T10:20:00Z' }, sleptOn: '0000abcd' } } }));
   k.at('2026-11-22T10:15:00Z');
   let release;
@@ -358,4 +364,30 @@ test('two runs at the same instant: the run that ended the night wins over one t
   await tick(k);
   assert.equal(k.tells().length, 1, 'the dream is told once');
   assert.deepEqual(k.asks().filter((a) => a === 'dream'), ['dream'], 'and asked once');
+});
+
+test('a dream is erased from status.json after a day, by any start, even while stopped (the file keeps no more than the screen shows)', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'stopped', kinId: 'k1' } });
+  const dream = { dream: 'A train by the sea', remembered: 'some', at: '2026-11-20T10:00:00.000Z' };
+  k.files.set('status.json', JSON.stringify({ kins: { k1: { name: 'Isa', lastRunAt: '2026-11-20T10:00:00Z', dream } } }));
+  k.at('2026-11-21T09:00:00Z'); // 23 hours later: still shown, still kept
+  await tick(k);
+  assert.equal(k.puts(), 0);
+  assert.equal(k.entry().dream.dream, 'A train by the sea');
+  k.at('2026-11-21T10:00:00Z'); // a day later: erased
+  await tick(k);
+  assert.equal(k.puts(), 1);
+  assert.equal(k.entry().dream, null);
+  assert.ok(!k.files.get('status.json').includes('train'), 'nothing of the dream is left in the file');
+});
+
+test('the Kin is never told its dream unless the person turned it on (the default is off)', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1' } });
+  assert.equal(JSON.parse(k.files.get('settings.json')).tellDream, undefined);
+  k.files.set('status.json', JSON.stringify({ kins: { k1: { sleep: { wakeAt: '2026-11-21T10:30:00Z', until: '2026-11-21T10:20:00Z' } } } }));
+  k.at('2026-11-21T10:20:00Z');
+  k.answers.dream.push('{"dream":"A train","remembered":"some"}');
+  await tick(k);
+  assert.equal(k.entry().dream.dream, 'A train');
+  assert.equal(k.tells().length, 0);
 });

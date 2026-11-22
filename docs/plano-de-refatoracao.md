@@ -287,7 +287,21 @@ Resultado, em 4 blocos (5a–5d): 177 testes verdes, cobertura de 99 % das linha
 5. Regex grandes (`GOING_TO_VERB`, `PT_WORDS`, `NO_PLACE`) montadas a partir de listas com nome, como `EN_PREP` já faz.
 6. Comentários: manter os que explicam *por quê* (são bons); remover os que repetem o código.
 
-### Fase 6 — Desempenho
+### Fase 6 — Desempenho — **feita**
+
+Resultado: 181 testes verdes e **nenhum pendente**: os 3 testes do O1, escritos na Fase 0, agora passam. Desempenho 12/12, e2e 18/18. Medidas com o `node main.js` real e um `kin` rodando como processo à parte, como no Kindroid:
+
+| Medida | Antes | Depois |
+| --- | --- | --- |
+| Início parado / pausado / sem Kin | 3 chamadas `kin` (com o `kin end`), 164 ms | **2 chamadas, 112 ms (−32 %)** |
+| Início rodando, nada devido | 3 chamadas, 142 ms | 3 chamadas, 150 ms (igual, dentro do ruído) |
+| Update status: leituras simultâneas | 1 (uma depois da outra) | **2 (juntas)** |
+| Uma renderização completa da tela | não medido | **2,4 ms** (o teste falha acima de 16 ms) |
+
+O que saiu diferente ou a mais:
+- **O1/O2:** um início agendado não pode ler os dois arquivos em paralelo, porque só sabe se precisa do `status.json` depois de ler o `settings.json`. Para ele, economizar uma chamada nos inícios parados vale mais que ganhar uma latência nos que rodam. A ação da tela, que sempre precisa dos dois, lê em paralelo. Um gatilho desconhecido agora termina sem ler nada.
+- **O3** foi feito na Fase 1 (B4); **O5** (minificar) foi descartado no §2.2.
+- **A mais:** `tests/perf/run.test.js` mede o início inteiro (`node main.js`), que é o que o Kindroid cobra 96 vezes por dia, para que um import pesado ou uma chamada a mais no futuro não passem despercebidos.
 
 | # | Otimização | Ganho esperado | Como verificar |
 | --- | --- | --- | --- |

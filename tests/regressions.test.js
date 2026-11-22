@@ -4,6 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runProgram, ACTION } from '../run/program.js';
 import { describeReading, parseReading } from '../src/core/outfit.js';
+import { isDue, startDueFor } from '../src/core/schedule.js';
 import { fakeKindroid, READING } from './support/fake-kindroid.js';
 
 const tick = (k) => runProgram({ event: { trigger: 'schedule' }, kin: k.kin, clock: k.clock, retryAfterMs: 0 });
@@ -59,4 +60,12 @@ test('B4: an answer far longer than asked is refused before parsing, without quo
   assert.equal(r.ok, false);
   assert.match(r.error, /too long/);
   assert.doesNotMatch(r.error, /garden/);
+});
+
+test('a planned time that cannot be read is due at once, and never breaks the screen\'s "next update" time', () => {
+  const now = new Date('2026-11-20T22:07:00Z');
+  for (const at of ['garbage', '2026-13-45T99:99:99Z', {}]) {
+    assert.equal(isDue(at, now), true, String(at));
+    assert.equal(startDueFor(at, now).toISOString(), '2026-11-20T22:15:00.000Z');
+  }
 });

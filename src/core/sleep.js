@@ -6,8 +6,8 @@ import { nextWallTime } from './time.js';
 
 export const WAKE_LEAD_S = 600; // the dream question is due this long before the wake-up time
 export const MIN_SLEEP_S = 15 * 60; // waking up sooner than this: no hibernation, the readings just go on
-export const MAX_SLEEP_S = 14 * 3600;
-export const DREAM_TTL_HOURS = 24; // the Kin is told its dream for a day (kin tell --ttl), and the screen shows it as long // a wake-up time further away than this is not believed (an old chat, a typo)
+export const MAX_SLEEP_S = 14 * 3600; // a wake-up time further away than this is not believed (an old chat, a typo)
+export const DREAM_TTL_HOURS = 24; // the Kin is told its dream for a day (kin tell --ttl), and the screen shows it as long
 
 const ASLEEP = /\b(sleeping|asleep|napping|dozing|slumbering|snoozing)\b(?!\s+(bag|pill|pills|mask|pad|pod|car|quarters|area|beauty)\b)/i;
 const NOT_ASLEEP = /\b(not|never|no longer|unable to|can['’]?t|cannot|trying to|about to|going to|half)\s+(quite\s+|yet\s+|really\s+)?(be\s+|fall\s+|get\s+)?(sleeping|asleep|napping|dozing)\b|\bawake\b/i;
@@ -52,7 +52,7 @@ export function planSleep(wakeText, now, tz) {
   const t = parseClockTime(wakeText);
   if (!t) return null;
   const wakeAt = nextWallTime(t, now, tz);
-  const s = (wakeAt - now) / 1000;
+  const s = (wakeAt.getTime() - now.getTime()) / 1000;
   if (s < MIN_SLEEP_S || s > MAX_SLEEP_S) return null;
   return { wakeAt, until: new Date(wakeAt.getTime() - WAKE_LEAD_S * 1000) };
 }

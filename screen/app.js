@@ -230,15 +230,22 @@ function errorKind(message, kind = 'server') {
   return MAINTENANCE.test(String(message ?? '')) ? 'maintenance' : kind;
 }
 
-/** Whether a start of the program at `now` should do what was planned for `at` (an ISO time or null: at once). */
+/** Milliseconds of an ISO time, or null for nothing or a time that cannot be read (both mean "at once"). */
+const plannedMs = (at) => { const t = at ? Date.parse(at) : NaN; return Number.isFinite(t) ? t : null; };
+
+/**
+ * Whether a start of the program at `now` should do what was planned for `at` (an ISO time or null: at once).
+ * A time that cannot be read is due at once: otherwise nothing would ever be due again.
+ */
 function isDue(at, now) {
-  if (!at) return true;
-  return now.getTime() >= new Date(at).getTime() - DUE_SLACK_S * 1000;
+  const t = plannedMs(at);
+  return t === null || now.getTime() >= t - DUE_SLACK_S * 1000;
 }
 
 /** The first start of the program (a quarter hour) at which something planned for `at` is due. */
 function startDueFor(at, now) {
-  const from = Math.max(now.getTime(), at ? new Date(at).getTime() - DUE_SLACK_S * 1000 : 0);
+  const t = plannedMs(at);
+  const from = Math.max(now.getTime(), t === null ? 0 : t - DUE_SLACK_S * 1000);
   const q = TICK_S * 1000;
   return new Date(Math.ceil(from / q) * q);
 }
@@ -254,8 +261,8 @@ const { nextWallTime } = __req("src/core/time.js");
 
 const WAKE_LEAD_S = 600; // the dream question is due this long before the wake-up time
 const MIN_SLEEP_S = 15 * 60; // waking up sooner than this: no hibernation, the readings just go on
-const MAX_SLEEP_S = 14 * 3600;
-const DREAM_TTL_HOURS = 24; // the Kin is told its dream for a day (kin tell --ttl), and the screen shows it as long // a wake-up time further away than this is not believed (an old chat, a typo)
+const MAX_SLEEP_S = 14 * 3600; // a wake-up time further away than this is not believed (an old chat, a typo)
+const DREAM_TTL_HOURS = 24; // the Kin is told its dream for a day (kin tell --ttl), and the screen shows it as long
 
 const ASLEEP = /\b(sleeping|asleep|napping|dozing|slumbering|snoozing)\b(?!\s+(bag|pill|pills|mask|pad|pod|car|quarters|area|beauty)\b)/i;
 const NOT_ASLEEP = /\b(not|never|no longer|unable to|can['’]?t|cannot|trying to|about to|going to|half)\s+(quite\s+|yet\s+|really\s+)?(be\s+|fall\s+|get\s+)?(sleeping|asleep|napping|dozing)\b|\bawake\b/i;
@@ -300,7 +307,7 @@ function planSleep(wakeText, now, tz) {
   const t = parseClockTime(wakeText);
   if (!t) return null;
   const wakeAt = nextWallTime(t, now, tz);
-  const s = (wakeAt - now) / 1000;
+  const s = (wakeAt.getTime() - now.getTime()) / 1000;
   if (s < MIN_SLEEP_S || s > MAX_SLEEP_S) return null;
   return { wakeAt, until: new Date(wakeAt.getTime() - WAKE_LEAD_S * 1000) };
 }
@@ -793,7 +800,7 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
     const r = e.reading;
     const now = clock();
     const busy = S.busy[kin.id];
-    const dream = e.dream && e.dream.dream && now - new Date(e.dream.at) < DREAM_TTL_HOURS * 3600e3 ? e.dream : null;
+    const dream = e.dream && e.dream.dream && now.getTime() - Date.parse(e.dream.at) < DREAM_TTL_HOURS * 3600e3 ? e.dream : null;
     const others = list.length - 1;
     const warning = S.settings.autoState === 'running' ? warningOf(e) : null;
     const problem = S.error && (S.error.save || S.error.kinId === kin.id) ? S.error.text : e.error ? problemText(e, kin) : null;
@@ -969,7 +976,12 @@ class Channel {
     if (entry) { clearTimeout(entry.timer); clearInterval(entry.resend); entry.resolve(data); }
   }
 
-  wait(key, { timeout, resend, message }) {
+  /**
+   * Posts `message` and waits for the reply with this key; `resend` (ms, optional) posts it again until answered.
+   * @param {string} key
+   * @param {{ timeout: number, resend?: number, message: object }} options
+   */
+  wait(key, { timeout, resend = 0, message }) {
     return new Promise((resolve, reject) => {
       const entry = { resolve, reject };
       const queue = this.waiting[key] || (this.waiting[key] = []);

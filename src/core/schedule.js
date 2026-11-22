@@ -47,15 +47,22 @@ export function errorKind(message, kind = 'server') {
   return MAINTENANCE.test(String(message ?? '')) ? 'maintenance' : kind;
 }
 
-/** Whether a start of the program at `now` should do what was planned for `at` (an ISO time or null: at once). */
+/** Milliseconds of an ISO time, or null for nothing or a time that cannot be read (both mean "at once"). */
+const plannedMs = (at) => { const t = at ? Date.parse(at) : NaN; return Number.isFinite(t) ? t : null; };
+
+/**
+ * Whether a start of the program at `now` should do what was planned for `at` (an ISO time or null: at once).
+ * A time that cannot be read is due at once: otherwise nothing would ever be due again.
+ */
 export function isDue(at, now) {
-  if (!at) return true;
-  return now.getTime() >= new Date(at).getTime() - DUE_SLACK_S * 1000;
+  const t = plannedMs(at);
+  return t === null || now.getTime() >= t - DUE_SLACK_S * 1000;
 }
 
 /** The first start of the program (a quarter hour) at which something planned for `at` is due. */
 export function startDueFor(at, now) {
-  const from = Math.max(now.getTime(), at ? new Date(at).getTime() - DUE_SLACK_S * 1000 : 0);
+  const t = plannedMs(at);
+  const from = Math.max(now.getTime(), t === null ? 0 : t - DUE_SLACK_S * 1000);
   const q = TICK_S * 1000;
   return new Date(Math.ceil(from / q) * q);
 }

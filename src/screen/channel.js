@@ -37,7 +37,12 @@ export class Channel {
     if (entry) { clearTimeout(entry.timer); clearInterval(entry.resend); entry.resolve(data); }
   }
 
-  wait(key, { timeout, resend, message }) {
+  /**
+   * Posts `message` and waits for the reply with this key; `resend` (ms, optional) posts it again until answered.
+   * @param {string} key
+   * @param {{ timeout: number, resend?: number, message: object }} options
+   */
+  wait(key, { timeout, resend = 0, message }) {
     return new Promise((resolve, reject) => {
       const entry = { resolve, reject };
       const queue = this.waiting[key] || (this.waiting[key] = []);

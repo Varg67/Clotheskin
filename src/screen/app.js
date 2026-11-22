@@ -209,7 +209,7 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
     const r = e.reading;
     const now = clock();
     const busy = S.busy[kin.id];
-    const dream = e.dream && e.dream.dream && now - new Date(e.dream.at) < DREAM_TTL_HOURS * 3600e3 ? e.dream : null;
+    const dream = e.dream && e.dream.dream && now.getTime() - Date.parse(e.dream.at) < DREAM_TTL_HOURS * 3600e3 ? e.dream : null;
     const others = list.length - 1;
     const warning = S.settings.autoState === 'running' ? warningOf(e) : null;
     const problem = S.error && (S.error.save || S.error.kinId === kin.id) ? S.error.text : e.error ? problemText(e, kin) : null;

@@ -2,7 +2,7 @@
 // asks) and the screen (which shows).
 import { cleanString, toSentence } from './text.js';
 import { parseJsonObject } from './json.js';
-import { nextWallTime } from './time.js';
+import { nextWallTime, clockText } from './time.js';
 /** @import { Failure } from './json.js' */
 
 export const WAKE_LEAD_S = 600; // the dream question is due this long before the wake-up time
@@ -78,7 +78,7 @@ export function parseSleepAnswer(text) {
   const wakeKey = Object.keys(o).find((k) => /^(wake_?at|wake_?up_?at|wake_?time|wake_?up|until)$/i.test(k));
   const t = wakeKey ? parseClockTime(o[wakeKey]) : null;
   if (!t) return { ok: false, error: 'The answer does not give a wake-up time as HH:MM.' };
-  return { ok: true, sleeping: true, wakeAt: `${String(t.h).padStart(2, '0')}:${String(t.m).padStart(2, '0')}` };
+  return { ok: true, sleeping: true, wakeAt: clockText(t.h, t.m) };
 }
 
 export const REMEMBERED = ['all', 'most', 'some', 'little', 'nothing'];

@@ -54,8 +54,11 @@ export function nextWallTime({ h, m }, now, tz) {
   return at;
 }
 
+/** 7, 5 -> "07:05": a 24-hour clock time. */
+export const clockText = (h, m) => `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+
 /** "23:10 on Friday" on the person's clock, for the Kin. */
 export function describeNow(now, tz) {
   const p = zonedParts(now, tz);
-  return `${String(p.h).padStart(2, '0')}:${String(p.min).padStart(2, '0')} on ${p.weekday}`;
+  return `${clockText(p.h, p.min)} on ${p.weekday}`;
 }

@@ -12,7 +12,7 @@ import { buildOutfitPrompt, buildFollowUpPrompt, SLEEP_PROMPT, DREAM_PROMPT, KIN
 import { parseReading, describeReading } from '../src/core/outfit.js';
 import { looksAsleep, sentenceMark, planSleep, parseSleepAnswer, parseDreamAnswer, describeDream, dreamFact, DREAM_TTL_HOURS } from '../src/core/sleep.js';
 import { retryDelay, errorKind, isDue, TICK_S } from '../src/core/schedule.js';
-import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, SETTINGS_FILE, STATUS_FILE, ACTION, OPS } from '../src/core/state.js';
+import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, readingText, SETTINGS_FILE, STATUS_FILE, ACTION, OPS } from '../src/core/state.js';
 import { describeNow } from '../src/core/time.js';
 import { oneLine } from '../src/core/text.js';
 
@@ -115,7 +115,7 @@ async function read(ctx, who, entry) {
   if (!parsed.makeup) reading.makeup = null;
   e.reading = { ...reading, at: now.toISOString() };
   e.serverFailures = 0; // Kindroid answered
-  const line = `${who.name}: ${[reading.location, reading.doing, reading.outfit, reading.hair, reading.makeup].filter(Boolean).join(' ')}`;
+  const line = `${who.name}: ${readingText(reading)}`;
 
   if (!looksAsleep(reading.doing)) {
     await save(ctx, who.id, succeeded({ ...e, sleep: null, sleptOn: null }), entry); // awake: any night is over

@@ -1,4 +1,5 @@
 import { CLOTHING_SLOTS, ACCESSORY_SLOTS, BAG_SLOT } from './constants.js';
+import { cleanString } from './text.js';
 
 /** kin ask accepts at most 8,000 characters (Workshop guide). This prompt is far below that. */
 export const KIN_ASK_LIMIT = 8000;
@@ -34,7 +35,7 @@ export function looksCopiedFromExample(doc) {
 }
 
 /** The Kin's name for a prompt: one line, at most 60 characters. */
-const kinName = (name) => String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, 60) || 'the character';
+const kinName = (name) => cleanString(name, 60) || 'the character';
 
 /** The reading question for a Kin (its name, one line, at most 60 characters). */
 export function buildOutfitPrompt({ name, template = OUTFIT_PROMPT }) {
@@ -64,6 +65,6 @@ Nothing else.`;
 /** Fills a follow-up prompt (sleep or dream) with the Kin's name and the person's current time. */
 export function buildFollowUpPrompt(template, { name, now }) {
   const who = kinName(name);
-  const when = String(now ?? '').replace(/\s+/g, ' ').trim().slice(0, 40) || 'unknown';
+  const when = cleanString(now, 40) || 'unknown';
   return template.replace(/\{\{(\w+)\}\}/g, (m, k) => ({ name: who, now: when }[k] ?? m));
 }

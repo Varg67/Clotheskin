@@ -266,7 +266,7 @@ __def("src/core/sleep.js", function () {
 // asks) and the screen (which shows).
 const { cleanString, toSentence } = __req("src/core/text.js");
 const { parseJsonObject } = __req("src/core/json.js");
-const { nextWallTime } = __req("src/core/time.js");
+const { nextWallTime, clockText } = __req("src/core/time.js");
 /** @import { Failure } from './json.js' */
 
 const WAKE_LEAD_S = 600; // the dream question is due this long before the wake-up time
@@ -342,7 +342,7 @@ function parseSleepAnswer(text) {
   const wakeKey = Object.keys(o).find((k) => /^(wake_?at|wake_?up_?at|wake_?time|wake_?up|until)$/i.test(k));
   const t = wakeKey ? parseClockTime(o[wakeKey]) : null;
   if (!t) return { ok: false, error: 'The answer does not give a wake-up time as HH:MM.' };
-  return { ok: true, sleeping: true, wakeAt: `${String(t.h).padStart(2, '0')}:${String(t.m).padStart(2, '0')}` };
+  return { ok: true, sleeping: true, wakeAt: clockText(t.h, t.m) };
 }
 
 const REMEMBERED = ['all', 'most', 'some', 'little', 'nothing'];
@@ -504,6 +504,12 @@ function plannedAt(entry, settings) {
   return new Date(new Date(entry.lastRunAt).getTime() + settings.intervalS * 1000).toISOString();
 }
 
+/** A stored reading as one text: "In the kitchen. Standing, making coffee. Wearing a grey hoodie." ('' for none). */
+function readingText(reading) {
+  if (!reading) return '';
+  return [reading.location, reading.doing, reading.outfit, reading.hair, reading.makeup].filter(Boolean).join(' ');
+}
+
 /** A warning about Kindroid itself for a Kin's entry, or null. */
 function warningOf(entry) {
   if (!entry) return null;
@@ -511,7 +517,7 @@ function warningOf(entry) {
   if (entry.errorKind === 'server' && entry.serverFailures >= ERRORS_BEFORE_WARNING) return { kind: 'server', failures: entry.serverFailures };
   return null;
 }
-return { SETTINGS_FILE, STATUS_FILE, THEMES, ACTION, OPS, DEFAULT_SETTINGS, normalizeSettings, normalizeEntry, normalizeStatus, afterStop, plannedAt, warningOf };
+return { SETTINGS_FILE, STATUS_FILE, THEMES, ACTION, OPS, DEFAULT_SETTINGS, normalizeSettings, normalizeEntry, normalizeStatus, afterStop, plannedAt, readingText, warningOf };
 });
 
 __def("src/core/text.js", function () {
@@ -614,12 +620,15 @@ function nextWallTime({ h, m }, now, tz) {
   return at;
 }
 
+/** 7, 5 -> "07:05": a 24-hour clock time. */
+const clockText = (h, m) => `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+
 /** "23:10 on Friday" on the person's clock, for the Kin. */
 function describeNow(now, tz) {
   const p = zonedParts(now, tz);
-  return `${String(p.h).padStart(2, '0')}:${String(p.min).padStart(2, '0')} on ${p.weekday}`;
+  return `${clockText(p.h, p.min)} on ${p.weekday}`;
 }
-return { safeTimeZone, deviceTimeZone, zonedParts, zonedTime, nextWallTime, describeNow };
+return { safeTimeZone, deviceTimeZone, zonedParts, zonedTime, nextWallTime, clockText, describeNow };
 });
 
 __def("src/screen/app.js", function () {
@@ -627,7 +636,7 @@ __def("src/screen/app.js", function () {
 // work, every 15 minutes or when Update status is pressed; the screen never asks the Kin anything itself.
 const { h, keepFocus } = __req("src/screen/dom.js");
 const { icon, spinner, poseIcon, hairIcon } = __req("src/screen/icons.js");
-const { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, warningOf, SETTINGS_FILE, STATUS_FILE, ACTION, THEMES } = __req("src/core/state.js");
+const { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, warningOf, readingText, SETTINGS_FILE, STATUS_FILE, ACTION, THEMES } = __req("src/core/state.js");
 const { INTERVAL_STEPS, formatInterval, snapInterval, startDueFor } = __req("src/core/schedule.js");
 const { describeDream, DREAM_TTL_HOURS } = __req("src/core/sleep.js");
 const { deviceTimeZone } = __req("src/core/time.js");
@@ -724,9 +733,8 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
     if (!kin) return;
     const a = afterStop(before.kins[kin.id] || normalizeEntry(), S.settings);
     const b = afterStop(after.kins[kin.id] || normalizeEntry(), S.settings);
-    const text = (r) => (r ? [r.location, r.doing, r.outfit, r.hair, r.makeup].filter(Boolean).join(' ') : '');
     const parts = [];
-    if (b.reading && (asked ? b.reading.at !== (a.reading && a.reading.at) : text(b.reading) !== text(a.reading))) parts.push(text(b.reading));
+    if (b.reading && (asked ? b.reading.at !== (a.reading && a.reading.at) : readingText(b.reading) !== readingText(a.reading))) parts.push(readingText(b.reading));
     if (b.sleep && (!a.sleep || asked)) parts.push(`${kin.name} is asleep until ${formatWhen(b.sleep.wakeAt, { now: clock() })}.`);
     if (b.dream && b.dream.at !== (a.dream && a.dream.at)) parts.push(`${kin.name} woke up. Dream: ${describeDream(b.dream)}`);
     const w = warningOf(b);

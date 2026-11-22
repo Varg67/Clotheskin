@@ -2,7 +2,7 @@
 // work, every 15 minutes or when Update status is pressed; the screen never asks the Kin anything itself.
 import { h, keepFocus } from './dom.js';
 import { icon, spinner, poseIcon, hairIcon } from './icons.js';
-import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, warningOf, SETTINGS_FILE, STATUS_FILE, ACTION, THEMES } from '../core/state.js';
+import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, warningOf, readingText, SETTINGS_FILE, STATUS_FILE, ACTION, THEMES } from '../core/state.js';
 import { INTERVAL_STEPS, formatInterval, snapInterval, startDueFor } from '../core/schedule.js';
 import { describeDream, DREAM_TTL_HOURS } from '../core/sleep.js';
 import { deviceTimeZone } from '../core/time.js';
@@ -99,9 +99,8 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
     if (!kin) return;
     const a = afterStop(before.kins[kin.id] || normalizeEntry(), S.settings);
     const b = afterStop(after.kins[kin.id] || normalizeEntry(), S.settings);
-    const text = (r) => (r ? [r.location, r.doing, r.outfit, r.hair, r.makeup].filter(Boolean).join(' ') : '');
     const parts = [];
-    if (b.reading && (asked ? b.reading.at !== (a.reading && a.reading.at) : text(b.reading) !== text(a.reading))) parts.push(text(b.reading));
+    if (b.reading && (asked ? b.reading.at !== (a.reading && a.reading.at) : readingText(b.reading) !== readingText(a.reading))) parts.push(readingText(b.reading));
     if (b.sleep && (!a.sleep || asked)) parts.push(`${kin.name} is asleep until ${formatWhen(b.sleep.wakeAt, { now: clock() })}.`);
     if (b.dream && b.dream.at !== (a.dream && a.dream.at)) parts.push(`${kin.name} woke up. Dream: ${describeDream(b.dream)}`);
     const w = warningOf(b);

@@ -111,6 +111,12 @@ export function plannedAt(entry, settings) {
   return new Date(new Date(entry.lastRunAt).getTime() + settings.intervalS * 1000).toISOString();
 }
 
+/** A stored reading as one text: "In the kitchen. Standing, making coffee. Wearing a grey hoodie." ('' for none). */
+export function readingText(reading) {
+  if (!reading) return '';
+  return [reading.location, reading.doing, reading.outfit, reading.hair, reading.makeup].filter(Boolean).join(' ');
+}
+
 /** A warning about Kindroid itself for a Kin's entry, or null. */
 export function warningOf(entry) {
   if (!entry) return null;

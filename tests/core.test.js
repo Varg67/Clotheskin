@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { toSentence, clipWords, trimEndPunctuation, stripWrapping } from '../src/core/text.js';
 import { zonedParts, zonedTime, nextWallTime, describeNow, safeTimeZone } from '../src/core/time.js';
 import { INTERVAL_STEPS, formatInterval, snapInterval, retryDelay, errorKind, isDue, startDueFor, MAX_RETRY_S, MAINTENANCE_RETRY_S } from '../src/core/schedule.js';
-import { normalizeSettings, normalizeStatus, normalizeEntry, warningOf, DEFAULT_SETTINGS } from '../src/core/state.js';
+import { normalizeSettings, normalizeStatus, normalizeEntry, warningOf, DEFAULT_SETTINGS, succeeded, failedEntry, postponedEntry, mergeConcurrent } from '../src/core/state.js';
 import { planSleep, dreamFact, WAKE_LEAD_S } from '../src/core/sleep.js';
 
 test('time zones: wall clock parts, wall time to moment, the next 07:30, also on daylight-saving nights', () => {
@@ -112,4 +112,32 @@ test('an unknown time zone reads as UTC, also once its formatter is cached', () 
     assert.deepEqual(zonedParts(d, undefined), zonedParts(d, 'UTC'));
   }
   assert.equal(zonedParts(d, 'America/Sao_Paulo').h, 19, 'a real zone is not mixed up with the fallback');
+});
+
+test('entry transitions: a failure slows the next try down; an unusable answer is not a Kindroid failure', () => {
+  const now = new Date('2026-11-20T22:00:00Z');
+  const e = normalizeEntry({ failures: 1, serverFailures: 1 });
+  const server = failedEntry(e, { kind: 'server', error: 'kin ask failed: 503', now, intervalS: 900 });
+  assert.deepEqual([server.failures, server.serverFailures, server.errorKind], [2, 2, 'server']);
+  assert.equal(server.retryAt, new Date(now.getTime() + 1800e3).toISOString(), 'from the second error in a row: twice the interval');
+  const answer = failedEntry(e, { kind: 'answer', error: 'The answer is not valid JSON.', note: 'Try again', now, intervalS: 900 });
+  assert.deepEqual([answer.serverFailures, answer.note], [0, 'Try again']);
+  assert.equal(failedEntry(e, { error: 'Scheduled maintenance until 3 AM', now, intervalS: 900 }).errorKind, 'maintenance');
+  assert.deepEqual(succeeded(server), { ...server, failures: 0, serverFailures: 0, errorKind: null, error: null, note: null, retryAt: null });
+  const later = postponedEntry(server, { now, note: 'waits' });
+  assert.deepEqual([later.failures, later.retryAt, later.note], [2, '2026-11-20T22:15:00.000Z', 'waits']);
+});
+
+test('two runs at once: the night goes to the run that changed it, the newest reading and dream are kept', () => {
+  const night = { wakeAt: '2026-11-21T10:30:00.000Z', until: '2026-11-21T10:20:00.000Z' };
+  const reading = (at) => ({ location: 'In bed.', doing: 'Lying in bed, sleeping.', outfit: 'Wearing pyjamas.', hair: null, makeup: null, at });
+  const start = normalizeEntry({ lastRunAt: '2026-11-20T22:00:00Z' });
+  const theirs = normalizeEntry({ lastRunAt: '2026-11-20T22:15:01Z', sleep: night, sleptOn: 'abcdef01', reading: reading('2026-11-20T22:15:01Z') });
+  const ours = normalizeEntry({ lastRunAt: '2026-11-20T22:15:00Z', reading: reading('2026-11-20T22:15:00Z') });
+  const m = mergeConcurrent({ current: theirs, start, next: ours });
+  assert.deepEqual([m.concurrent, m.theirs], [true, true]);
+  assert.deepEqual([m.entry.sleep, m.entry.sleptOn, m.entry.reading.at], [night, 'abcdef01', '2026-11-20T22:15:01.000Z']);
+  const alone = mergeConcurrent({ current: start, start, next: ours });
+  assert.deepEqual([alone.concurrent, alone.entry], [false, ours], 'nobody saved in between: this run\'s entry as it is');
+  assert.equal(mergeConcurrent({ current: undefined, start, next: ours }).entry, ours, 'a first save');
 });

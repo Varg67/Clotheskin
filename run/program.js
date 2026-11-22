@@ -11,8 +11,9 @@
 import { buildOutfitPrompt, buildFollowUpPrompt, SLEEP_PROMPT, DREAM_PROMPT, KIN_ASK_LIMIT } from '../src/core/prompt.js';
 import { parseReading, describeReading } from '../src/core/outfit.js';
 import { looksAsleep, sentenceMark, planSleep, parseSleepAnswer, parseDreamAnswer, describeDream, dreamFact, DREAM_TTL_HOURS } from '../src/core/sleep.js';
-import { retryDelay, errorKind, isDue, TICK_S, ERROR } from '../src/core/schedule.js';
-import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, readingText, SETTINGS_FILE, STATUS_FILE, ACTION, OPS, AUTO } from '../src/core/state.js';
+import { errorKind, isDue, ERROR } from '../src/core/schedule.js';
+import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, readingText, succeeded, failedEntry, postponedEntry, mergeConcurrent,
+  SETTINGS_FILE, STATUS_FILE, ACTION, OPS, AUTO } from '../src/core/state.js';
 import { describeNow } from '../src/core/time.js';
 import { oneLine } from '../src/core/text.js';
 
@@ -32,19 +33,34 @@ const failed = (message) => ({ ok: false, message: oneLine(message) });
  * Returns { ok, message }: the caller ends the run with `kin end [--failed] message`. Throws only when status.json
  * could not be saved (the caller then ends with --failed).
  */
-export async function runProgram({ event, kin, clock = () => new Date(), log = () => {}, retryAfterMs = RETRY_AFTER_MS, budgetMs = RUN_BUDGET_MS }) {
-  let settings; let status;
-  try {
-    settings = normalizeSettings(await kin.get(SETTINGS_FILE));
-    status = normalizeStatus(await kin.get(STATUS_FILE));
-  } catch (e) {
-    return failed(`Could not read the app's files, so nothing was changed: ${e.message}`);
-  }
-  const ctx = { kin, clock, log, settings, retryAfterMs, deadline: Date.now() + budgetMs };
+export async function runProgram({ event, kin, ...options }) {
+  const files = await readFiles(kin);
+  if (!files.ok) return failed(`Could not read the app's files, so nothing was changed: ${files.error}`);
+  return dispatch(context(kin, files.settings, options), files.status, event);
+}
 
-  if (event?.trigger === 'schedule') return scheduled(ctx, status);
-  if (event?.trigger === 'action' && event.action === ACTION) return onAction(ctx, status, event);
-  return failed(`Nothing to do for ${event?.trigger === 'action' ? `the action "${event.action}"` : `the trigger "${event?.trigger}"`}.`);
+/** What every step gets: the kin functions, the clock, the log, the settings and the run's deadline (from now). */
+function context(kin, settings, { clock = () => new Date(), log = () => {}, retryAfterMs = RETRY_AFTER_MS, budgetMs = RUN_BUDGET_MS }) {
+  return { kin, clock, log, settings, retryAfterMs, deadline: Date.now() + budgetMs };
+}
+
+/** The trigger to its step: the 15-minute start, or the screen's action. */
+function dispatch(ctx, status, event) {
+  const trigger = event && event.trigger;
+  if (trigger === 'schedule') return scheduled(ctx, status);
+  if (trigger === 'action' && event.action === ACTION) return onAction(ctx, status, event);
+  return failed(`Nothing to do for ${trigger === 'action' ? `the action "${event.action}"` : `the trigger "${trigger}"`}.`);
+}
+
+/** settings.json and status.json, normalised; { ok: false, error } when either could not be read. */
+async function readFiles(kin) {
+  try {
+    const settings = normalizeSettings(await kin.get(SETTINGS_FILE));
+    const status = normalizeStatus(await kin.get(STATUS_FILE));
+    return { ok: true, settings, status };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
 }
 
 // ---------------------------------------------------------------- triggers
@@ -97,10 +113,8 @@ async function attachedKin(ctx, id, entry) {
 
 /** Reads where the Kin is, its pose and action and its outfit; then, if it is asleep, asks until when. */
 async function read(ctx, who, entry) {
-  const { settings, clock } = ctx;
-  const now = clock();
+  const now = ctx.clock();
   const e = { ...entry, name: who.name, lastRunAt: now.toISOString() };
-
   const answer = await ask(ctx, who, buildOutfitPrompt({ name: who.name }));
   if (!answer.ok && answer.kind === ERROR.TIME) return postpone(ctx, { who, entry: e, now, base: entry, note: 'The reading waits for the next start of the app.' });
   if (!answer.ok) return fail(ctx, { who, entry: e, outcome: answer, now, base: entry });
@@ -109,25 +123,33 @@ async function read(ctx, who, entry) {
     const outcome = { kind: ERROR.ANSWER, error: `${parsed.error} Nothing was changed.`, length: answer.text.length };
     return fail(ctx, { who, entry: e, outcome, now, base: entry });
   }
-  const reading = describeReading(parsed);
-  // Hair and makeup are kept only when the Kin described them (the card shows those rows only then).
-  if (!parsed.hair) reading.hair = null;
-  if (!parsed.makeup) reading.makeup = null;
-  e.reading = { ...reading, at: now.toISOString() };
-  e.serverFailures = 0; // Kindroid answered
-  const line = `${who.name}: ${readingText(reading)}`;
+  const withReading = { ...e, reading: storedReading(parsed, now), serverFailures: 0 }; // Kindroid answered
+  return afterReading(ctx, { who, entry: withReading, base: entry, now, line: `${who.name}: ${readingText(withReading.reading)}` });
+}
 
-  if (!looksAsleep(reading.doing)) {
-    await save(ctx, who.id, succeeded({ ...e, sleep: null, sleptOn: null }), entry); // awake: any night is over
+/** The card's sentences as stored: hair and makeup only when the Kin described them (the card shows those rows only then). */
+function storedReading(parsed, now) {
+  const reading = describeReading(parsed);
+  return { ...reading, hair: parsed.hair ? reading.hair : null, makeup: parsed.makeup ? reading.makeup : null, at: now.toISOString() };
+}
+
+/** After a reading: awake ends any night; a new "asleep" sentence starts the sleep question. */
+async function afterReading(ctx, { who, entry: e, base, now, line }) {
+  if (!looksAsleep(e.reading.doing)) {
+    await save(ctx, who.id, succeeded({ ...e, sleep: null, sleptOn: null }), base); // awake: any night is over
     return ok(line);
   }
-  if (e.sleep) { await save(ctx, who.id, succeeded(e), entry); return ok(`${line} Still asleep.`); } // read by hand during the night
-  const mark = sentenceMark(reading.doing); // a fingerprint, never the sentence: nothing about the scene in the night's data
-  if (e.sleptOn === mark) { await save(ctx, who.id, succeeded(e), entry); return ok(line); } // the chat has not moved since
-
+  if (e.sleep) { await save(ctx, who.id, succeeded(e), base); return ok(`${line} Still asleep.`); } // read by hand during the night
+  const mark = sentenceMark(e.reading.doing); // a fingerprint, never the sentence: nothing about the scene in the night's data
+  if (e.sleptOn === mark) { await save(ctx, who.id, succeeded(e), base); return ok(line); } // the chat has not moved since
   // The reading is kept before the sleep question: if the run is cut short, it is not lost.
-  await save(ctx, who.id, e, entry);
-  const s = await ask(ctx, who, buildFollowUpPrompt(SLEEP_PROMPT, { name: who.name, now: describeNow(now, settings.tz) }));
+  await save(ctx, who.id, e, base);
+  return askSleep(ctx, { who, entry: e, now, mark, line });
+}
+
+/** Asks whether the Kin is asleep and until when; a believable wake-up time starts the night. */
+async function askSleep(ctx, { who, entry: e, now, mark, line }) {
+  const s = await ask(ctx, who, buildFollowUpPrompt(SLEEP_PROMPT, { name: who.name, now: describeNow(now, ctx.settings.tz) }));
   if (!s.ok && s.kind === ERROR.TIME) {
     const note = 'The sleep question waits for the next start of the app.';
     return postpone(ctx, { who, entry: succeeded(e), now, base: e, note, message: `${line} The sleep question waits for the next start.` });
@@ -141,8 +163,9 @@ async function read(ctx, who, entry) {
     const note = `The sleep question did not get a clear answer (${p.error}) It is asked again at the next update.`;
     return fail(ctx, { who, entry: e, outcome: { kind: ERROR.ANSWER, error: p.error }, now, note, base: e });
   }
-  const plan = p.sleeping ? planSleep(p.wakeAt, now, settings.tz) : null;
-  await save(ctx, who.id, succeeded({ ...e, sleptOn: mark, sleep: plan ? { wakeAt: plan.wakeAt.toISOString(), until: plan.until.toISOString() } : null }), e);
+  const plan = p.sleeping ? planSleep(p.wakeAt, now, ctx.settings.tz) : null;
+  const sleep = plan ? { wakeAt: plan.wakeAt.toISOString(), until: plan.until.toISOString() } : null;
+  await save(ctx, who.id, succeeded({ ...e, sleptOn: mark, sleep }), e);
   if (plan) return ok(`${line} Asleep until ${p.wakeAt}.`);
   return ok(p.sleeping ? `${line} Asleep, but the wake-up time ${p.wakeAt} is too soon or too far away to wait for; readings go on.` : `${line} Not asleep after all.`);
 }
@@ -200,27 +223,13 @@ async function ask(ctx, who, prompt) {
   }
 }
 
-function succeeded(e) {
-  return { ...e, failures: 0, serverFailures: 0, errorKind: null, error: null, note: null, retryAt: null };
-}
-
 /**
  * Records a failure: errors in a row slow the next try down; only Kindroid errors count towards the server warning.
  * `entry` is what this run would save, `base` the entry it started from (see save), `note` the words for the person.
  */
-async function fail(ctx, { who, entry: e, outcome, now, note = null, base }) {
-  const kind = errorKind(outcome.error, outcome.kind || ERROR.SERVER);
-  if (kind === ERROR.ANSWER && outcome.length !== undefined) ctx.log(`answer not usable (${outcome.length} characters)`);
-  const failures = e.failures + 1;
-  const next = {
-    ...e,
-    failures,
-    serverFailures: kind === ERROR.ANSWER ? 0 : e.serverFailures + 1,
-    errorKind: kind,
-    error: oneLine(outcome.error, 300),
-    note: note || null,
-    retryAt: new Date(now.getTime() + retryDelay(ctx.settings.intervalS, failures, kind) * 1000).toISOString(),
-  };
+async function fail(ctx, { who, entry, outcome, now, note = null, base }) {
+  if (outcome.kind === ERROR.ANSWER && outcome.length !== undefined) ctx.log(`answer not usable (${outcome.length} characters)`);
+  const next = failedEntry(entry, { kind: outcome.kind, error: outcome.error, note, now, intervalS: ctx.settings.intervalS });
   await save(ctx, who.id, next, base);
   return failed(note || next.error);
 }
@@ -230,35 +239,21 @@ async function fail(ctx, { who, entry: e, outcome, now, note = null, base }) {
  * down), the step is tried again at the next start of the program.
  */
 async function postpone(ctx, { who, entry, now, note, base, message = note }) {
-  await save(ctx, who.id, { ...entry, retryAt: new Date(now.getTime() + TICK_S * 1000).toISOString(), note }, base);
+  await save(ctx, who.id, postponedEntry(entry, { now, note }), base);
   return ok(message);
 }
 
 /**
  * Writes one Kin's entry on top of a fresh copy of status.json. `base` is the entry this run started from: if another
- * run saved this Kin meanwhile (a scheduled start and Update status at the same moment), the night goes to the run
- * that changed it, and the newest reading and dream are kept. A failed save throws: the run
- * then ends with --failed instead of claiming a result that was not kept.
+ * run saved this Kin meanwhile, mergeConcurrent (state.js) decides what is kept. A failed save throws: the run then
+ * ends with --failed instead of claiming a result that was not kept.
  */
 async function save(ctx, id, entry, base) {
   let fresh;
   try { fresh = normalizeStatus(await ctx.kin.get(STATUS_FILE)); } catch (e) { throw new Error(`status.json could not be read before saving, so nothing was saved: ${e.message}`); }
   const current = fresh.kins[id];
-  let next = normalizeEntry(entry);
-  const start = base && normalizeEntry(base);
-  if (current && start && current.lastRunAt !== start.lastRunAt) {
-    // Another run saved this Kin meanwhile. The night goes to the run that changed it (asked the dream question,
-    // started a night); if both did, to the one that started later. The newest reading and dream are kept either way.
-    const nightOf = (x) => JSON.stringify([x.sleep, x.sleptOn]);
-    const theirs = nightOf(current) !== nightOf(start);
-    const ours = nightOf(next) !== nightOf(start);
-    const takeTheirs = theirs && (!ours || (current.lastRunAt || '') >= (next.lastRunAt || ''));
-    if (takeTheirs) next = { ...next, sleep: current.sleep, sleptOn: current.sleptOn };
-    const newer = (a, b) => (!a ? b : !b ? a : (a.at || '') >= (b.at || '') ? a : b);
-    next = { ...next, dream: newer(next.dream, current.dream), reading: newer(next.reading, current.reading) };
-    ctx.log(`another run saved this Kin meanwhile: ${takeTheirs ? 'its' : 'this'} night is kept`);
-  }
-
-  fresh.kins[id] = next;
+  const merged = mergeConcurrent({ current, start: base && normalizeEntry(base), next: normalizeEntry(entry) });
+  if (merged.concurrent) ctx.log(`another run saved this Kin meanwhile: ${merged.theirs ? 'its' : 'this'} night is kept`);
+  fresh.kins[id] = merged.entry;
   try { await ctx.kin.put(STATUS_FILE, JSON.stringify(fresh)); } catch (e) { throw new Error(`status.json could not be saved: ${e.message}`); }
 }

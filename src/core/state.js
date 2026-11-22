@@ -5,7 +5,7 @@
 //                  the night (hibernation) and the last dream.
 // One writer per file, so the screen and a run never overwrite each other. Both are normalised on every read: a
 // damaged or hand-edited file can never break the screen or the run, it only falls back to defaults.
-import { snapInterval, DEFAULT_INTERVAL_S, ERRORS_BEFORE_WARNING, ERROR } from './schedule.js';
+import { snapInterval, retryDelay, errorKind, DEFAULT_INTERVAL_S, ERRORS_BEFORE_WARNING, ERROR, TICK_S } from './schedule.js';
 import { safeTimeZone } from './time.js';
 import { REMEMBERED } from './sleep.js';
 import { oneLine } from './text.js';
@@ -58,17 +58,33 @@ export function normalizeSettings(raw) {
   };
 }
 
+const objectOr = (v) => (v && typeof v === 'object' ? v : null);
+
+/** The last reading (the card's sentences): kept only with an outfit sentence. */
+function normalizeReading(given) {
+  const r = objectOr(given);
+  if (!r || !sentence(r.outfit, 600)) return null;
+  return { location: sentence(r.location, 300) || '', doing: sentence(r.doing, 300) || '', outfit: sentence(r.outfit, 600), hair: sentence(r.hair, 200), makeup: sentence(r.makeup, 200), at: iso(r.at) };
+}
+
+/** The night: when the Kin wakes up, and from when the dream question is due. Both times, or no night. */
+function normalizeSleep(given) {
+  const s = objectOr(given);
+  return s && iso(s.wakeAt) && iso(s.until) ? { wakeAt: iso(s.wakeAt), until: iso(s.until) } : null;
+}
+
+/** The last dream: kept only with the time it was told. */
+function normalizeDream(given) {
+  const d = objectOr(given);
+  if (!d || !iso(d.at)) return null;
+  return { dream: sentence(d.dream, 300), remembered: REMEMBERED.includes(d.remembered) ? d.remembered : 'some', at: iso(d.at) };
+}
+
 /** One Kin's entry in status.json, complete and valid. */
 export function normalizeEntry(e = {}) {
-  const r = e.reading && typeof e.reading === 'object' ? e.reading : null;
-  const reading = r && sentence(r.outfit, 600) ? { location: sentence(r.location, 300) || '', doing: sentence(r.doing, 300) || '', outfit: sentence(r.outfit, 600), hair: sentence(r.hair, 200), makeup: sentence(r.makeup, 200), at: iso(r.at) } : null;
-  const s = e.sleep && typeof e.sleep === 'object' ? e.sleep : null;
-  const sleep = s && iso(s.wakeAt) && iso(s.until) ? { wakeAt: iso(s.wakeAt), until: iso(s.until) } : null;
-  const d = e.dream && typeof e.dream === 'object' ? e.dream : null;
-  const dream = d && iso(d.at) ? { dream: sentence(d.dream, 300), remembered: REMEMBERED.includes(d.remembered) ? d.remembered : 'some', at: iso(d.at) } : null;
   return {
     name: str(e.name, 120),
-    reading,
+    reading: normalizeReading(e.reading),
     lastRunAt: iso(e.lastRunAt), // the last time a step ran for this Kin (reading, sleep or dream question)
     retryAt: iso(e.retryAt), // after an error: when to try again (kept when the ruler moves)
     failures: count(e.failures),
@@ -76,9 +92,9 @@ export function normalizeEntry(e = {}) {
     errorKind: SAVED_ERRORS.includes(e.errorKind) ? e.errorKind : null,
     error: str(e.error, 500),
     note: str(e.note, 500),
-    sleep,
+    sleep: normalizeSleep(e.sleep),
     sleptOn: typeof e.sleptOn === 'string' && /^[0-9a-f]{8}$/.test(e.sleptOn) ? e.sleptOn : null,
-    dream,
+    dream: normalizeDream(e.dream),
   };
 }
 
@@ -112,6 +128,55 @@ export function plannedAt(entry, settings) {
   if (entry.retryAt) return entry.retryAt;
   if (!entry.lastRunAt) return null;
   return new Date(new Date(entry.lastRunAt).getTime() + settings.intervalS * 1000).toISOString();
+}
+
+// ---------------------------------------------------------------- what a run does to an entry (pure: no I/O)
+
+/** A step went through: errors, notes and any slowing down are over. */
+export function succeeded(entry) {
+  return { ...entry, failures: 0, serverFailures: 0, errorKind: null, error: null, note: null, retryAt: null };
+}
+
+/**
+ * A step failed: errors in a row slow the next try down (retryDelay); only Kindroid errors count towards the server
+ * warning, a Kin's unusable answer does not. `note` is what the person is told instead of the error, if anything.
+ */
+export function failedEntry(entry, { kind: given, error, note = null, now, intervalS }) {
+  const kind = errorKind(error, given || ERROR.SERVER);
+  const failures = entry.failures + 1;
+  return {
+    ...entry,
+    failures,
+    serverFailures: kind === ERROR.ANSWER ? 0 : entry.serverFailures + 1,
+    errorKind: kind,
+    error: oneLine(error, 300),
+    note: note || null,
+    retryAt: new Date(now.getTime() + retryDelay(intervalS, failures, kind) * 1000).toISOString(),
+  };
+}
+
+/** The run's own time ran out before a question: nothing failed, the step waits for the next start. */
+export function postponedEntry(entry, { now, note }) {
+  return { ...entry, retryAt: new Date(now.getTime() + TICK_S * 1000).toISOString(), note };
+}
+
+const nightOf = (x) => JSON.stringify([x.sleep, x.sleptOn]);
+const newer = (a, b) => (!a ? b : !b ? a : (a.at || '') >= (b.at || '') ? a : b);
+
+/**
+ * What to save when another run saved the same Kin while this one ran (a scheduled start and Update status at the
+ * same moment). `start` is the entry this run started from, `current` what is saved now, `next` what this run would
+ * save. The night goes to the run that changed it (asked the dream question, started a night); if both did, to the
+ * one that started later. The newest reading and dream are kept either way. Returns { entry, concurrent, theirs }:
+ * concurrent when another run did save in between, theirs when its night was kept.
+ */
+export function mergeConcurrent({ current, start, next }) {
+  if (!current || !start || current.lastRunAt === start.lastRunAt) return { entry: next, concurrent: false, theirs: false };
+  const theyChanged = nightOf(current) !== nightOf(start);
+  const weChanged = nightOf(next) !== nightOf(start);
+  const theirs = theyChanged && (!weChanged || (current.lastRunAt || '') >= (next.lastRunAt || ''));
+  const night = theirs ? { sleep: current.sleep, sleptOn: current.sleptOn } : {};
+  return { entry: { ...next, ...night, dream: newer(next.dream, current.dream), reading: newer(next.reading, current.reading) }, concurrent: true, theirs };
 }
 
 /** A stored reading as one text: "In the kitchen. Standing, making coffee. Wearing a grey hoodie." ('' for none). */

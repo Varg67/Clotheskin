@@ -230,7 +230,7 @@ Resultado: as 11 repetições resolvidas em 7 commits, sem mudar nenhuma frase d
 
 Resultado: os 20 avisos de tamanho e complexidade zerados em 4 blocos (motor, leitura das respostas, tela, scripts), e as regras viraram **erro** no lint. Nenhuma função passa de 60 linhas, 4 parâmetros ou complexidade 12. 176 testes verdes (7 novos da tela em Node e 2 das transições puras), cobertura de 98,9 % das linhas, desempenho 10/10, e2e 17/17. O roteiro do Kin real ficou idêntico; a única mudança nele é apontar também `phrases.js` como lugar da leitura da resposta. O que saiu diferente do planejado:
 - **4.1:** as transições puras (`succeeded`, `failedEntry`, `postponedEntry`, `mergeConcurrent`) foram para `state.js`, não para um `entry.js` novo: ficam junto do resto da forma do `status.json` e não aumentam a lista de instalação.
-- **4.2:** a divisão moderada (opção (a)) ficou em `vocabulary.js` (Fase 3) + `phrases.js` (limpeza e frases de local, pose/ação, cabelo e maquiagem) + `outfit.js` (roupas, leitura do JSON, idioma, montagem). O `joinNatural` foi para `text.js`. **A lista de instalação tem 24 arquivos.** Cada reescrita de parser foi conferida contra o código antigo em ~7.000 respostas (as strings dos próprios testes mais fuzz aleatório), com resultado idêntico em todas as funções. No `json.js`, o `normalizeLoose` virou uma tabela de leitores, com desempenho igual dentro do ruído (−5 % a +7 %).
+- **4.2:** a divisão moderada (opção (a)) ficou em `vocabulary.js` (Fase 3) + `phrases.js` (limpeza e frases de local, pose/ação, cabelo e maquiagem) + `outfit.js` (roupas, leitura do JSON, idioma, montagem). O `joinNatural` foi para `text.js`. **A lista de instalação tem 24 arquivos.** Cada reescrita de parser foi conferida contra o código antigo, com resultado idêntico em todas as funções. *Correção (integração):* o gerador aleatório dessa conferência entrava em ciclo, então as "~7.000 respostas" tinham repetições. Refeita com um gerador correto: o código antes da Fase 3 e o do fim da Fase 5 dão o mesmo resultado em **48.532 respostas distintas**. No `json.js`, o `normalizeLoose` virou uma tabela de leitores, com desempenho igual dentro do ruído (−5 % a +7 %).
 - **4.3:** a tela ficou em `store.js` + `texts.js` (sem DOM, testados em Node: 92 % e 99 % de linhas, agora dentro do limite de cobertura do `check`), `announcer.js`, `views/` (`card`, `kinList`, `automation`, `settings`) e `app.js`. O `dispose()` continua descartado (ver Fase 1), e `startApp` não devolve mais nada, porque ninguém usava o retorno.
 - **Bug B6, achado ao mover o código:** num Kin **nunca lido**, se o Kindroid não respondesse ao Update status, o erro era apagado na hora (`null !== undefined` na comparação de `lastRunAt`). Não aparecia banner nem alerta. Corrigido, com teste.
 - **Tamanho do `screen/app.js`:** passou de 68 KB (antes da Fase 3) para 85 KB. Em código (sem comentários), foi de ~51 KB para ~59 KB. Três causas: as transições do run em `state.js` entram no pacote da tela, os leitores do `json.js`, e a ligação entre as novas peças da tela; o resto são comentários. Como esse é o arquivo que o agente do Kindroid copia (§2.2), tirar os comentários do arquivo gerado (cerca de 59 KB) é uma opção, mas eles ajudam quem revisa o código publicado (decisão 7 no §6).
@@ -276,7 +276,7 @@ Resultado, em 4 blocos (5a–5d): 177 testes verdes, cobertura de 99 % das linha
 - **Bugs que o modo estrito achou:** uma falha que não é `Error` (uma string, `null`) virava "...: undefined" na mensagem e no `status.json`. Agora há `errorMessage()`, com teste, e confirmei o comportamento antigo rodando o código anterior. Além disso, o exemplo do prompt deixou de ser lido de volta do próprio prompt por regex: o prompt é montado a partir dele, byte a byte igual. O 404 do `kin files get` agora usa `instanceof KinError`.
 - **`!ok` voltou a estreitar o tipo**, então o contorno `ok === false` da Fase 1 saiu, exceto no protocolo da página (`channel.js`), onde um `ok` ausente significa sucesso. Agora há um comentário lá, porque a troca automática quase quebrou essa linha.
 - **Linhas longas:** o limite de 140 colunas vale para **código**. Frases, templates e regex longas não são quebradas, porque ficariam piores de ler. Sobraram 19 linhas de código longas, corrigidas, e as que escondiam lógica ganharam nome (`canRetry`, `NOT_AN_ACTION`).
-- **Regex grandes:** "não diz nada" (unknown, none, n/a, not mentioned…) estava escrito 3 vezes com diferenças pequenas; agora `nothingSaid()` monta cada uma. As novas dão resultado idêntico às antigas em 21.806 strings.
+- **Regex grandes:** "não diz nada" (unknown, none, n/a, not mentioned…) estava escrito 3 vezes com diferenças pequenas; agora `nothingSaid()` monta cada uma. As novas dão resultado idêntico às antigas. *Correção (integração):* as "21.806 strings" tinham repetições (gerador aleatório em ciclo). Refeito com um gerador correto: idênticas em **44.335 strings distintas**.
 - **Comentários:** os 54 comentários de fim de linha do código de produção explicam o porquê ou dão exemplos do domínio; nenhum foi removido.
 - O `screen/app.js` gerado está em **~90 KB**, por causa dos tipos JSDoc (ver decisão 7).
 
@@ -305,13 +305,30 @@ O que saiu diferente ou a mais:
 
 | # | Otimização | Ganho esperado | Como verificar |
 | --- | --- | --- | --- |
-| O1 | No início agendado, ler `settings.json` primeiro e **só ler `status.json` se estiver rodando e com Kin** | Inícios parados/pausados: 2 → **1** chamada `kin` (o caso mais comum, 96 vezes por dia) | teste de custo por run |
+| ~~O1~~ | **Desfeito na integração** (ver abaixo): no início agendado, ler `settings.json` primeiro e só ler `status.json` se estiver rodando e com Kin | Inícios parados/pausados: 2 → **1** chamada `kin` (o caso mais comum, 96 vezes por dia) | teste de custo por run |
 | O2 | Quando os dois arquivos forem necessários, lê-los em paralelo (`Promise.all`) | −1 latência de chamada por início com leitura devida | teste com `kin` fake com atraso fixo |
 | O3 | Limite de tamanho da resposta (1.4) e regex com âncora/limite em `normalizeLoose` | elimina o pior caso quadrático (243 ms → < 10 ms em 128 KB) | `tests/perf.test.js` |
 | O4 | Tela: manter o "não renderiza se `status.json` não mudou"; medir o `render()` completo no e2e (`performance.now`) e falhar acima de 16 ms | renderização sem travar a rolagem | e2e |
 | ~~O5~~ | ~~Minificar `screen/app.js`~~ — **descartado** (§2.2): o agente do Kindroid copia os arquivos, e linhas gigantes são as mais fáceis de corromper | — | — |
 
 Não otimizar o que já é rápido (`parseReading`, fusos): o custo está nas chamadas ao Kindroid.
+
+### Integração da linha de produção (até a 0.6.0) — **feita**
+
+A refatoração partiu de `4b10472`. O app em produção (beta 1.1, `7afd8c7`) e a 0.6.0 (`afc5414`) estavam em outra linha, `claude/pensive-noether-c7dwbw`, com 17 commits que mudam comportamento nos mesmos arquivos. Por decisão sua, ela foi integrada por **merge** (`d49478a`), com o comportamento dela valendo, recolocado na estrutura refatorada:
+
+- **Motor:** pergunta como diretiva fora do personagem e uma segunda tentativa com correção na mesma execução; a última frase conhecida fica (`carryOver`); contar o visual ao Kin por escolha (`tellLook`); o sonho só é contado por escolha e é apagado depois de um dia ou do Stop (`forgetOld`); a versão gravada no `status.json`; a linha do log no relógio da pessoa; `kin files put` com o conteúdo no stdin (como Kin Bank e Planner, confirmado no Kindroid).
+- **Leitura:** as revisões de local, roupa, pose/ação, cabelo e maquiagem entraram em `phrases.js` e `outfit.js`. Comparadas com o `outfit.js` deles em **34.060 respostas distintas**: resultado idêntico, exceto onde corrigem dois defeitos que eles tinham:
+  - **B7:** um Kin que agrupa a roupa (`{"outfit": {...}}`) e diz que está sem roupa fazia a leitura lançar uma exceção. A execução inteira falhava em 126 respostas distintas do corpus. O defeito veio depois da beta 1.1, então não está em produção.
+  - **Ponto duplo:** "Lying in bed reading.." quando a pose vinha numa lista com ponto final dentro.
+
+  Há testes de regressão para os dois.
+- **Tela:** marcas "seen …", os cartões **Current look** e **Dreams** à vista, a versão em Settings e o aviso de versões diferentes, nenhuma linha para rosto sem maquiagem.
+- **O1 desfeito:** apagar um sonho antigo "em até um início" (requisito da revisão da App Library) exige ler o `status.json` em todo início, mesmo parado. Requisito vale mais que economia. Agora todo início lê os dois arquivos **em paralelo** (antes só a ação fazia isso); os testes de custo registram isso.
+- **Decisão 7:** a linha de produção limita `screen/app.js` a 80.000 caracteres. O build agora tira as linhas que são só comentário (101 KB → 71 KB); as fontes continuam comentadas.
+- **A lista de instalação** tem 24 arquivos, e o `COMO-INSTALAR.md` (vindo da outra linha) foi atualizado. Um teste dela garante que a lista bate com os arquivos que o app usa.
+- **Coincidências:** a outra linha também tinha removido o `parseOutfit` e desexportado as mesmas constantes que a Fase 2. Os dois lados chegaram ao mesmo resultado.
+- **Testes:** as suítes das duas linhas passam juntas (254 unitários, 12 de desempenho, 22 de navegador).
 
 ### Fase 7 — Fechamento
 
@@ -370,7 +387,7 @@ Não otimizar o que já é rápido (`parseReading`, fusos): o custo está nas ch
 4. **Idioma:** manter código, comentários e mensagens em inglês (como hoje) e só a documentação de testes em português?
 5. **Arquivos do run (§4.4):** (a) dividir `src/core/` com moderação, ou (b) empacotar o run num arquivo gerado, como a tela? Recomendo (a) agora e (b) só se a cópia pelo agente se mostrar pouco confiável.
 6. **Instalação (§2.2):** o agente do Kindroid baixa cada link (cópia exata) ou lê e reescreve o conteúdo? E ele tem um terminal para conferir SHA-256? Isso decide se a conferência de hashes vai no prompt ou fica só o identificador de build na tela.
-7. **Comentários no `screen/app.js` gerado (Fases 4 e 5):** manter (~90 KB depois dos tipos JSDoc da Fase 5, mais legível para quem revisa o código publicado) ou tirar no build (~60 KB, menos para o agente do Kindroid copiar)? As fontes em `src/` continuam comentadas nos dois casos.
+7. ~~**Comentários no `screen/app.js` gerado**~~ — resolvido na integração: a linha de produção tem um teste que limita o arquivo a 80.000 caracteres. O build tira as linhas que são só comentário (71 KB); as fontes em `src/` continuam comentadas.
 
 ## 7. Ordem sugerida e tamanho
 

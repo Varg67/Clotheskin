@@ -258,13 +258,69 @@ const SUBJECT = /^((currently|right now|now|just)\s+)?((i|she|he|they|we)\s+(am|
 const PLACE_ONLY_START = /^(in|at|inside|outside|near|nearby)\b/i;
 const POSTURE_WORD = /\b(sitting|seated|standing|lying|laying|leaning|kneeling|crouching|squatting|reclining|resting|lounging|walking|sleeping|slouching|perched|curled|stretched)\b/i;
 const MAX_DOING = 80;
+// "not mentioned in the chat", "the chat does not say", "same as before": nothing new (the last known one stays).
+const NO_VALUE_START = /^(unknown|unspecified|not (mentioned|specified|stated|known|described|clear|given|said)|the (recent )?(chat|conversation) (does not|doesn['’]t|did not|didn['’]t)|(the )?same( as (before|earlier))?$|unchanged|as before)\b/i;
+const DOING_LABEL = /^(pose|posture|position|action|activity|doing)\s*[:\-–—]\s*/i;
+// "Bia is sitting on the bed": a roleplay answer in the third person, with the Kin's own name.
+const NAME_SUBJECT = /^(?:[A-Z][\w'’-]*\s+){1,2}(?:is|was)\s+(?=[a-z]+ing\b|(?:seated|perched|curled|stretched)\b)|^[A-Z][\w'’-]*['’]s\s+(?=[a-z]+ing\b)/;
+// A feeling is not an action: "happy", "a bit tired".
+const FEELING_WORD = /^((very|so|a (bit|little)|quite|really|kind of|slightly|still)\s+)?(happy|sad|tired|sleepy|exhausted|bored|angry|mad|nervous|excited|anxious|calm|relaxed|content|annoyed|upset|embarrassed|shy|flustered|curious|confused|worried|scared|afraid|hungry|thirsty|lonely|jealous|in love|sick|comfortable|cozy|cosy|cold|warm|hot)(\s+and\s+[a-z]+)?$/i;
+
+// Common verbs a Kin writes in another form than "-ing": "sits on the sofa", "cook dinner", "drinks coffee".
+const VERBS = new Set(['sit', 'stand', 'lie', 'lean', 'kneel', 'crouch', 'sleep', 'rest', 'nap', 'doze', 'lounge', 'curl', 'snuggle', 'cuddle', 'hug', 'kiss', 'hold', 'read', 'write', 'type', 'text', 'call', 'cook', 'bake', 'eat', 'drink', 'sip', 'stir', 'chop', 'pour', 'prepare', 'make', 'serve', 'set', 'wash', 'clean', 'tidy', 'fold', 'pack', 'brush', 'comb', 'dress', 'change', 'shower', 'bathe', 'watch', 'look', 'stare', 'gaze', 'glance', 'smile', 'grin', 'laugh', 'giggle', 'blush', 'talk', 'chat', 'listen', 'wait', 'walk', 'run', 'jog', 'drive', 'ride', 'play', 'work', 'study', 'draw', 'paint', 'knit', 'sew', 'sing', 'hum', 'dance', 'stretch', 'yawn', 'relax', 'scroll', 'browse', 'shop', 'pick', 'carry', 'fix', 'adjust', 'check', 'open', 'close', 'think', 'wave', 'nod', 'sigh', 'pace', 'tie', 'stroke', 'pet', 'feed']);
+// Past forms only for postures ("sat on the sofa" is how many people say "sitting"); a past action may be over.
+const PAST_POSTURE = { sat: 'sit', stood: 'stand', lay: 'lie', knelt: 'kneel', crouched: 'crouch', leaned: 'lean', leant: 'lean' };
+function verbBase(w) {
+  const x = w.toLowerCase();
+  if (VERBS.has(x)) return x;
+  if (/ies$/.test(x) && VERBS.has(`${x.slice(0, -3)}y`)) return `${x.slice(0, -3)}y`;
+  if (/es$/.test(x) && VERBS.has(x.slice(0, -2))) return x.slice(0, -2);
+  if (/s$/.test(x) && VERBS.has(x.slice(0, -1))) return x.slice(0, -1);
+  return null;
+}
+function ingOf(base) {
+  if (/ie$/.test(base)) return `${base.slice(0, -2)}ying`; // lie -> lying
+  if (/[^e]e$/.test(base)) return `${base.slice(0, -1)}ing`; // write -> writing
+  if (/^[^aeiou]*[aeiou][bdgmnprt]$/.test(base)) return `${base}${base.slice(-1)}ing`; // sit -> sitting
+  return `${base}ing`;
+}
+/** "sits on the sofa" -> "sitting on the sofa", "cook dinner" -> "cooking dinner"; anything else as it is. */
+function toIng(s, { posture = false } = {}) {
+  const m = s.match(/^([A-Za-z]+)(.*)$/);
+  if (!m) return s;
+  const base = (posture && PAST_POSTURE[m[1].toLowerCase()]) || verbBase(m[1]);
+  return base ? `${ingOf(base)}${m[2]}` : s;
+}
+
+/**
+ * The shared repairs of a pose or an action: *roleplay* asides, a label, brackets, a subject ("I am", "Bia is"), a
+ * clause about someone else ("who is watching TV"), the verb form, and "not mentioned" or "same as before".
+ */
+function cleanDoing(v, { posture }) {
+  // "*smiles* cooking" -> "cooking": a *roleplay* aside goes, before anything trims the stars at the edges.
+  if (typeof v === 'string') { const unstarred = v.replace(/\*[^*]+\*/g, ' ').trim(); if (unstarred) v = unstarred; }
+  let s = rawText(v, 400);
+  if (s === null || s === undefined) return s;
+  s = s.replace(/\*/g, '');
+  s = s.replace(DOING_LABEL, '')
+    .replace(/\s*\(([^()]*)\)?/g, (m, inner) => (inner.trim() ? ` ${inner.trim()}` : ''));       // "reading (a novel)"
+  let prev;
+  do { prev = s; s = s.replace(/^((currently|right now|now|just|still|actually)\s+)+/i, '').replace(NAME_SUBJECT, '').replace(SUBJECT, ''); } while (s !== prev);
+  s = s.replace(CLOTHES_CLAUSE, '')
+    .replace(/,?\s+(who|whom|whose|which)\b.*$/i, '')                         // ", who is watching TV"
+    .replace(/\s+that\s+(I|you|he|she|they|we|[A-Z][\w'’-]*)\s.*$/, '')     // "the glass that Ari dropped"
+    .replace(/[.;,!?\s]+$/, '');
+  if (!s || NO_VALUE.test(s) || NO_VALUE_START.test(s) || NO_ACTION.test(s)) return null;
+  s = toIng(s, { posture });
+  return /^[A-Z][a-z]*(ing|ed)\b/.test(s) ? s[0].toLowerCase() + s.slice(1) : s;  // "Reading a book" mid-sentence
+}
 
 /** The body position ("sitting on the sofa"). Returns string | null | undefined. */
 export function cleanPose(v) {
-  let s = rawText(v, 400);
-  if (s === null || s === undefined) return s;
-  s = s.replace(CLOTHES_CLAUSE, '').replace(/[.;,!?\s]+$/, '');
-  if (!s || NO_VALUE.test(s) || NO_ACTION.test(s)) return null;
+  let s = cleanDoing(v, { posture: true });
+  if (!s) return s;
+  // An activity after the posture belongs to the action: "leaning on the wall, arms crossed, looking at Ari" -> "leaning on the wall, arms crossed".
+  s = s.replace(/,\s*([a-z]+ing)\b.*$/, (m, w) => (POSTURE_WORD.test(w) ? m : ''));
   return clipWords(s, MAX_DOING);
 }
 
@@ -285,20 +341,22 @@ function withoutSpeech(s) {
 }
 
 export function cleanAction(v) {
-  let s = rawText(v, 400);
+  let s = cleanDoing(v, { posture: false });
   if (s === null || s === undefined) return s;
-  let prev;
-  do { prev = s; s = s.replace(/^((currently|right now|now|just|still|actually)\s+)+/i, '').replace(SUBJECT, ''); } while (s !== prev);
-  s = withoutSpeech(s.replace(/[.;,!?\s]+$/, '')).replace(/[.;,!?\s]+$/, '');
-  if (!s || NO_VALUE.test(s) || NO_ACTION.test(s) || PLAN_OR_PAST.test(s) || GOING_TO_VERB.test(s) || FUTURE_WORD.test(s) || FEELING.test(s)) return null;
+  s = withoutSpeech(s)
+    .replace(/\s+(while|as)\s+[a-z]+ing\b.*$/i, '')   // "cooking dinner while humming a song" -> "cooking dinner"
+    .replace(/[.;,!?\s]+$/, '');
+  if (!s || NO_VALUE.test(s) || NO_ACTION.test(s) || PLAN_OR_PAST.test(s) || GOING_TO_VERB.test(s) || FUTURE_WORD.test(s) || FEELING.test(s) || FEELING_WORD.test(s)) return null;
   return clipWords(s, MAX_DOING);
 }
 
 /** "Sitting on the sofa, drinking coffee." Pose first, then the action; an action already inside the pose is not repeated. */
 export function describeDoing({ pose, action } = {}) {
   const parts = [];
-  if (pose) parts.push(pose);
-  if (action && !(pose && pose.toLowerCase().includes(action.toLowerCase()))) parts.push(action);
+  // One inside the other ("sitting" and "sitting on the sofa"): the longer one alone.
+  const p = pose && pose.toLowerCase(); const a = action && action.toLowerCase();
+  if (pose && !(a && a !== p && a.includes(p))) parts.push(pose);
+  if (action && !(p && p.includes(a))) parts.push(action);
   if (!parts.length) return NOT_DESCRIBED.doing;
   const text = parts.join(', ');
   return capitalizeFirst(text.endsWith('…') ? text : `${text}.`);

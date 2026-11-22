@@ -459,7 +459,7 @@ Para a automação, use a régua em **15 min** durante o teste e volte para um i
 |---|---|---|
 | **A. Formato** | erro vermelho ("not valid JSON", "must be a text") | a pergunta (`src/core/prompt.js`) |
 | **B. Interpretação** | o Kin respondeu certo no formato, mas com o fato errado (plano virou fato, lugar antigo ficou, roupa de outra pessoa) | a pergunta (`src/core/prompt.js`) |
-| **C. App** | o Kin respondeu certo e o cartão mostrou outra coisa | a leitura da resposta (`src/core/outfit.js`) |
+| **C. App** | o Kin respondeu certo e o cartão mostrou outra coisa | a leitura da resposta (`src/core/outfit.js`, `src/core/phrases.js`) |
 | **D. Plataforma** | nada acontece, erro de permissão, `kin` falha, a tela não carrega | `run/kin.js`, `kin.json`, `src/screen/` |
 
 ## Tabela de resultados

@@ -226,7 +226,14 @@ Resultado: as 11 repetições resolvidas em 7 commits, sem mudar nenhuma frase d
 | `scripts/lib/generated.mjs`: `writeOrCheck(target, text, label)` usado pelos 3 geradores. | D10 |
 | Cada prompt exporta seu `kind` (`READING`, `SLEEP`, `DREAM`) e uma função `promptKind(text)` vive em `prompt.js`; harness e fake usam essa função. | D11 |
 
-### Fase 4 — Estrutura (SOLID aplicado ao tamanho do projeto)
+### Fase 4 — Estrutura (SOLID aplicado ao tamanho do projeto) — **feita**
+
+Resultado: os 20 avisos de tamanho e complexidade zerados em 4 blocos (motor, leitura das respostas, tela, scripts), e as regras viraram **erro** no lint. Nenhuma função passa de 60 linhas, 4 parâmetros ou complexidade 12. 176 testes verdes (7 novos da tela em Node e 2 das transições puras), cobertura de 98,9 % das linhas, desempenho 10/10, e2e 17/17. O roteiro do Kin real ficou idêntico; a única mudança nele é apontar também `phrases.js` como lugar da leitura da resposta. O que saiu diferente do planejado:
+- **4.1:** as transições puras (`succeeded`, `failedEntry`, `postponedEntry`, `mergeConcurrent`) foram para `state.js`, não para um `entry.js` novo: ficam junto do resto da forma do `status.json` e não aumentam a lista de instalação.
+- **4.2:** a divisão moderada (opção (a)) ficou em `vocabulary.js` (Fase 3) + `phrases.js` (limpeza e frases de local, pose/ação, cabelo e maquiagem) + `outfit.js` (roupas, leitura do JSON, idioma, montagem). O `joinNatural` foi para `text.js`. **A lista de instalação tem 24 arquivos.** Cada reescrita de parser foi conferida contra o código antigo em ~7.000 respostas (as strings dos próprios testes mais fuzz aleatório), com resultado idêntico em todas as funções. No `json.js`, o `normalizeLoose` virou uma tabela de leitores, com desempenho igual dentro do ruído (−5 % a +7 %).
+- **4.3:** a tela ficou em `store.js` + `texts.js` (sem DOM, testados em Node: 92 % e 99 % de linhas, agora dentro do limite de cobertura do `check`), `announcer.js`, `views/` (`card`, `kinList`, `automation`, `settings`) e `app.js`. O `dispose()` continua descartado (ver Fase 1), e `startApp` não devolve mais nada, porque ninguém usava o retorno.
+- **Bug B6, achado ao mover o código:** num Kin **nunca lido**, se o Kindroid não respondesse ao Update status, o erro era apagado na hora (`null !== undefined` na comparação de `lastRunAt`). Não aparecia banner nem alerta. Corrigido, com teste.
+- **Tamanho do `screen/app.js`:** passou de 68 KB (antes da Fase 3) para 85 KB. Em código (sem comentários), foi de ~51 KB para ~59 KB. Três causas: as transições do run em `state.js` entram no pacote da tela, os leitores do `json.js`, e a ligação entre as novas peças da tela; o resto são comentários. Como esse é o arquivo que o agente do Kindroid copia (§2.2), tirar os comentários do arquivo gerado (cerca de 59 KB) é uma opção, mas eles ajudam quem revisa o código publicado (decisão 7 no §6).
 
 O projeto é pequeno; a meta é **responsabilidade única e testabilidade**, não camadas novas.
 
@@ -340,6 +347,7 @@ Não otimizar o que já é rápido (`parseReading`, fusos): o custo está nas ch
 4. **Idioma:** manter código, comentários e mensagens em inglês (como hoje) e só a documentação de testes em português?
 5. **Arquivos do run (§4.4):** (a) dividir `src/core/` com moderação, ou (b) empacotar o run num arquivo gerado, como a tela? Recomendo (a) agora e (b) só se a cópia pelo agente se mostrar pouco confiável.
 6. **Instalação (§2.2):** o agente do Kindroid baixa cada link (cópia exata) ou lê e reescreve o conteúdo? E ele tem um terminal para conferir SHA-256? Isso decide se a conferência de hashes vai no prompt ou fica só o identificador de build na tela.
+7. **Comentários no `screen/app.js` gerado (Fase 4):** manter (85 KB, mais legível para quem revisa o código publicado) ou tirar no build (~59 KB, menos para o agente do Kindroid copiar)? As fontes em `src/` continuam comentadas nos dois casos.
 
 ## 7. Ordem sugerida e tamanho
 

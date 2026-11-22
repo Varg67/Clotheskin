@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMainModule, writeOrCheck } from './lib/generated.mjs';
+import { APP_VERSION } from '../src/core/constants.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const ENTRY = 'src/screen/main.js';
@@ -81,6 +82,12 @@ function transform(rel, code) {
   return { deps, code: `__def(${JSON.stringify(rel)}, function () {\n${out.trim()}\nreturn { ${names.join(', ')} };\n});` };
 }
 
+/**
+ * The file's last line, the same for every build of a version: a copy that lost its end (the Kindroid agent copying
+ * a long file) is told apart by asking for its last line (COMO-INSTALAR.md, step 5).
+ */
+export const SCREEN_END = `// end of Clotheskin screen ${APP_VERSION}`;
+
 export function buildScreen() {
   const seen = new Map();
   const visit = (rel) => {
@@ -104,6 +111,7 @@ ${modules.join('\n\n')}
 
 __req(${JSON.stringify(ENTRY)}).boot();
 })();
+${SCREEN_END}
 `;
 }
 

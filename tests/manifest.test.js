@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildManifest } from '../scripts/build-manifest.mjs';
+import { installFiles } from '../scripts/build-install.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
@@ -43,11 +44,12 @@ test('the sample/ folder is laid out like the data folder the screen reads', () 
   assert.ok(status.kins[settings.kinId].reading.outfit);
 });
 
-test('COMO-INSTALAR.md lists exactly the files Kindroid runs (the ones npm run pack packs)', () => {
+test('COMO-INSTALAR.md lists exactly the files Kindroid runs: what the run and the screen load, and nothing else in their folders', () => {
   const guide = readFileSync(join(root, 'COMO-INSTALAR.md'), 'utf8');
   const listed = guide.split('## Os ')[1].split('```')[1].trim().split('\n').map((l) => l.trim()).sort();
   const runs = spawnSync('git', ['ls-files', 'kin.json', 'package.json', 'main.js', 'run', 'src/core', 'screen', 'sample'], { cwd: root, encoding: 'utf8' }).stdout.trim().split('\n').sort();
   assert.deepEqual(listed, runs);
+  assert.deepEqual([...installFiles()].sort(), runs, 'the files followed from the imports are the files in the app\'s folders');
   assert.match(guide, new RegExp(`## Os ${runs.length} arquivos`));
 });
 

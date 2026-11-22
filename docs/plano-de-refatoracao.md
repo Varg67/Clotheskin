@@ -330,10 +330,20 @@ A refatoração partiu de `4b10472`. O app em produção (beta 1.1, `7afd8c7`) e
 - **Coincidências:** a outra linha também tinha removido o `parseOutfit` e desexportado as mesmas constantes que a Fase 2. Os dois lados chegaram ao mesmo resultado.
 - **Testes:** as suítes das duas linhas passam juntas (254 unitários, 12 de desempenho, 22 de navegador).
 
+### Fusão de consistência — **feita**
+
+Depois de várias conversas e linhas paralelas, o projeto foi alinhado para contar uma história só:
+
+- **Um jeito de instalar.** O `scripts/pack.mjs` (tarball que nunca foi usado) saiu. O `COMO-INSTALAR.md` agora é gerado por `scripts/build-install.mjs`: a lista dos 24 arquivos sai dos imports de `main.js` e de `screen/index.html`, e as mensagens são as do método que funcionou (perguntar o manifesto, seguir os imports, seguir a tela, copiar, reler a cópia, testar). `npm run install-prompt` imprime as mensagens com o commit e o tamanho e o SHA-256 de cada arquivo. A ideia do branch `claude/vigilant-gauss-fd2spi` (o pacote de mensagens com a tabela de conferência) entrou aqui.
+- **Conferir que a cópia veio inteira:** a última linha do `screen/app.js` é `// end of Clotheskin screen <versão>`, e o passo 5 pede essa linha.
+- **A versão Mini, abandonada,** não deixou mais rastros: as duas imagens dela em `prints/` saíram.
+- **Os textos batem com o código:** README (instalação, layout, o que cada início lê), o roteiro com o Kin real (instalar pelo `COMO-INSTALAR.md`).
+- **`CLAUDE.md`** guarda as regras para qualquer conversa nova: `main` é a fonte da verdade, um jeito de instalar, os arquivos gerados, as verificações antes de entregar, a língua de cada coisa.
+
 ### Fase 7 — Fechamento
 
-1. Atualizar a tabela de layout do `README.md` com os novos módulos. Trocar a seção "Send it to Kindroid" (`kin send`) pelo método real: `npm run install-prompt` e o envio dos links ao agente do Kindroid Apps (§2.2).
-2. Regras de complexidade e de cobertura viram bloqueantes no CI.
+1. ~~Atualizar o `README.md` e a instalação~~ (feito na fusão de consistência).
+2. Regras de complexidade e de cobertura viram bloqueantes no CI (pendente: não há CI).
 3. Rodar o roteiro com o Kin real (`docs/real-kin-test-script.md`) como teste de aceitação final.
 
 ---

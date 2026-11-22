@@ -1,16 +1,15 @@
 # Clotheskin: como instalar e atualizar no Kindroid
 
-## O jeito que funciona: o raw do GitHub
+Este arquivo é gerado por `npm run build` (`scripts/build-install.mjs`): não edite à mão. Versão do app: **0.6.0**.
 
-O agente do Workshop baixa cada arquivo direto do GitHub, exatamente como está. Assim ele não redigita nem "melhora" nada.
+## O jeito que funciona
 
-Endereço de cada arquivo:
+O agente do Workshop abre cada arquivo pelo endereço *raw* do GitHub, **um por vez**, no mesmo chat do Workshop, em etapas. A pasta local não fica acessível ao agente, e baixar o repositório inteiro dá 403.
 
-```
-https://raw.githubusercontent.com/Varg67/Clotheskin/<branch>/<arquivo>
-```
+O endereço aponta para um **commit**, não para um branch: assim o agente pega o motor, a tela e o manifesto da mesma versão, sem cache velho do GitHub.
 
-Troque `<branch>` pelo branch da versão que você quer (hoje, `claude/pensive-noether-c7dwbw`).
+- **Mensagens prontas, com o commit preenchido:** depois do push, rode `npm run install-prompt` (ou peça ao Claude para rodar). Ele imprime as mensagens abaixo com o commit, as respostas esperadas e o tamanho e o SHA-256 de cada arquivo.
+- **À mão:** troque `<commit>` pelo hash completo do commit em cada mensagem.
 
 ## Os 24 arquivos que o Kindroid usa
 
@@ -32,37 +31,92 @@ src/core/state.js
 src/core/text.js
 src/core/time.js
 src/core/vocabulary.js
-screen/index.html
 screen/app.js
+screen/assets/icon.svg
+screen/index.html
 screen/styles.css
 screen/theme.css
-screen/assets/icon.svg
 sample/settings.json
 sample/status.json
 ```
 
-O resto do repositório (`tests/`, `dev/`, `scripts/`, `docs/`, `prints/`) é só para desenvolver e testar: o Kindroid não precisa.
+O resto do repositório (`tests/`, `dev/`, `scripts/`, `docs/`, `tools/`, `prints/`) é só para desenvolver e testar: o Kindroid não precisa. **Para atualizar, mande sempre os 24 juntos**: eles dependem uns dos outros, e uma mistura de arquivos novos e velhos pode quebrar o app.
 
-## Mensagem para o agente
+## As mensagens para o agente, em ordem
+
+### 1. Conferir que ele lê o manifesto (sem dar a resposta no prompt)
 
 ```
-Update the Clotheskin app from GitHub. For each file below, download it from
-https://raw.githubusercontent.com/Varg67/Clotheskin/<branch>/<file>
-and save it at the same path, exactly as downloaded. Do not rewrite, shorten
-or "improve" anything. Then tell me if anything was rejected, with the exact error.
-
-(cole aqui a lista dos arquivos)
+Open this raw GitHub file: https://raw.githubusercontent.com/Varg67/Clotheskin/<commit>/kin.json. What are the exact values of run.timeout and triggers[0].cron? Only inspect the file for now.
 ```
 
-**Para atualizar, mande sempre os 24 arquivos juntos.** Eles dependem uns dos outros, e uma mistura de arquivos novos e velhos pode quebrar o app.
+**Resposta certa:** `2m` e `*/15 * * * *` (e o run entry `node main.js`). Outra resposta: ele está lendo outra coisa, talvez uma cópia antiga que já está no Workshop.
 
-**Para conferir a versão:** na tela, abra **Settings**. No fim aparece "Clotheskin 0.6.0". Se só uma parte foi atualizada, a tela mostra um aviso amarelo no topo: *"Some of Clotheskin's files are from another update… Update all the files together."*
+### 2. Seguir o motor pelos imports
 
-## Depois de instalar
+```
+Starting from the same raw GitHub revision, open main.js and follow its local imports. Which file and function handle a manual status update? List the files you successfully opened.
+```
+
+**Resposta certa:** a função `onAction` em `run/program.js`, e os 15 arquivos: `main.js`, `run/kin.js`, `run/program.js`, `src/core/constants.js`, `src/core/format.js`, `src/core/json.js`, `src/core/outfit.js`, `src/core/phrases.js`, `src/core/prompt.js`, `src/core/schedule.js`, `src/core/sleep.js`, `src/core/state.js`, `src/core/text.js`, `src/core/time.js`, `src/core/vocabulary.js`.
+
+### 3. Seguir a tela
+
+```
+Open screen/index.html from the same revision and follow its local scripts, stylesheets, and assets. Trace the Update status button. Which file handles the click, and what action and payload does it send to Kindroid?
+```
+
+**Resposta certa:** `screen/app.js`; a ação `update_status` com `{ kin: <id do Kin>, op: "read" }`.
+
+### 4. Copiar para o projeto do Workshop
+
+```
+Copy the existing Clotheskin app from the verified raw GitHub revision into the current Workshop project. Copy exactly these 24 files, each from https://raw.githubusercontent.com/Varg67/Clotheskin/<commit>/<path>, saved at the same path, exactly as downloaded: do not rewrite, shorten or "improve" anything. Keep kin.json at the project root.
+
+kin.json
+package.json
+main.js
+run/kin.js
+run/program.js
+src/core/constants.js
+src/core/format.js
+src/core/json.js
+src/core/outfit.js
+src/core/phrases.js
+src/core/prompt.js
+src/core/schedule.js
+src/core/sleep.js
+src/core/state.js
+src/core/text.js
+src/core/time.js
+src/core/vocabulary.js
+screen/app.js
+screen/assets/icon.svg
+screen/index.html
+screen/styles.css
+screen/theme.css
+sample/settings.json
+sample/status.json
+
+Apply the files now. If a file fails to copy, report its path and the exact error.
+```
+
+**Resposta certa:** que copiou os arquivos, ou o caminho e o erro exato de cada um que falhou.
+
+### 5. Conferir a cópia, relendo do projeto do Workshop (não do GitHub)
+
+```
+Now reopen these files from the Workshop project, not from GitHub, and report: the run entry, screen entry and schedule in kin.json; the value of APP_VERSION in src/core/constants.js; and the exact last line of screen/app.js. Then open the screen in Workshop preview.
+```
+
+**Resposta certa:** `node main.js`, `screen/index.html`, `*/15 * * * *`; `APP_VERSION` = `0.6.0`; última linha `// end of Clotheskin screen 0.6.0`. Outra última linha: o `screen/app.js` foi cortado na cópia (repita o passo 4 só com ele).
+
+### 6. Testar dentro do Kindroid
 
 1. Apps → **Waiting for you** → **Allow** (o app lê o chat, por isso espera a sua permissão).
 2. Configurações do app → **Kins** → marque os Kins.
-3. Abra a tela, escolha o Kin do roleplay, aperte **Update status** e depois **Start**.
+3. Abra a tela, escolha o Kin do roleplay e aperte **Update status**. Em **Settings**, no fim, aparece "Clotheskin 0.6.0". Se só uma parte foi atualizada, a tela mostra um aviso amarelo no topo: *"Some of Clotheskin's files are from another update… Update all the files together."*
+4. A automação merece um teste próprio: aperte **Start** e deixe chegar uma leitura programada, sem apertar o botão.
 
 ## O log do Workshop
 

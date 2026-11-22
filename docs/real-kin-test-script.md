@@ -5,7 +5,7 @@ Este arquivo é gerado por `node scripts/build-test-script.mjs`. As frases "O ca
 ## Antes de começar
 
 1. **Ensaio sem tocar em nada real** (opcional, 1 minuto): `curl -fsSO https://downloads.kinusercontent.com/workshop/kin.mjs` e `npm run try`. Isso roda a execução de verdade com o `kin` oficial em modo simulação (`KIN_MOCK`) e lista cada chamada.
-2. Envie o app: `node kin.mjs send .` (passos no README). No Kindroid, em **Apps → Waiting for you**, clique em **Allow**.
+2. Instale o app pelo `COMO-INSTALAR.md` (as mensagens para o agente do Workshop, com o commit desta versão: `npm run install-prompt`). No Kindroid, em **Apps → Waiting for you**, clique em **Allow**.
 3. Nas configurações do app, em **Kins**, marque o Kin do teste (de preferência um que você conheça bem).
 4. Abra o app e escolha o Kin. Em cada passo: escreva a fala no chat, deixe o Kin responder, aperte **Update status** e compare.
 5. Anote tudo na tabela do final: cole a resposta do Kin (se aparecer) e as frases do cartão.

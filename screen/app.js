@@ -1544,3 +1544,4 @@ return { dreamOptions, renderSettings };
 
 __req("src/screen/main.js").boot();
 })();
+// end of Clotheskin screen 0.6.0

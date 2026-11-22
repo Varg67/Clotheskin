@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { describeOutfit, joinNatural, parseReading, describeReading } from '../src/core/outfit.js';
+import { describeOutfit, parseReading, describeReading } from '../src/core/outfit.js';
+import { joinNatural } from '../src/core/text.js';
 import { normalizeSlot } from '../src/core/vocabulary.js';
 import { DEMO_SCENES } from '../dev/scenes.js';
 

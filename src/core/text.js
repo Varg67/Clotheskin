@@ -37,3 +37,9 @@ export const trimEndPunctuation = (s) => s.replace(/[.;,!?\s]+$/, '');
 
 /** Drops what a model wraps a value in: markdown emphasis, quotes and brackets ("**'in the kitchen'**"). */
 export const stripWrapping = (s) => s.replace(/^[\s*_"'“”‘’()[\]]+/, '').replace(/[\s*_"'“”‘’()[\]]+$/, '');
+
+/** "a" / "a and b" / "a, b and c". */
+export function joinNatural(list) {
+  if (list.length <= 1) return list.join('');
+  return `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
+}

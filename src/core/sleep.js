@@ -34,16 +34,19 @@ export function parseClockTime(v) {
   if (/^\d{4}$/.test(s)) return parseClockTime(`${s.slice(0, 2)}:${s.slice(2)}`); // "0730" (military style)
   const m = s.match(/^(\d{1,2})(?:\s*[:.h]\s*(\d{2})(?::\d{2})?)?\s*(a\.?m\.?|p\.?m\.?)?$/);
   if (!m) return null;
-  let h = Number(m[1]);
-  const min = m[2] === undefined ? 0 : Number(m[2]);
-  const ampm = m[3]?.[0];
+  const [, hour, minutes, suffix] = m;
+  const min = minutes === undefined ? 0 : Number(minutes);
   if (min > 59) return null;
-  if (ampm) {
-    if (h < 1 || h > 12) return null;
-    h = (h % 12) + (ampm === 'p' ? 12 : 0);
-  } else if (m[2] === undefined || h > 23) return null; // a bare "7" is not a time
-  return { h, m: min };
+  if (suffix) {
+    const h = from12h(Number(hour), suffix[0]);
+    return h === null ? null : { h, m: min };
+  }
+  if (minutes === undefined || Number(hour) > 23) return null; // a bare "7" is not a time
+  return { h: Number(hour), m: min };
 }
+
+/** An hour of a 12-hour clock ("7 pm": 7, 'p') as 0-23, or null when it is not on that clock. */
+const from12h = (h, ampm) => (h < 1 || h > 12 ? null : (h % 12) + (ampm === 'p' ? 12 : 0));
 
 /**
  * From the Kin's wake-up time (on the person's clock, zone `tz`) to a plan: { wakeAt, until } (until = when the dream question is asked), or null when
@@ -67,10 +70,9 @@ const falsy = (v) => v === false || /^(false|no|n|awake|not sleeping)$/i.test(St
  */
 /** @returns {{ ok: true, sleeping: boolean, wakeAt: string|null } | Failure} */
 export function parseSleepAnswer(text) {
-  const p = parseJsonObject(text);
+  const p = parseAnswerObject(text);
   if (p.ok === false) return p;
   const o = p.value;
-  if (!o || typeof o !== 'object' || Array.isArray(o)) return { ok: false, error: 'The answer must be a JSON object.' };
   const key = Object.keys(o).find((k) => /^(sleeping|asleep|is_?sleeping)$/i.test(k));
   if (!key) return { ok: false, error: 'The answer does not say whether the Kin is asleep.' };
   if (falsy(o[key])) return { ok: true, sleeping: false, wakeAt: null };
@@ -87,20 +89,33 @@ const NO_DREAM = /^(none|nothing|no dream|n\/?a|unknown|-+)?$/i;
 
 /** @typedef {{ ok?: true, dream: string|null, remembered: string }} Dream */
 
-/** The answer to the dream question: {"dream":"…","remembered":"all|most|some|little|nothing"}. */
-/** @returns {Dream | Failure} */
+/**
+ * The answer to the dream question: {"dream":"…","remembered":"all|most|some|little|nothing"}.
+ * @returns {Dream | Failure}
+ */
 export function parseDreamAnswer(text) {
+  const p = parseAnswerObject(text);
+  if (p.ok === false) return p;
+  const { dream, remembered } = dreamFields(p.value);
+  if (typeof dream !== 'string') return { ok: false, error: '"dream" must be a text.' };
+  const summary = cleanString(dream, 240).replace(/^["“]|["”]$/g, '');
+  if (NO_DREAM.test(summary)) return { ok: true, dream: null, remembered: 'nothing' };
+  return { ok: true, dream: summary, remembered: REMEMBERED.includes(remembered) ? remembered : 'some' };
+}
+
+/** The dream and how much of it is remembered, under the keys a Kin uses for them. */
+const dreamFields = (o) => ({ dream: o.dream ?? o.summary ?? '', remembered: String(o.remembered ?? o.remember ?? '').trim().toLowerCase() });
+
+/**
+ * A follow-up answer (sleep or dream) as a JSON object.
+ * @returns {{ ok: true, value: Object<string, any> } | Failure}
+ */
+function parseAnswerObject(text) {
   const p = parseJsonObject(text);
   if (p.ok === false) return p;
   const o = p.value;
   if (!o || typeof o !== 'object' || Array.isArray(o)) return { ok: false, error: 'The answer must be a JSON object.' };
-  const dream = o.dream ?? o.summary ?? '';
-  if (typeof dream !== 'string') return { ok: false, error: '"dream" must be a text.' };
-  const rememberedRaw = String(o.remembered ?? o.remember ?? '').trim().toLowerCase();
-  const remembered = REMEMBERED.includes(rememberedRaw) ? rememberedRaw : null;
-  const summary = cleanString(dream, 240).replace(/^["“]|["”]$/g, '');
-  if (NO_DREAM.test(summary)) return { ok: true, dream: null, remembered: 'nothing' };
-  return { ok: true, dream: summary, remembered: remembered ?? 'some' };
+  return { ok: true, value: o };
 }
 
 /**

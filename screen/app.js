@@ -81,30 +81,48 @@ function parseJsonObject(text) {
   // The questions ask for one line of JSON (a few hundred characters). A longer answer is still read if it is strict
   // JSON (one linear parse), but it is not searched and repaired: every {...} in it would be one more parse. It is
   // refused without quoting it.
-  if (raw.length > MAX_ANSWER_CHARS) {
-    try { return unwrap(JSON.parse(raw), false); } catch { return { ok: false, error: `The answer is too long to be read (${raw.length} characters).` }; }
-  }
+  if (raw.length > MAX_ANSWER_CHARS) return strictOnly(raw);
+  const candidates = candidatesIn(raw);
+  const parsed = firstParsed(candidates, (c) => [c], false) || firstParsed(candidates, repairs, true);
+  if (parsed) return parsed;
+  const first = raw.indexOf('{');
+  if (first !== -1 && !balancedObjects(raw.slice(first)).length) return { ok: false, error: 'The answer was cut off before the end, so it is not valid JSON.' };
+  // Not the parser's message: it quotes the answer, and the answer is the scene (it would reach logs and status.json).
+  return { ok: false, error: 'The answer is not valid JSON.' };
+}
+
+/** @returns {Parsed | Failure} */
+function strictOnly(raw) {
+  try { return unwrap(JSON.parse(raw), false); } catch { return { ok: false, error: `The answer is too long to be read (${raw.length} characters).` }; }
+}
+
+/** Where the object may be: the whole text, a code fence, every balanced {...} (the last first: when the example is
+ * echoed, the real answer comes after it), and the span from the first { to the last }. */
+function candidatesIn(raw) {
   const candidates = [raw];
   const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fence) candidates.push(fence[1].trim());
-  // Every balanced {...} in the text, the last first: when the example is echoed, the real answer comes after it.
   candidates.push(...balancedObjects(raw).reverse());
   const first = raw.indexOf('{');
   const last = raw.lastIndexOf('}');
   if (first !== -1 && last > first) candidates.push(raw.slice(first, last + 1));
+  return candidates;
+}
 
+/** The repaired versions of a candidate, in the order they are tried. */
+function repairs(candidate) {
+  const loose = normalizeLoose(candidate);
+  return [loose, loose.replace(/[“”]/g, '"')];
+}
+
+/** The first candidate (or version of it) that parses, or null. */
+function firstParsed(candidates, versionsOf, repaired) {
   for (const c of candidates) {
-    try { return unwrap(JSON.parse(c), false); } catch { /* try the next candidate */ }
-  }
-  for (const c of candidates) {
-    const loose = normalizeLoose(c);
-    for (const attempt of [loose, loose.replace(/[“”]/g, '"')]) {
-      try { return unwrap(JSON.parse(attempt), true); } catch { /* try the next repair */ }
+    for (const v of versionsOf(c)) {
+      try { return unwrap(JSON.parse(v), repaired); } catch { /* try the next one */ }
     }
   }
-  if (first !== -1 && !balancedObjects(raw.slice(first)).length) return { ok: false, error: 'The answer was cut off before the end, so it is not valid JSON.' };
-  // Not the parser's message: it quotes the answer, and the answer is the scene (it would reach logs and status.json).
-  return { ok: false, error: 'The answer is not valid JSON.' };
+  return null;
 }
 
 /**
@@ -118,6 +136,10 @@ function unwrap(value, repaired) {
   return repaired ? { ok: true, value, repaired: true } : { ok: true, value };
 }
 
+// An apostrophe inside narration ("it's") is not a quote: quotes only count inside an object, and a single quote only
+// where a value or key can start.
+const opensQuote = (text, i, depth) => depth > 0 && (text[i] === '"' || (text[i] === "'" && /[\s{[,:]/.test(text[i - 1] || ' ')));
+
 /** The top-level {...} spans of a text, aware of quoted strings (both quote styles). */
 function balancedObjects(text) {
   const out = [];
@@ -129,13 +151,71 @@ function balancedObjects(text) {
       else if (c === quote) quote = null;
       continue;
     }
-    // An apostrophe inside narration ("it's") is not a quote: only count quotes once inside an object.
-    if ((c === '"' || (c === "'" && depth > 0 && /[\s{[,:]/.test(text[i - 1] || ' '))) && depth > 0) { quote = c; continue; }
+    if (opensQuote(text, i, depth)) { quote = c; continue; }
     if (c === '{') { if (depth === 0) start = i; depth += 1; }
     else if (c === '}' && depth > 0) { depth -= 1; if (depth === 0) out.push(text.slice(start, i + 1)); }
   }
   return out;
 }
+
+// ---- loose JSON to strict JSON. Each reader looks at position i of the text: it returns null when what is there is
+// not its kind, or { out, end }: what goes into the strict JSON and the index of the last character it read.
+const DOUBLE_QUOTES = new Set(['"', '“', '”']);
+const BARE_KEY = /([A-Za-z_\u00C0-\u024F][\wÀ-ɏ -]*?)\s*:/y; // letters up to a colon, read where the key starts
+const BARE_WORD = /[A-Za-z]+/y;
+const PYTHON = { True: 'true', False: 'false', None: 'null' };
+
+/** "a string" (straight or curly quotes) is copied as it is, with straight quotes. */
+function doubleQuoted(text, i) {
+  if (!DOUBLE_QUOTES.has(text[i])) return null;
+  let j = i + 1;
+  while (j < text.length && !DOUBLE_QUOTES.has(text[j])) j += text[j] === '\\' ? 2 : 1;
+  return { out: `"${text.slice(i + 1, j)}"`, end: j };
+}
+
+/** 'a string' -> "a string" (an escaped \' becomes ', a " inside is escaped). */
+function singleQuoted(text, i) {
+  if (text[i] !== "'") return null;
+  let j = i + 1; let s = '';
+  while (j < text.length && text[j] !== "'") {
+    if (text[j] === '\\' && text[j + 1] === "'") { s += "'"; j += 2; continue; }
+    s += text[j] === '"' ? '\\"' : text[j];
+    j += 1;
+  }
+  return { out: `"${s}"`, end: j };
+}
+
+/** A // comment is dropped up to the end of its line (the line break stays). */
+function lineComment(text, i) {
+  if (text[i] !== '/' || text[i + 1] !== '/') return null;
+  const end = text.indexOf('\n', i);
+  return { out: '\n', end: end === -1 ? text.length : end };
+}
+
+/** A block comment is dropped. */
+function blockComment(text, i) {
+  if (text[i] !== '/' || text[i + 1] !== '*') return null;
+  const end = text.indexOf('*/', i + 2);
+  return { out: '', end: end === -1 ? text.length : end + 1 };
+}
+
+/** A bare key after { or , gets its quotes ({location: …} -> {"location": …}). */
+function bareKey(text, i, out) {
+  if (!/[A-Za-z_\u00C0-\u024F]/.test(text[i]) || !/[{,]$/.test(out.trimEnd())) return null;
+  BARE_KEY.lastIndex = i;
+  const m = BARE_KEY.exec(text);
+  return m ? { out: `"${m[1]}":`, end: i + m[0].length - 1 } : { out: text[i], end: i };
+}
+
+/** A bare word in a value: Python's True, False and None become JSON; any other word is copied. */
+function bareWord(text, i) {
+  if (!/[A-Za-z]/.test(text[i])) return null;
+  BARE_WORD.lastIndex = i;
+  const w = BARE_WORD.exec(text)[0];
+  return { out: PYTHON[w] ?? w, end: i + w.length - 1 };
+}
+
+const READERS = [doubleQuoted, singleQuoted, lineComment, blockComment, bareKey, bareWord];
 
 /**
  * Loose JSON to strict JSON, outside strings only: drops // and /* *\/ comments and trailing commas, turns
@@ -144,36 +224,9 @@ function balancedObjects(text) {
 function normalizeLoose(text) {
   let out = '';
   for (let i = 0; i < text.length; i += 1) {
-    const c = text[i];
-    if (c === '"' || c === '“' || c === '”') { // copy a double-quoted string as it is
-      let j = i + 1;
-      while (j < text.length && text[j] !== '"' && text[j] !== '”' && text[j] !== '“') j += text[j] === '\\' ? 2 : 1;
-      out += `"${text.slice(i + 1, j)}"`;
-      i = j;
-    } else if (c === "'") { // 'single' -> "double"
-      let j = i + 1; let s = '';
-      while (j < text.length && text[j] !== "'") {
-        if (text[j] === '\\' && text[j + 1] === "'") { s += "'"; j += 2; continue; }
-        if (text[j] === '"') s += '\\"'; else s += text[j];
-        j += 1;
-      }
-      out += `"${s}"`;
-      i = j;
-    } else if (c === '/' && text[i + 1] === '/') {
-      while (i < text.length && text[i] !== '\n') i += 1;
-      out += '\n';
-    } else if (c === '/' && text[i + 1] === '*') {
-      const end = text.indexOf('*/', i + 2);
-      i = end === -1 ? text.length : end + 1;
-    } else if (/[A-Za-z_\u00C0-\u024F]/.test(c) && /[{,]$/.test(out.trimEnd())) {
-      // a bare key: letters up to a colon
-      const m = text.slice(i).match(/^([A-Za-z_\u00C0-\u024F][\wÀ-ɏ -]*?)\s*:/);
-      if (m) { out += `"${m[1]}":`; i += m[0].length - 1; } else out += c;
-    } else if (/[A-Za-z]/.test(c)) { // a bare word in value position
-      const w = text.slice(i).match(/^[A-Za-z]+/)[0];
-      out += { True: 'true', False: 'false', None: 'null' }[w] ?? w;
-      i += w.length - 1;
-    } else out += c;
+    let read = null;
+    for (const reader of READERS) if ((read = reader(text, i, out))) break;
+    if (read) { out += read.out; i = read.end; } else out += text[i];
   }
   return out.replace(/,(\s*[}\]])/g, '$1');
 }
@@ -302,16 +355,19 @@ function parseClockTime(v) {
   if (/^\d{4}$/.test(s)) return parseClockTime(`${s.slice(0, 2)}:${s.slice(2)}`); // "0730" (military style)
   const m = s.match(/^(\d{1,2})(?:\s*[:.h]\s*(\d{2})(?::\d{2})?)?\s*(a\.?m\.?|p\.?m\.?)?$/);
   if (!m) return null;
-  let h = Number(m[1]);
-  const min = m[2] === undefined ? 0 : Number(m[2]);
-  const ampm = m[3]?.[0];
+  const [, hour, minutes, suffix] = m;
+  const min = minutes === undefined ? 0 : Number(minutes);
   if (min > 59) return null;
-  if (ampm) {
-    if (h < 1 || h > 12) return null;
-    h = (h % 12) + (ampm === 'p' ? 12 : 0);
-  } else if (m[2] === undefined || h > 23) return null; // a bare "7" is not a time
-  return { h, m: min };
+  if (suffix) {
+    const h = from12h(Number(hour), suffix[0]);
+    return h === null ? null : { h, m: min };
+  }
+  if (minutes === undefined || Number(hour) > 23) return null; // a bare "7" is not a time
+  return { h: Number(hour), m: min };
 }
+
+/** An hour of a 12-hour clock ("7 pm": 7, 'p') as 0-23, or null when it is not on that clock. */
+const from12h = (h, ampm) => (h < 1 || h > 12 ? null : (h % 12) + (ampm === 'p' ? 12 : 0));
 
 /**
  * From the Kin's wake-up time (on the person's clock, zone `tz`) to a plan: { wakeAt, until } (until = when the dream question is asked), or null when
@@ -335,10 +391,9 @@ const falsy = (v) => v === false || /^(false|no|n|awake|not sleeping)$/i.test(St
  */
 /** @returns {{ ok: true, sleeping: boolean, wakeAt: string|null } | Failure} */
 function parseSleepAnswer(text) {
-  const p = parseJsonObject(text);
+  const p = parseAnswerObject(text);
   if (p.ok === false) return p;
   const o = p.value;
-  if (!o || typeof o !== 'object' || Array.isArray(o)) return { ok: false, error: 'The answer must be a JSON object.' };
   const key = Object.keys(o).find((k) => /^(sleeping|asleep|is_?sleeping)$/i.test(k));
   if (!key) return { ok: false, error: 'The answer does not say whether the Kin is asleep.' };
   if (falsy(o[key])) return { ok: true, sleeping: false, wakeAt: null };
@@ -355,20 +410,33 @@ const NO_DREAM = /^(none|nothing|no dream|n\/?a|unknown|-+)?$/i;
 
 /** @typedef {{ ok?: true, dream: string|null, remembered: string }} Dream */
 
-/** The answer to the dream question: {"dream":"…","remembered":"all|most|some|little|nothing"}. */
-/** @returns {Dream | Failure} */
+/**
+ * The answer to the dream question: {"dream":"…","remembered":"all|most|some|little|nothing"}.
+ * @returns {Dream | Failure}
+ */
 function parseDreamAnswer(text) {
+  const p = parseAnswerObject(text);
+  if (p.ok === false) return p;
+  const { dream, remembered } = dreamFields(p.value);
+  if (typeof dream !== 'string') return { ok: false, error: '"dream" must be a text.' };
+  const summary = cleanString(dream, 240).replace(/^["“]|["”]$/g, '');
+  if (NO_DREAM.test(summary)) return { ok: true, dream: null, remembered: 'nothing' };
+  return { ok: true, dream: summary, remembered: REMEMBERED.includes(remembered) ? remembered : 'some' };
+}
+
+/** The dream and how much of it is remembered, under the keys a Kin uses for them. */
+const dreamFields = (o) => ({ dream: o.dream ?? o.summary ?? '', remembered: String(o.remembered ?? o.remember ?? '').trim().toLowerCase() });
+
+/**
+ * A follow-up answer (sleep or dream) as a JSON object.
+ * @returns {{ ok: true, value: Object<string, any> } | Failure}
+ */
+function parseAnswerObject(text) {
   const p = parseJsonObject(text);
   if (p.ok === false) return p;
   const o = p.value;
   if (!o || typeof o !== 'object' || Array.isArray(o)) return { ok: false, error: 'The answer must be a JSON object.' };
-  const dream = o.dream ?? o.summary ?? '';
-  if (typeof dream !== 'string') return { ok: false, error: '"dream" must be a text.' };
-  const rememberedRaw = String(o.remembered ?? o.remember ?? '').trim().toLowerCase();
-  const remembered = REMEMBERED.includes(rememberedRaw) ? rememberedRaw : null;
-  const summary = cleanString(dream, 240).replace(/^["“]|["”]$/g, '');
-  if (NO_DREAM.test(summary)) return { ok: true, dream: null, remembered: 'nothing' };
-  return { ok: true, dream: summary, remembered: remembered ?? 'some' };
+  return { ok: true, value: o };
 }
 
 /**
@@ -632,7 +700,13 @@ const trimEndPunctuation = (s) => s.replace(/[.;,!?\s]+$/, '');
 
 /** Drops what a model wraps a value in: markdown emphasis, quotes and brackets ("**'in the kitchen'**"). */
 const stripWrapping = (s) => s.replace(/^[\s*_"'“”‘’()[\]]+/, '').replace(/[\s*_"'“”‘’()[\]]+$/, '');
-return { capitalizeFirst, cleanString, oneLine, toSentence, clipWords, trimEndPunctuation, stripWrapping };
+
+/** "a" / "a and b" / "a, b and c". */
+function joinNatural(list) {
+  if (list.length <= 1) return list.join('');
+  return `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
+}
+return { capitalizeFirst, cleanString, oneLine, toSentence, clipWords, trimEndPunctuation, stripWrapping, joinNatural };
 });
 
 __def("src/core/time.js", function () {

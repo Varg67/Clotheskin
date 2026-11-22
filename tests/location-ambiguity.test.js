@@ -2,7 +2,8 @@
 // (parseReading -> describeReading, and the whole run) and we check what the card would say.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseReading, describeReading, describeLocation, cleanLocation } from '../src/core/outfit.js';
+import { parseReading, describeReading } from '../src/core/outfit.js';
+import { describeLocation, cleanLocation } from '../src/core/phrases.js';
 import { OUTFIT_PROMPT, buildOutfitPrompt } from '../src/core/prompt.js';
 import { runProgram } from '../run/program.js';
 import { ACTION } from '../src/core/state.js';

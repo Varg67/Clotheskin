@@ -1,7 +1,8 @@
 // Ambiguity tests for pose + action: plausible WRONG answers from the Kin go through the real pipeline.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseReading, describeReading, describeDoing, cleanPose, cleanAction } from '../src/core/outfit.js';
+import { parseReading, describeReading } from '../src/core/outfit.js';
+import { describeDoing, cleanPose, cleanAction } from '../src/core/phrases.js';
 import { poseIcon } from '../src/screen/icons.js';
 import { OUTFIT_PROMPT, buildOutfitPrompt } from '../src/core/prompt.js';
 import { runProgram } from '../run/program.js';

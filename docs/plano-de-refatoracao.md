@@ -189,7 +189,13 @@ Resultado: B1–B5 corrigidos, cada um com teste de regressão ativo; `npm run c
 | 1.8 | Datas: trocar aritmética de `Date` por `getTime()` (`sleep.js:55`, `app.js:212`) e validar `Date` inválida nos pontos de entrada (`isDue`, `plannedAt`, `startDueFor` com `retryAt` corrompido já normalizado, mas sem garantia de tipo). |
 | 1.9 (**B5**) | Corrigir o comentário de `sleep.js:10`. |
 
-### Fase 2 — Limpeza (código morto, imports órfãos, superfície da API)
+### Fase 2 — Limpeza (código morto, imports órfãos, superfície da API) — **feita**
+
+Resultado: os 6 itens abaixo feitos; `npm run check` com `unused-exports` e regras de código morto do lint como **erro** (testei: um export sem uso e uma variável sem uso plantados são barrados). Lint: 0 erros, 20 avisos (todos de tamanho e complexidade, Fase 4). O que saiu diferente:
+- O detector achou dois exports a mais que o levantamento manual (`append` em `src/screen/dom.js`, além da lista do §1.3) e entende `await import(...)`, por isso não acusou `createAppServer`, que o e2e usa.
+- **`KinError`:** ficou interna (não exportada). O `kin.get` continua distinguindo o 404 por `e.code` numérico, que diz se o `kin` chegou a rodar; um `instanceof` não substituiria isso.
+- Também saiu uma regra de CSS órfã (`.auto-note`, sem uso desde `88d6e03`). O CSS vai para o Kindroid, então conta como código morto.
+- Os comentários sobre o limite do `kin end` agora dizem que o guia aceita 4.000 caracteres e que 500 é uma escolha nossa.
 
 1. Remover imports/variáveis não usados dos testes (§1.3).
 2. Remover `parseOutfit` depois de migrar seus testes para `parseReading`.

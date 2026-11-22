@@ -181,8 +181,15 @@ export function cleanLocation(v) {
  * "in the kitchen" -> "In the kitchen." Only a bare noun phrase is adjusted: articles and proper names get "in",
  * "home" gets "at"; any other bare word, and anything Portuguese, is shown as written.
  */
+/** What a sentence says when the Kin's answer said nothing about it: such a sentence is never carried over. */
+export const NOT_DESCRIBED = Object.freeze({
+  location: 'No location described in the recent chat.',
+  doing: 'No pose or action described in the recent chat.',
+  outfit: 'No outfit described in the recent chat.',
+});
+
 export function describeLocation(value) {
-  if (!value) return 'No location described in the recent chat.';
+  if (!value) return NOT_DESCRIBED.location;
   const v = value.trim();
   let phrase = v;
   if (STARTS_PLACE.test(v) || STARTS_PORTUGUESE.test(v)) phrase = v;
@@ -229,7 +236,7 @@ export function describeDoing({ pose, action } = {}) {
   const parts = [];
   if (pose) parts.push(pose);
   if (action && !(pose && pose.toLowerCase().includes(action.toLowerCase()))) parts.push(action);
-  if (!parts.length) return 'No pose or action described in the recent chat.';
+  if (!parts.length) return NOT_DESCRIBED.doing;
   const text = parts.join(', ');
   return capitalizeFirst(text.endsWith('…') ? text : `${text}.`);
 }
@@ -342,7 +349,7 @@ export function describeOutfit(outfit) {
   let clothing = inOrder(outfit, CLOTHING_ORDER);
   const accessories = inOrder(outfit, ACCESSORY_ORDER);
   if (!clothing.length) clothing = inOrder(outfit, UNDERWEAR_ORDER);
-  if (!clothing.length && !accessories.length) return 'No outfit described in the recent chat.';
+  if (!clothing.length && !accessories.length) return NOT_DESCRIBED.outfit;
   if (!clothing.length) return `Accessories: ${joinNatural(accessories)}.`;
   const text = `Wearing ${joinNatural(clothing)}${accessories.length ? `, with ${joinNatural(accessories)}` : ''}.`;
   return capitalizeFirst(text);

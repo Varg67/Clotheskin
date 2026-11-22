@@ -184,11 +184,15 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
       h('p', { class: 'help' }, 'Only the selected Kin is read. To attach or detach a Kin, open Clotheskin’s settings in Kindroid Apps and use Kins.'));
   }
 
-  function fact(iconName, label, testid, value, empty) {
+  // `seen`: for a sentence kept from an earlier reading (the Kin said nothing new about it), when it was last seen.
+  function fact(iconName, label, testid, value, empty, seen) {
     return h('div', { class: `fact${value ? '' : ' empty'}` },
       h('span', { class: 'row-icon' }, icon(iconName, { size: 24 })),
-      h('span', { class: 'fact-text' }, h('span', { class: 'row-label' }, label), h('span', { class: 'fact-value', 'data-testid': testid }, value || empty)));
+      h('span', { class: 'fact-text' },
+        h('span', { class: 'row-label' }, label, seen ? h('span', { class: 'seen', 'data-testid': `${testid}-seen` }, ` · seen ${seen}`) : null),
+        h('span', { class: 'fact-value', 'data-testid': testid }, value || empty)));
   }
+  const seenAt = (r, key, now) => (r && r.seen && r.seen[key] && r.seen[key] !== r.at ? formatClock(r.seen[key], { now }) : null);
 
   function renderCard() {
     const list = known();
@@ -223,11 +227,11 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
       h('div', { class: 'card-body' },
         h('h2', { class: 'section-title' }, 'Current status'),
         h('div', { class: 'facts' },
-          fact('pin', 'Location', 'location', r && r.location, 'No location read yet.'),
-          fact(r ? poseIcon(r.doing) : 'person', 'Pose and action', 'doing', r && r.doing, 'No pose or action read yet.'),
-          fact('hanger', 'Outfit', 'outfit', r && r.outfit, 'No outfit read yet. Press Update status.'),
-          r && r.hair ? fact(hairIcon(r.hair), 'Hair', 'hair', r.hair, '') : null,
-          r && r.makeup ? fact('makeup', 'Makeup', 'makeup', r.makeup, '') : null,
+          fact('pin', 'Location', 'location', r && r.location, 'No location read yet.', seenAt(r, 'location', now)),
+          fact(r ? poseIcon(r.doing) : 'person', 'Pose and action', 'doing', r && r.doing, 'No pose or action read yet.', seenAt(r, 'doing', now)),
+          fact('hanger', 'Outfit', 'outfit', r && r.outfit, 'No outfit read yet. Press Update status.', seenAt(r, 'outfit', now)),
+          r && r.hair ? fact(hairIcon(r.hair), 'Hair', 'hair', r.hair, '', seenAt(r, 'hair', now)) : null,
+          r && r.makeup ? fact('makeup', 'Makeup', 'makeup', r.makeup, '', seenAt(r, 'makeup', now)) : null,
           dream ? fact('moon', 'Last dream', 'dream', describeDream(dream), '') : null),
         h('button', { type: 'button', class: 'btn primary block', 'data-key': 'update', 'aria-busy': String(Boolean(busy)), onClick: () => update('read') },
           busy ? [spinner(), busy === 'wake' ? 'Asking about the dream…' : 'Reading…'] : [icon('refresh', { size: 18 }), 'Update status']),

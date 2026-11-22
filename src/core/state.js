@@ -9,6 +9,7 @@ import { snapInterval, DEFAULT_INTERVAL_S, ERRORS_BEFORE_WARNING } from './sched
 import { safeTimeZone } from './time.js';
 import { REMEMBERED, DREAM_TTL_HOURS } from './sleep.js';
 import { oneLine } from './text.js';
+import { NOT_DESCRIBED } from './outfit.js';
 
 export const SETTINGS_FILE = 'settings.json';
 export const STATUS_FILE = 'status.json';
@@ -55,10 +56,30 @@ export function normalizeSettings(raw) {
   };
 }
 
+/** The sentences of a reading, each kept until the Kin says something new about it. */
+export const READING_FIELDS = ['location', 'doing', 'outfit', 'hair', 'makeup'];
+const seenOf = (o) => Object.fromEntries(READING_FIELDS.filter((k) => o && iso(o[k])).map((k) => [k, iso(o[k])]));
+const said = (k, v) => typeof v === 'string' && v.trim() !== '' && v !== NOT_DESCRIBED[k];
+
+/**
+ * The new reading on top of the last one: what the Kin's answer said nothing about (no outfit in the recent chat,
+ * say) keeps the last known sentence, with the time it was last seen (`seen`), instead of an empty card. Only the
+ * Kin saying something new about it replaces it.
+ */
+export function carryOver(fresh, prev, now) {
+  const at = now.toISOString();
+  const r = { ...fresh, at, seen: {} };
+  for (const k of READING_FIELDS) {
+    if (said(k, fresh[k])) r.seen[k] = at;
+    else if (prev && said(k, prev[k])) { r[k] = prev[k]; r.seen[k] = (prev.seen && prev.seen[k]) || prev.at || at; }
+  }
+  return r;
+}
+
 /** One Kin's entry in status.json, complete and valid. */
 export function normalizeEntry(e = {}) {
   const r = e.reading && typeof e.reading === 'object' ? e.reading : null;
-  const reading = r && sentence(r.outfit, 600) ? { location: sentence(r.location, 300) || '', doing: sentence(r.doing, 300) || '', outfit: sentence(r.outfit, 600), hair: sentence(r.hair, 200), makeup: sentence(r.makeup, 200), at: iso(r.at) } : null;
+  const reading = r && sentence(r.outfit, 600) ? { location: sentence(r.location, 300) || '', doing: sentence(r.doing, 300) || '', outfit: sentence(r.outfit, 600), hair: sentence(r.hair, 200), makeup: sentence(r.makeup, 200), at: iso(r.at), seen: seenOf(r.seen) } : null;
   const s = e.sleep && typeof e.sleep === 'object' ? e.sleep : null;
   const sleep = s && iso(s.wakeAt) && iso(s.until) ? { wakeAt: iso(s.wakeAt), until: iso(s.until) } : null;
   const d = e.dream && typeof e.dream === 'object' ? e.dream : null;

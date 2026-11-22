@@ -12,7 +12,7 @@ import { buildOutfitPrompt, buildFollowUpPrompt, buildCorrectionPrompt, SLEEP_PR
 import { parseReading, describeReading } from '../src/core/outfit.js';
 import { looksAsleep, sentenceMark, planSleep, parseSleepAnswer, parseDreamAnswer, describeDream, dreamFact, DREAM_TTL_HOURS } from '../src/core/sleep.js';
 import { retryDelay, errorKind, isDue, TICK_S } from '../src/core/schedule.js';
-import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, forgetOld, SETTINGS_FILE, STATUS_FILE, ACTION, OPS } from '../src/core/state.js';
+import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, forgetOld, carryOver, SETTINGS_FILE, STATUS_FILE, ACTION, OPS } from '../src/core/state.js';
 import { describeNow } from '../src/core/time.js';
 import { formatWhen } from '../src/core/format.js';
 import { oneLine } from '../src/core/text.js';
@@ -116,20 +116,23 @@ async function read(ctx, who, entry) {
   const { answer, parsed } = await askAndParse(ctx, who, buildOutfitPrompt({ name: who.name }), parseReading);
   if (!answer.ok) return fail(ctx, who, e, answer, now, null, entry);
   if (!parsed.ok) return fail(ctx, who, e, { kind: 'answer', error: `${parsed.error} Nothing was changed.`, length: answer.text.length }, now, null, entry);
-  const reading = describeReading(parsed);
-  // Hair and makeup are kept only when the Kin described them (the card shows those rows only then).
-  if (!parsed.hair) reading.hair = null;
-  if (!parsed.makeup) reading.makeup = null;
-  e.reading = { ...reading, at: now.toISOString() };
+  const fresh = describeReading(parsed);
+  // Hair and makeup only when the Kin described them (the card shows those rows only then).
+  if (!parsed.hair) fresh.hair = null;
+  if (!parsed.makeup) fresh.makeup = null;
+  // What the answer said nothing about keeps the last known sentence (real test: "No outfit described" lost it).
+  const reading = carryOver(fresh, entry.reading, now);
+  e.reading = reading;
   e.serverFailures = 0; // Kindroid answered
   const line = `${who.name}: ${[reading.location, reading.doing, reading.outfit, reading.hair, reading.makeup].filter(Boolean).join(' ')}`;
 
-  if (!looksAsleep(reading.doing)) {
+  // Sleep is read from what the Kin said just now, never from a pose kept from an earlier reading.
+  if (!looksAsleep(fresh.doing)) {
     await save(ctx, who.id, succeeded({ ...e, sleep: null, sleptOn: null }), entry); // awake: any night is over
     return ok(line);
   }
   if (e.sleep) { await save(ctx, who.id, succeeded(e), entry); return ok(`${line} Still asleep.`); } // read by hand during the night
-  const mark = sentenceMark(reading.doing); // a fingerprint, never the sentence: nothing about the scene in the night's data
+  const mark = sentenceMark(fresh.doing); // a fingerprint, never the sentence: nothing about the scene in the night's data
   if (e.sleptOn === mark) { await save(ctx, who.id, succeeded(e), entry); return ok(line); } // the chat has not moved since
 
   // The reading is kept before the sleep question: if the run is cut short, it is not lost.

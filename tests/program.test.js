@@ -25,7 +25,8 @@ test('running: reads at once, then only when the interval has passed; moving the
   k.answers.reading.push(AWAKE);
   const first = await tick(k);
   assert.match(first.message, /^Isa: In the bedroom\. Sitting on the bed, reading a book\. Wearing pyjamas\.$/);
-  assert.deepEqual(k.entry().reading, { location: 'In the bedroom.', doing: 'Sitting on the bed, reading a book.', outfit: 'Wearing pyjamas.', hair: null, makeup: null, at: k.clock().toISOString() });
+  const t0 = k.clock().toISOString();
+  assert.deepEqual(k.entry().reading, { location: 'In the bedroom.', doing: 'Sitting on the bed, reading a book.', outfit: 'Wearing pyjamas.', hair: null, makeup: null, at: t0, seen: { location: t0, doing: t0, outfit: t0 } });
   assert.equal(k.entry().name, 'Isa');
   for (const m of [15, 15, 15]) { k.advance(m); await tick(k); }
   assert.deepEqual(k.asks(), ['reading'], '45 minutes with a 1-hour interval: nothing more');
@@ -448,4 +449,45 @@ test('a start with nothing due says when the next update is, on the person\'s cl
   const r = await tick(k);
   assert.equal(r.message, 'Nothing to do yet: next update around 3:27 AM.');
   assert.ok(!/\d{4}-\d\d-\d\dT/.test(r.message), 'no ISO timestamp');
+});
+
+// ---------------------------------------------------------------- the last known sentence (real test, Nov 2026)
+
+test('what the Kin says nothing about keeps the last known sentence, with when it was last seen', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', intervalS: 900 } });
+  k.answers.reading.push(JSON.stringify({ location: 'in the kitchen', pose: 'sitting at the table', action: 'talking with Ari', hair: 'long dark hair, loose', topwear: ['a purple shirt'] }));
+  await tick(k);
+  const t0 = k.clock().toISOString();
+  k.advance(20);
+  k.answers.reading.splice(0, Infinity, JSON.stringify({ location: 'in the living room', action: 'ordering pizza' })); // no outfit, no hair
+  await tick(k);
+  const t1 = k.clock().toISOString();
+  const r = k.entry().reading;
+  assert.equal(r.location, 'In the living room.');
+  assert.equal(r.doing, 'Ordering pizza.');
+  assert.equal(r.outfit, 'Wearing a purple shirt.', 'kept, not "No outfit described"');
+  assert.equal(r.hair, 'Long dark hair, loose.', 'kept');
+  assert.equal(r.at, t1);
+  assert.deepEqual(r.seen, { location: t1, doing: t1, outfit: t0, hair: t0 });
+  k.advance(20);
+  k.answers.reading.splice(0, Infinity, JSON.stringify({ topwear: ['a black dress'] })); // only the outfit changed
+  await tick(k);
+  const t2 = k.clock().toISOString();
+  assert.equal(k.entry().reading.outfit, 'Wearing a black dress.');
+  assert.equal(k.entry().reading.location, 'In the living room.');
+  assert.deepEqual(k.entry().reading.seen, { location: t1, doing: t1, outfit: t2, hair: t0 });
+});
+
+test('a pose kept from an earlier reading never starts a night: sleep is read from what the Kin says now', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', intervalS: 900, ...SAO_PAULO } });
+  k.answers.reading.push(ASLEEP);
+  k.answers.sleep.push('{"sleeping":false}'); // "lying in bed, sleeping" but not asleep after all: no night
+  await tick(k);
+  assert.deepEqual(k.asks(), ['reading', 'sleep']);
+  k.advance(20);
+  k.answers.reading.splice(0, Infinity, JSON.stringify({ topwear: ['a hoodie'] })); // nothing about the pose
+  await tick(k);
+  assert.deepEqual(k.asks(), ['reading', 'sleep', 'reading'], 'no sleep question from the kept pose');
+  assert.equal(k.entry().reading.doing, 'Lying in bed, sleeping.', 'still shown, as last seen');
+  assert.equal(k.entry().sleep, null);
 });

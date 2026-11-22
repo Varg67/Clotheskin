@@ -312,6 +312,22 @@ const step = async (name, fn) => {
     await t.ctx.close(); await u.ctx.close();
   });
 
+  await step('what the Kin says nothing about keeps the last known sentence, marked with when it was seen', async () => {
+    const t = await open({ kins: [{ id: 'kin-isa', name: 'Isa' }] });
+    await t.key('update').click();
+    await t.until(async () => /leather jacket/.test(await t.text('outfit')), 'first reading');
+    assert.equal(await t.fr.locator('[data-testid="outfit-seen"]').count(), 0, 'fresh: no "seen" mark');
+    await t.page.clock.fastForward('20:00');
+    await t.dev(() => window.dev.answers({ reading: '{"location":"in the kitchen","action":"ordering pizza"}' }));
+    await t.key('update').click();
+    await t.until(async () => /kitchen/.test(await t.text('location')), 'second reading');
+    assert.match(await t.text('outfit'), /leather jacket/, 'the outfit is kept');
+    assert.equal(await t.text('outfit-seen'), ' · seen 10:00 PM');
+    assert.equal(await t.fr.locator('[data-testid="location-seen"]').count(), 0, 'the location is new');
+    await t.page.screenshot({ path: path.join(SHOTS, '10-kept-outfit.png') });
+    await t.ctx.close();
+  });
+
   await step('no page errors or console errors', async () => { assert.deepEqual(problems, []); });
 
   await browser.close(); server.close();

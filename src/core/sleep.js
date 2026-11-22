@@ -56,8 +56,8 @@ export function planSleep(wakeText, now, tz) {
   const t = parseClockTime(wakeText);
   if (!t) return null;
   const wakeAt = nextWallTime(t, now, tz);
-  const s = (wakeAt.getTime() - now.getTime()) / 1000;
-  if (s < MIN_SLEEP_S || s > MAX_SLEEP_S) return null;
+  const seconds = (wakeAt.getTime() - now.getTime()) / 1000;
+  if (seconds < MIN_SLEEP_S || seconds > MAX_SLEEP_S) return null;
   return { wakeAt, until: new Date(wakeAt.getTime() - WAKE_LEAD_S * 1000) };
 }
 
@@ -70,15 +70,15 @@ const falsy = (v) => v === false || /^(false|no|n|awake|not sleeping)$/i.test(St
  */
 /** @returns {{ ok: true, sleeping: boolean, wakeAt: string|null } | Failure} */
 export function parseSleepAnswer(text) {
-  const p = parseAnswerObject(text);
-  if (!p.ok) return p;
-  const o = p.value;
-  const key = Object.keys(o).find((k) => /^(sleeping|asleep|is_?sleeping)$/i.test(k));
+  const parsed = parseAnswerObject(text);
+  if (!parsed.ok) return parsed;
+  const answer = parsed.value;
+  const key = Object.keys(answer).find((k) => /^(sleeping|asleep|is_?sleeping)$/i.test(k));
   if (!key) return { ok: false, error: 'The answer does not say whether the Kin is asleep.' };
-  if (falsy(o[key])) return { ok: true, sleeping: false, wakeAt: null };
-  if (!truthy(o[key])) return { ok: false, error: '"sleeping" must be true or false.' };
-  const wakeKey = Object.keys(o).find((k) => /^(wake_?at|wake_?up_?at|wake_?time|wake_?up|until)$/i.test(k));
-  const t = wakeKey ? parseClockTime(o[wakeKey]) : null;
+  if (falsy(answer[key])) return { ok: true, sleeping: false, wakeAt: null };
+  if (!truthy(answer[key])) return { ok: false, error: '"sleeping" must be true or false.' };
+  const wakeKey = Object.keys(answer).find((k) => /^(wake_?at|wake_?up_?at|wake_?time|wake_?up|until)$/i.test(k));
+  const t = wakeKey ? parseClockTime(answer[wakeKey]) : null;
   if (!t) return { ok: false, error: 'The answer does not give a wake-up time as HH:MM.' };
   return { ok: true, sleeping: true, wakeAt: clockText(t.h, t.m) };
 }

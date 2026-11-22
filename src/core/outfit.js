@@ -115,13 +115,13 @@ export function notEnglishKeys(doc) {
  * @returns {Reading | Failure}
  */
 export function parseReading(text) {
-  const p = parseObject(text);
-  if (!p.ok) return p;
-  const { outfit, warnings, errors } = outfitFromObject(p.doc);
+  const parsed = parseObject(text);
+  if (!parsed.ok) return parsed;
+  const { outfit, warnings, errors } = outfitFromObject(parsed.doc);
   const read = (field, clean) => {
-    const key = Object.keys(p.doc).find((k) => readingFieldOf(k) === field);
-    if (!key || p.doc[key] === false) return null;
-    const v = clean(p.doc[key]);
+    const key = Object.keys(parsed.doc).find((k) => readingFieldOf(k) === field);
+    if (!key || parsed.doc[key] === false) return null;
+    const v = clean(parsed.doc[key]);
     if (v === undefined) errors.push(`"${field}" must be a text.`);
     return v ?? null;
   };
@@ -137,8 +137,8 @@ export function parseReading(text) {
   }
   if (errors.length) return { ok: false, error: errors.join(' ') };
   // A model may copy the format example instead of describing itself. That is not a reading.
-  if (looksCopiedFromExample(p.doc)) return { ok: false, error: 'The Kin copied the example from the question instead of describing itself.' };
-  return { ok: true, outfit, location, pose, action, hair, makeup, warnings, notEnglish: notEnglishKeys(p.doc) };
+  if (looksCopiedFromExample(parsed.doc)) return { ok: false, error: 'The Kin copied the example from the question instead of describing itself.' };
+  return { ok: true, outfit, location, pose, action, hair, makeup, warnings, notEnglish: notEnglishKeys(parsed.doc) };
 }
 
 /**

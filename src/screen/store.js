@@ -139,8 +139,8 @@ export function createStore(deps) {
     const ranBefore = entryOf(S, kin.id).lastRunAt;
     onChange();
     try {
-      const r = await channel.action(ACTION, { kin: kin.id, op });
-      if (!r.ok && r.summary) S.error = { kinId: kin.id, text: r.summary };
+      const reply = await channel.action(ACTION, { kin: kin.id, op });
+      if (!reply.ok && reply.summary) S.error = { kinId: kin.id, text: reply.summary };
     } catch {
       S.error = { kinId: kin.id, text: 'Kindroid did not answer. Try again in a moment.' };
     }

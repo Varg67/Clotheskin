@@ -3,15 +3,15 @@ import { h } from '../dom.js';
 import { THEMES } from '../../core/state.js';
 
 function dreamOptions(v) {
-  const s = v.S.settings;
+  const settings = v.S.settings;
   return [
     h('h3', { class: 'sub' }, 'Dreams'),
-    h('label', { class: 'check' }, h('input', { type: 'checkbox', 'data-key': 'tell-dream', checked: s.tellDream || undefined, onChange: (ev) => v.store.saveSettings({ tellDream: ev.target.checked }) }),
+    h('label', { class: 'check' }, h('input', { type: 'checkbox', 'data-key': 'tell-dream', checked: settings.tellDream || undefined, onChange: (ev) => v.store.saveSettings({ tellDream: ev.target.checked }) }),
       h('span', {}, 'Tell my Kin its dream, so it can remember it during the day')),
-    h('label', { class: `check${s.tellDream ? '' : ' off'}` }, h('input', {
-      type: 'checkbox', 'data-key': 'reach-out', checked: (s.tellDream && s.reachOut) || undefined, disabled: !s.tellDream || undefined,
-      'aria-describedby': s.tellDream ? undefined : 'reach-why', onChange: (ev) => v.store.saveSettings({ reachOut: ev.target.checked }),
-    }), h('span', {}, 'Let my Kin bring the dream up by itself', s.tellDream ? null : h('span', { class: 'why', id: 'reach-why' }, ' (needs the option above)'))),
+    h('label', { class: `check${settings.tellDream ? '' : ' off'}` }, h('input', {
+      type: 'checkbox', 'data-key': 'reach-out', checked: (settings.tellDream && settings.reachOut) || undefined, disabled: !settings.tellDream || undefined,
+      'aria-describedby': settings.tellDream ? undefined : 'reach-why', onChange: (ev) => v.store.saveSettings({ reachOut: ev.target.checked }),
+    }), h('span', {}, 'Let my Kin bring the dream up by itself', settings.tellDream ? null : h('span', { class: 'why', id: 'reach-why' }, ' (needs the option above)'))),
   ];
 }
 

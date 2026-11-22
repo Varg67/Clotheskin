@@ -270,10 +270,10 @@ function snapInterval(seconds) {
  * interval. When Kindroid says it is under maintenance, the next try is at least half an hour away.
  */
 function retryDelay(intervalS, failures, kind) {
-  let d = intervalS;
-  if (failures >= ERRORS_BEFORE_SLOWING) d = Math.max(intervalS, Math.min(MAX_RETRY_S, intervalS * 2 ** (failures - ERRORS_BEFORE_SLOWING + 1)));
-  if (kind === ERROR.MAINTENANCE) d = Math.max(d, MAINTENANCE_RETRY_S);
-  return d;
+  let delay = intervalS;
+  if (failures >= ERRORS_BEFORE_SLOWING) delay = Math.max(intervalS, Math.min(MAX_RETRY_S, intervalS * 2 ** (failures - ERRORS_BEFORE_SLOWING + 1)));
+  if (kind === ERROR.MAINTENANCE) delay = Math.max(delay, MAINTENANCE_RETRY_S);
+  return delay;
 }
 
 /**
@@ -378,8 +378,8 @@ function planSleep(wakeText, now, tz) {
   const t = parseClockTime(wakeText);
   if (!t) return null;
   const wakeAt = nextWallTime(t, now, tz);
-  const s = (wakeAt.getTime() - now.getTime()) / 1000;
-  if (s < MIN_SLEEP_S || s > MAX_SLEEP_S) return null;
+  const seconds = (wakeAt.getTime() - now.getTime()) / 1000;
+  if (seconds < MIN_SLEEP_S || seconds > MAX_SLEEP_S) return null;
   return { wakeAt, until: new Date(wakeAt.getTime() - WAKE_LEAD_S * 1000) };
 }
 
@@ -392,15 +392,15 @@ const falsy = (v) => v === false || /^(false|no|n|awake|not sleeping)$/i.test(St
  */
 /** @returns {{ ok: true, sleeping: boolean, wakeAt: string|null } | Failure} */
 function parseSleepAnswer(text) {
-  const p = parseAnswerObject(text);
-  if (!p.ok) return p;
-  const o = p.value;
-  const key = Object.keys(o).find((k) => /^(sleeping|asleep|is_?sleeping)$/i.test(k));
+  const parsed = parseAnswerObject(text);
+  if (!parsed.ok) return parsed;
+  const answer = parsed.value;
+  const key = Object.keys(answer).find((k) => /^(sleeping|asleep|is_?sleeping)$/i.test(k));
   if (!key) return { ok: false, error: 'The answer does not say whether the Kin is asleep.' };
-  if (falsy(o[key])) return { ok: true, sleeping: false, wakeAt: null };
-  if (!truthy(o[key])) return { ok: false, error: '"sleeping" must be true or false.' };
-  const wakeKey = Object.keys(o).find((k) => /^(wake_?at|wake_?up_?at|wake_?time|wake_?up|until)$/i.test(k));
-  const t = wakeKey ? parseClockTime(o[wakeKey]) : null;
+  if (falsy(answer[key])) return { ok: true, sleeping: false, wakeAt: null };
+  if (!truthy(answer[key])) return { ok: false, error: '"sleeping" must be true or false.' };
+  const wakeKey = Object.keys(answer).find((k) => /^(wake_?at|wake_?up_?at|wake_?time|wake_?up|until)$/i.test(k));
+  const t = wakeKey ? parseClockTime(answer[wakeKey]) : null;
   if (!t) return { ok: false, error: 'The answer does not give a wake-up time as HH:MM.' };
   return { ok: true, sleeping: true, wakeAt: clockText(t.h, t.m) };
 }
@@ -1403,8 +1403,8 @@ function createStore(deps) {
     const ranBefore = entryOf(S, kin.id).lastRunAt;
     onChange();
     try {
-      const r = await channel.action(ACTION, { kin: kin.id, op });
-      if (!r.ok && r.summary) S.error = { kinId: kin.id, text: r.summary };
+      const reply = await channel.action(ACTION, { kin: kin.id, op });
+      if (!reply.ok && reply.summary) S.error = { kinId: kin.id, text: reply.summary };
     } catch {
       S.error = { kinId: kin.id, text: 'Kindroid did not answer. Try again in a moment.' };
     }
@@ -1723,15 +1723,15 @@ const { h } = __req("src/screen/dom.js");
 const { THEMES } = __req("src/core/state.js");
 
 function dreamOptions(v) {
-  const s = v.S.settings;
+  const settings = v.S.settings;
   return [
     h('h3', { class: 'sub' }, 'Dreams'),
-    h('label', { class: 'check' }, h('input', { type: 'checkbox', 'data-key': 'tell-dream', checked: s.tellDream || undefined, onChange: (ev) => v.store.saveSettings({ tellDream: ev.target.checked }) }),
+    h('label', { class: 'check' }, h('input', { type: 'checkbox', 'data-key': 'tell-dream', checked: settings.tellDream || undefined, onChange: (ev) => v.store.saveSettings({ tellDream: ev.target.checked }) }),
       h('span', {}, 'Tell my Kin its dream, so it can remember it during the day')),
-    h('label', { class: `check${s.tellDream ? '' : ' off'}` }, h('input', {
-      type: 'checkbox', 'data-key': 'reach-out', checked: (s.tellDream && s.reachOut) || undefined, disabled: !s.tellDream || undefined,
-      'aria-describedby': s.tellDream ? undefined : 'reach-why', onChange: (ev) => v.store.saveSettings({ reachOut: ev.target.checked }),
-    }), h('span', {}, 'Let my Kin bring the dream up by itself', s.tellDream ? null : h('span', { class: 'why', id: 'reach-why' }, ' (needs the option above)'))),
+    h('label', { class: `check${settings.tellDream ? '' : ' off'}` }, h('input', {
+      type: 'checkbox', 'data-key': 'reach-out', checked: (settings.tellDream && settings.reachOut) || undefined, disabled: !settings.tellDream || undefined,
+      'aria-describedby': settings.tellDream ? undefined : 'reach-why', onChange: (ev) => v.store.saveSettings({ reachOut: ev.target.checked }),
+    }), h('span', {}, 'Let my Kin bring the dream up by itself', settings.tellDream ? null : h('span', { class: 'why', id: 'reach-why' }, ' (needs the option above)'))),
   ];
 }
 

@@ -160,16 +160,16 @@ async function attachedKin(ctx, id, entry) {
 /** Reads where the Kin is, its pose and action and its outfit; then, if it is asleep, asks until when. */
 async function read(ctx, who, entry) {
   const now = ctx.clock();
-  const e = { ...entry, name: who.name, lastRunAt: now.toISOString() };
-  const answer = await ask(ctx, who, buildOutfitPrompt({ name: who.name }));
-  if (!answer.ok && answer.kind === ERROR.TIME) return postpone(ctx, { who, entry: e, now, base: entry, note: 'The reading waits for the next start of the app.' });
-  if (!answer.ok) return fail(ctx, { who, entry: e, outcome: answer, now, base: entry });
-  const parsed = parseReading(answer.text);
+  const updated = { ...entry, name: who.name, lastRunAt: now.toISOString() };
+  const reply = await ask(ctx, who, buildOutfitPrompt({ name: who.name }));
+  if (!reply.ok && reply.kind === ERROR.TIME) return postpone(ctx, { who, entry: updated, now, base: entry, note: 'The reading waits for the next start of the app.' });
+  if (!reply.ok) return fail(ctx, { who, entry: updated, outcome: reply, now, base: entry });
+  const parsed = parseReading(reply.text);
   if (!parsed.ok) {
-    const outcome = { kind: ERROR.ANSWER, error: `${parsed.error} Nothing was changed.`, length: answer.text.length };
-    return fail(ctx, { who, entry: e, outcome, now, base: entry });
+    const outcome = { kind: ERROR.ANSWER, error: `${parsed.error} Nothing was changed.`, length: reply.text.length };
+    return fail(ctx, { who, entry: updated, outcome, now, base: entry });
   }
-  const withReading = { ...e, reading: storedReading(parsed, now), serverFailures: 0 }; // Kindroid answered
+  const withReading = { ...updated, reading: storedReading(parsed, now), serverFailures: 0 }; // Kindroid answered
   return afterReading(ctx, { who, entry: withReading, base: entry, now, line: `${who.name}: ${readingText(withReading.reading)}` });
 }
 
@@ -184,59 +184,59 @@ function storedReading(parsed, now) {
 }
 
 /** After a reading: awake ends any night; a new "asleep" sentence starts the sleep question. */
-async function afterReading(ctx, { who, entry: e, base, now, line }) {
-  if (!looksAsleep(e.reading.doing)) {
-    await save(ctx, who.id, succeeded({ ...e, sleep: null, sleptOn: null }), base); // awake: any night is over
+async function afterReading(ctx, { who, entry, base, now, line }) {
+  if (!looksAsleep(entry.reading.doing)) {
+    await save(ctx, who.id, succeeded({ ...entry, sleep: null, sleptOn: null }), base); // awake: any night is over
     return ok(line);
   }
-  if (e.sleep) { await save(ctx, who.id, succeeded(e), base); return ok(`${line} Still asleep.`); } // read by hand during the night
-  const mark = sentenceMark(e.reading.doing); // a fingerprint, never the sentence: nothing about the scene in the night's data
-  if (e.sleptOn === mark) { await save(ctx, who.id, succeeded(e), base); return ok(line); } // the chat has not moved since
+  if (entry.sleep) { await save(ctx, who.id, succeeded(entry), base); return ok(`${line} Still asleep.`); } // read by hand during the night
+  const mark = sentenceMark(entry.reading.doing); // a fingerprint, never the sentence: nothing about the scene in the night's data
+  if (entry.sleptOn === mark) { await save(ctx, who.id, succeeded(entry), base); return ok(line); } // the chat has not moved since
   // The reading is kept before the sleep question: if the run is cut short, it is not lost.
-  await save(ctx, who.id, e, base);
-  return askSleep(ctx, { who, entry: e, now, mark, line });
+  await save(ctx, who.id, entry, base);
+  return askSleep(ctx, { who, entry, now, mark, line });
 }
 
 /** Asks whether the Kin is asleep and until when; a believable wake-up time starts the night. */
-async function askSleep(ctx, { who, entry: e, now, mark, line }) {
-  const s = await ask(ctx, who, buildFollowUpPrompt(SLEEP_PROMPT, { name: who.name, now: describeNow(now, ctx.settings.tz) }));
-  if (!s.ok && s.kind === ERROR.TIME) {
+async function askSleep(ctx, { who, entry, now, mark, line }) {
+  const reply = await ask(ctx, who, buildFollowUpPrompt(SLEEP_PROMPT, { name: who.name, now: describeNow(now, ctx.settings.tz) }));
+  if (!reply.ok && reply.kind === ERROR.TIME) {
     const note = 'The sleep question waits for the next start of the app.';
-    return postpone(ctx, { who, entry: succeeded(e), now, base: e, note, message: `${line} The sleep question waits for the next start.` });
+    return postpone(ctx, { who, entry: succeeded(entry), now, base: entry, note, message: `${line} The sleep question waits for the next start.` });
   }
-  if (!s.ok) {
-    const note = `The sleep question could not be asked (${s.error}). It is asked again at the next update.`;
-    return fail(ctx, { who, entry: e, outcome: s, now, note, base: e });
+  if (!reply.ok) {
+    const note = `The sleep question could not be asked (${reply.error}). It is asked again at the next update.`;
+    return fail(ctx, { who, entry, outcome: reply, now, note, base: entry });
   }
-  const p = parseSleepAnswer(s.text);
-  if (!p.ok) {
-    const note = `The sleep question did not get a clear answer (${p.error}) It is asked again at the next update.`;
-    return fail(ctx, { who, entry: e, outcome: { kind: ERROR.ANSWER, error: p.error }, now, note, base: e });
+  const answer = parseSleepAnswer(reply.text);
+  if (!answer.ok) {
+    const note = `The sleep question did not get a clear answer (${answer.error}) It is asked again at the next update.`;
+    return fail(ctx, { who, entry, outcome: { kind: ERROR.ANSWER, error: answer.error }, now, note, base: entry });
   }
-  const plan = p.sleeping ? planSleep(p.wakeAt, now, ctx.settings.tz) : null;
+  const plan = answer.sleeping ? planSleep(answer.wakeAt, now, ctx.settings.tz) : null;
   const sleep = plan ? { wakeAt: plan.wakeAt.toISOString(), until: plan.until.toISOString() } : null;
-  await save(ctx, who.id, succeeded({ ...e, sleptOn: mark, sleep }), e);
-  if (plan) return ok(`${line} Asleep until ${p.wakeAt}.`);
-  return ok(p.sleeping ? `${line} Asleep, but the wake-up time ${p.wakeAt} is too soon or too far away to wait for; readings go on.` : `${line} Not asleep after all.`);
+  await save(ctx, who.id, succeeded({ ...entry, sleptOn: mark, sleep }), entry);
+  if (plan) return ok(`${line} Asleep until ${answer.wakeAt}.`);
+  return ok(answer.sleeping ? `${line} Asleep, but the wake-up time ${answer.wakeAt} is too soon or too far away to wait for; readings go on.` : `${line} Not asleep after all.`);
 }
 
 /** The night is over: asks what the Kin dreamt, and (if the person wants) tells the Kin so it remembers it. */
 async function wake(ctx, who, entry) {
   const { settings, clock, log } = ctx;
   const now = clock();
-  const e = { ...entry, name: who.name, lastRunAt: now.toISOString() };
-  const d = await ask(ctx, who, buildFollowUpPrompt(DREAM_PROMPT, { name: who.name, now: describeNow(now, settings.tz) }));
+  const updated = { ...entry, name: who.name, lastRunAt: now.toISOString() };
+  const reply = await ask(ctx, who, buildFollowUpPrompt(DREAM_PROMPT, { name: who.name, now: describeNow(now, settings.tz) }));
   // the night goes on in both cases below
-  if (!d.ok && d.kind === ERROR.TIME) return postpone(ctx, { who, entry: e, now, base: entry, note: 'The dream question waits for the next start of the app.' });
-  if (!d.ok) {
-    const note = `The dream question could not be asked (${d.error}). It is asked again at the next update.`;
-    return fail(ctx, { who, entry: e, outcome: d, now, note, base: entry });
+  if (!reply.ok && reply.kind === ERROR.TIME) return postpone(ctx, { who, entry: updated, now, base: entry, note: 'The dream question waits for the next start of the app.' });
+  if (!reply.ok) {
+    const note = `The dream question could not be asked (${reply.error}). It is asked again at the next update.`;
+    return fail(ctx, { who, entry: updated, outcome: reply, now, note, base: entry });
   }
-  const p = parseDreamAnswer(d.text);
+  const dream = parseDreamAnswer(reply.text);
   let told = '';
-  if (p.ok) {
-    e.dream = { dream: p.dream, remembered: p.remembered, at: now.toISOString() };
-    const fact = settings.tellDream ? dreamFact(p) : null;
+  if (dream.ok) {
+    updated.dream = { dream: dream.dream, remembered: dream.remembered, at: now.toISOString() };
+    const fact = settings.tellDream ? dreamFact(dream) : null;
     if (fact) {
       try {
         await ctx.kin.tell(fact, { kin: who.id, key: 'dream', ttl: DREAM_TTL_HOURS, reachOut: settings.reachOut });
@@ -244,8 +244,8 @@ async function wake(ctx, who, entry) {
       } catch (err) { log(`kin tell (dream) failed: ${errorMessage(err)}`); }
     }
   } else log('the dream answer was not usable'); // a Kin that cannot answer is let go: awake, without a dream
-  await save(ctx, who.id, succeeded({ ...e, sleep: null }), entry); // sleptOn stays: the still chat does not start a new night
-  return ok(p.ok ? `${who.name} woke up. ${describeDream(p)}${told}` : `${who.name} woke up (no usable dream answer).`);
+  await save(ctx, who.id, succeeded({ ...updated, sleep: null }), entry); // sleptOn stays: the still chat does not start a new night
+  return ok(dream.ok ? `${who.name} woke up. ${describeDream(dream)}${told}` : `${who.name} woke up (no usable dream answer).`);
 }
 
 // ---------------------------------------------------------------- helpers

@@ -33,10 +33,10 @@ export function snapInterval(seconds) {
  * interval. When Kindroid says it is under maintenance, the next try is at least half an hour away.
  */
 export function retryDelay(intervalS, failures, kind) {
-  let d = intervalS;
-  if (failures >= ERRORS_BEFORE_SLOWING) d = Math.max(intervalS, Math.min(MAX_RETRY_S, intervalS * 2 ** (failures - ERRORS_BEFORE_SLOWING + 1)));
-  if (kind === ERROR.MAINTENANCE) d = Math.max(d, MAINTENANCE_RETRY_S);
-  return d;
+  let delay = intervalS;
+  if (failures >= ERRORS_BEFORE_SLOWING) delay = Math.max(intervalS, Math.min(MAX_RETRY_S, intervalS * 2 ** (failures - ERRORS_BEFORE_SLOWING + 1)));
+  if (kind === ERROR.MAINTENANCE) delay = Math.max(delay, MAINTENANCE_RETRY_S);
+  return delay;
 }
 
 /**

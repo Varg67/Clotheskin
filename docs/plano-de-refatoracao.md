@@ -269,7 +269,16 @@ Os nomes de arquivo respeitam o bundler (imports nomeados relativos). Os testes 
 
 **4.5 Critérios de saída da Fase 4:** nenhuma função com complexidade > 12 ou > 4 parâmetros (regras viram `error`); nenhuma função com mais de 60 linhas; `src/screen` com cobertura unitária ≥ 80 % nos módulos puros.
 
-### Fase 5 — Clean Code e tipagem
+### Fase 5 — Clean Code e tipagem — **feita**
+
+Resultado, em 4 blocos (5a–5d): 177 testes verdes, cobertura de 99 % das linhas, desempenho 10/10, e2e 17/17, lint e tipos sem erros. O que saiu diferente ou a mais:
+- **Tipagem:** `strict: true` **sem** `noImplicitAny`, com 0 erros. O `strict` completo daria ~450 erros, 398 deles "parâmetro sem tipo": exigir JSDoc em cada parâmetro incharia o código (e o arquivo que o agente copia) sem achar bugs. Há tipos para `Settings`, `Entry`, `Status`, `KinApi`, o contexto e os resultados do run, e o estado da tela.
+- **Bugs que o modo estrito achou:** uma falha que não é `Error` (uma string, `null`) virava "...: undefined" na mensagem e no `status.json`. Agora há `errorMessage()`, com teste, e confirmei o comportamento antigo rodando o código anterior. Além disso, o exemplo do prompt deixou de ser lido de volta do próprio prompt por regex: o prompt é montado a partir dele, byte a byte igual. O 404 do `kin files get` agora usa `instanceof KinError`.
+- **`!ok` voltou a estreitar o tipo**, então o contorno `ok === false` da Fase 1 saiu, exceto no protocolo da página (`channel.js`), onde um `ok` ausente significa sucesso. Agora há um comentário lá, porque a troca automática quase quebrou essa linha.
+- **Linhas longas:** o limite de 140 colunas vale para **código**. Frases, templates e regex longas não são quebradas, porque ficariam piores de ler. Sobraram 19 linhas de código longas, corrigidas, e as que escondiam lógica ganharam nome (`canRetry`, `NOT_AN_ACTION`).
+- **Regex grandes:** "não diz nada" (unknown, none, n/a, not mentioned…) estava escrito 3 vezes com diferenças pequenas; agora `nothingSaid()` monta cada uma. As novas dão resultado idêntico às antigas em 21.806 strings.
+- **Comentários:** os 54 comentários de fim de linha do código de produção explicam o porquê ou dão exemplos do domínio; nenhum foi removido.
+- O `screen/app.js` gerado está em **~90 KB**, por causa dos tipos JSDoc (ver decisão 7).
 
 1. JSDoc `@typedef` para `Settings`, `Status`, `Entry`, `Reading`, `Sleep`, `Dream`, `AskResult` (união discriminada por `ok`), `KinApi` (o contrato injetado em `runProgram`); `@param` em todas as funções exportadas.
 2. `jsconfig` com `strict: true` (ou ao menos `strictNullChecks`) e **0 erros** no `npm run typecheck`.
@@ -347,7 +356,7 @@ Não otimizar o que já é rápido (`parseReading`, fusos): o custo está nas ch
 4. **Idioma:** manter código, comentários e mensagens em inglês (como hoje) e só a documentação de testes em português?
 5. **Arquivos do run (§4.4):** (a) dividir `src/core/` com moderação, ou (b) empacotar o run num arquivo gerado, como a tela? Recomendo (a) agora e (b) só se a cópia pelo agente se mostrar pouco confiável.
 6. **Instalação (§2.2):** o agente do Kindroid baixa cada link (cópia exata) ou lê e reescreve o conteúdo? E ele tem um terminal para conferir SHA-256? Isso decide se a conferência de hashes vai no prompt ou fica só o identificador de build na tela.
-7. **Comentários no `screen/app.js` gerado (Fase 4):** manter (85 KB, mais legível para quem revisa o código publicado) ou tirar no build (~59 KB, menos para o agente do Kindroid copiar)? As fontes em `src/` continuam comentadas nos dois casos.
+7. **Comentários no `screen/app.js` gerado (Fases 4 e 5):** manter (~90 KB depois dos tipos JSDoc da Fase 5, mais legível para quem revisa o código publicado) ou tirar no build (~60 KB, menos para o agente do Kindroid copiar)? As fontes em `src/` continuam comentadas nos dois casos.
 
 ## 7. Ordem sugerida e tamanho
 

@@ -89,6 +89,7 @@ export class Channel {
   write(path, body) {
     const prev = this.writes[path] || Promise.resolve();
     const next = prev.catch(() => {}).then(() => this.wait(`files.write:${path}`, { timeout: this.t.write, message: { kin: 'files.write', path, body } }))
+      // `=== false`, not `!r.ok`: in the page's replies a missing ok means it worked.
       .then((r) => { if (r.ok === false) throw new Error(`Kindroid did not save ${path}.`); return true; });
     this.writes[path] = next;
     return next;

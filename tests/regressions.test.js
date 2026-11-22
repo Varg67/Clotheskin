@@ -70,3 +70,14 @@ test('a planned time that cannot be read is due at once, and never breaks the sc
     assert.equal(startDueFor(at, now).toISOString(), '2026-11-20T22:15:00.000Z');
   }
 });
+
+test('a failure that is not an Error (a string, null) is still told in words, never "undefined"', async () => {
+  for (const thrown of ['503 Service Unavailable', null]) {
+    const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1' } });
+    k.kin.kins = async () => { throw thrown; };
+    const r = await tick(k);
+    assert.equal(r.ok, false);
+    assert.doesNotMatch(r.message, /undefined/);
+    assert.match(k.entry().error, new RegExp(`Could not list the Kins: ${String(thrown)}`));
+  }
+});

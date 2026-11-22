@@ -9,7 +9,9 @@
     "lib": ["es2022", "dom", "dom.iterable"],
     "typeRoots": ["./tools/node_modules/@types"],
     "types": ["node"],
-    "strict": false,
+    "strict": true,
+    "noImplicitAny": false,
+    "strictNullChecks": true,
     "skipLibCheck": true,
     "maxNodeModuleJsDepth": 0
   },

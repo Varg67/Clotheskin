@@ -19,6 +19,11 @@ import { oneLine } from '../src/core/text.js';
 const END_LIMIT = 500;
 
 class KinError extends Error {
+  /**
+   * @param {string} message
+   * @param {{ code?: string|number|null, stderr?: string, timedOut?: boolean }} [details] code: kin's exit code (a number:
+   *   it ran) or Node's error code ('ENOENT': it did not)
+   */
   constructor(message, { code = null, stderr = '', timedOut = false } = {}) {
     super(message);
     this.code = code;
@@ -77,7 +82,7 @@ export function createKin({ bin = process.env.KIN_BIN || 'kin', defaultTimeoutMs
         const body = await call(['files', 'get', path]);
         return body === '' ? null : body;
       } catch (e) {
-        if (typeof e.code === 'number' && NOT_FOUND.test(e.stderr)) return null; // kin ran and said 404
+        if (e instanceof KinError && typeof e.code === 'number' && NOT_FOUND.test(e.stderr)) return null; // kin ran and said 404
         throw e;
       }
     },

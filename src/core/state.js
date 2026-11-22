@@ -9,6 +9,43 @@ import { snapInterval, retryDelay, errorKind, DEFAULT_INTERVAL_S, ERRORS_BEFORE_
 import { safeTimeZone } from './time.js';
 import { REMEMBERED } from './sleep.js';
 import { oneLine } from './text.js';
+/** @import { ErrorKind } from './schedule.js' */
+
+/**
+ * settings.json, as the screen writes it.
+ * @typedef {object} Settings
+ * @property {1} v
+ * @property {string|null} kinId the Kin of the current roleplay: the only one read
+ * @property {'running'|'paused'|'stopped'} autoState Start / Pause / Stop
+ * @property {number} intervalS how often the automatic update reads, in seconds (15 min to 4 h)
+ * @property {string} tz the person's IANA time zone (wake-up times are on their clock)
+ * @property {string} theme
+ * @property {boolean} tellDream tell the Kin its dream (kin tell), so it can remember it during the day
+ * @property {boolean} reachOut and let it bring the dream up by itself (kin tell --reach-out)
+ * @property {string|null} stoppedAt when Stop was last pressed (ISO time)
+ *
+ * The card's sentences of the last reading. Hair and makeup only when the Kin described them.
+ * @typedef {{ location: string, doing: string, outfit: string, hair: string|null, makeup: string|null, at: string|null }} StoredReading
+ * @typedef {{ wakeAt: string, until: string }} Night  when the Kin wakes up, and from when the dream question is due
+ * @typedef {{ dream: string|null, remembered: string, at: string }} StoredDream
+ *
+ * One Kin's entry in status.json, as the run writes it.
+ * @typedef {object} Entry
+ * @property {string|null} name
+ * @property {StoredReading|null} reading
+ * @property {string|null} lastRunAt the last time a step ran for this Kin (reading, sleep or dream question)
+ * @property {string|null} retryAt after an error, or a step that did not fit in a run: when to try again
+ * @property {number} failures errors in a row (they slow the next try down)
+ * @property {number} serverFailures Kindroid's own errors in a row (three show the server warning)
+ * @property {string|null} errorKind
+ * @property {string|null} error
+ * @property {string|null} note what the person is told instead of the error
+ * @property {Night|null} sleep
+ * @property {string|null} sleptOn the fingerprint of the "asleep" sentence of the last night
+ * @property {StoredDream|null} dream
+ *
+ * @typedef {{ v: 1, kins: Object<string, Entry> }} Status
+ */
 
 export const SETTINGS_FILE = 'settings.json';
 export const STATUS_FILE = 'status.json';
@@ -43,6 +80,7 @@ const iso = (v) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? new 
 const count = (v) => (Number.isInteger(v) && v > 0 ? Math.min(v, 99) : 0);
 
 /** settings.json (text or object) -> a complete, valid settings object. */
+/** @returns {Settings} */
 export function normalizeSettings(raw) {
   const o = parse(raw);
   return {
@@ -61,26 +99,37 @@ export function normalizeSettings(raw) {
 const objectOr = (v) => (v && typeof v === 'object' ? v : null);
 
 /** The last reading (the card's sentences): kept only with an outfit sentence. */
+/** @returns {StoredReading|null} */
 function normalizeReading(given) {
   const r = objectOr(given);
-  if (!r || !sentence(r.outfit, 600)) return null;
-  return { location: sentence(r.location, 300) || '', doing: sentence(r.doing, 300) || '', outfit: sentence(r.outfit, 600), hair: sentence(r.hair, 200), makeup: sentence(r.makeup, 200), at: iso(r.at) };
+  const outfit = r && sentence(r.outfit, 600);
+  if (!r || !outfit) return null;
+  return { location: sentence(r.location, 300) || '', doing: sentence(r.doing, 300) || '', outfit, hair: sentence(r.hair, 200), makeup: sentence(r.makeup, 200), at: iso(r.at) };
 }
 
 /** The night: when the Kin wakes up, and from when the dream question is due. Both times, or no night. */
+/** @returns {Night|null} */
 function normalizeSleep(given) {
-  const s = objectOr(given);
-  return s && iso(s.wakeAt) && iso(s.until) ? { wakeAt: iso(s.wakeAt), until: iso(s.until) } : null;
+  const night = objectOr(given);
+  const wakeAt = night && iso(night.wakeAt);
+  const until = night && iso(night.until);
+  return wakeAt && until ? { wakeAt, until } : null;
 }
 
 /** The last dream: kept only with the time it was told. */
+/** @returns {StoredDream|null} */
 function normalizeDream(given) {
   const d = objectOr(given);
-  if (!d || !iso(d.at)) return null;
-  return { dream: sentence(d.dream, 300), remembered: REMEMBERED.includes(d.remembered) ? d.remembered : 'some', at: iso(d.at) };
+  const at = d && iso(d.at);
+  if (!d || !at) return null;
+  return { dream: sentence(d.dream, 300), remembered: REMEMBERED.includes(d.remembered) ? d.remembered : 'some', at };
 }
 
-/** One Kin's entry in status.json, complete and valid. */
+/**
+ * One Kin's entry in status.json, complete and valid.
+ * @param {any} [e]
+ * @returns {Entry}
+ */
 export function normalizeEntry(e = {}) {
   return {
     name: str(e.name, 120),
@@ -98,9 +147,13 @@ export function normalizeEntry(e = {}) {
   };
 }
 
-/** status.json (text or object) -> { v, kins: { id: entry } }. */
+/**
+ * status.json (text or object) -> { v, kins: { id: entry } }.
+ * @returns {Status}
+ */
 export function normalizeStatus(raw) {
   const o = parse(raw);
+  /** @type {Object<string, Entry>} */
   const kins = {};
   if (o.kins && typeof o.kins === 'object') {
     for (const [id, e] of Object.entries(o.kins)) if (str(id, 120)) kins[id] = normalizeEntry(e && typeof e === 'object' ? e : {});
@@ -133,6 +186,10 @@ export function plannedAt(entry, settings) {
 // ---------------------------------------------------------------- what a run does to an entry (pure: no I/O)
 
 /** A step went through: errors, notes and any slowing down are over. */
+/**
+ * @param {Entry} entry
+ * @returns {Entry}
+ */
 export function succeeded(entry) {
   return { ...entry, failures: 0, serverFailures: 0, errorKind: null, error: null, note: null, retryAt: null };
 }
@@ -140,6 +197,11 @@ export function succeeded(entry) {
 /**
  * A step failed: errors in a row slow the next try down (retryDelay); only Kindroid errors count towards the server
  * warning, a Kin's unusable answer does not. `note` is what the person is told instead of the error, if anything.
+ */
+/**
+ * @param {Entry} entry
+ * @param {{ kind?: ErrorKind, error: string, note?: string|null, now: Date, intervalS: number }} failure
+ * @returns {Entry}
  */
 export function failedEntry(entry, { kind: given, error, note = null, now, intervalS }) {
   const kind = errorKind(error, given || ERROR.SERVER);
@@ -156,6 +218,11 @@ export function failedEntry(entry, { kind: given, error, note = null, now, inter
 }
 
 /** The run's own time ran out before a question: nothing failed, the step waits for the next start. */
+/**
+ * @param {Entry} entry
+ * @param {{ now: Date, note: string }} when
+ * @returns {Entry}
+ */
 export function postponedEntry(entry, { now, note }) {
   return { ...entry, retryAt: new Date(now.getTime() + TICK_S * 1000).toISOString(), note };
 }
@@ -169,6 +236,10 @@ const newer = (a, b) => (!a ? b : !b ? a : (a.at || '') >= (b.at || '') ? a : b)
  * save. The night goes to the run that changed it (asked the dream question, started a night); if both did, to the
  * one that started later. The newest reading and dream are kept either way. Returns { entry, concurrent, theirs }:
  * concurrent when another run did save in between, theirs when its night was kept.
+ */
+/**
+ * @param {{ current?: Entry, start?: Entry|null, next: Entry }} entries
+ * @returns {{ entry: Entry, concurrent: boolean, theirs: boolean }}
  */
 export function mergeConcurrent({ current, start, next }) {
   if (!current || !start || current.lastRunAt === start.lastRunAt) return { entry: next, concurrent: false, theirs: false };

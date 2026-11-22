@@ -43,3 +43,6 @@ export function joinNatural(list) {
   if (list.length <= 1) return list.join('');
   return `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
 }
+
+/** What went wrong, as text, whatever was thrown (an Error, a string, anything): never "undefined". */
+export const errorMessage = (e) => (e instanceof Error ? e.message : String(e));

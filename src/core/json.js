@@ -150,7 +150,8 @@ function bareKey(text, i, out) {
 function bareWord(text, i) {
   if (!/[A-Za-z]/.test(text[i])) return null;
   BARE_WORD.lastIndex = i;
-  const w = BARE_WORD.exec(text)[0];
+  const m = BARE_WORD.exec(text);
+  const w = m ? m[0] : text[i]; // always a match: text[i] is a letter
   return { out: PYTHON[w] ?? w, end: i + w.length - 1 };
 }
 

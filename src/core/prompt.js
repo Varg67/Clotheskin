@@ -6,6 +6,12 @@ export const KIN_ASK_LIMIT = 8000;
 
 const SLOT_LIST = [...CLOTHING_SLOTS, ...ACCESSORY_SLOTS, BAG_SLOT].join(', ');
 
+/** The format example of the reading question; its values also tell a Kin that copied them instead of answering. */
+const EXAMPLE = {
+  location: 'at a bookstore', pose: 'standing by a shelf', action: 'flipping through a book', hair: 'a loose braid',
+  topwear: ['a grey hoodie'], bottomwear: ['black leggings'], footwear: ['white sneakers'],
+};
+
 /**
  * The reading question. The Kin sees its own recent chat with the person (grants kin:read and chat:read:<days>), so
  * the prompt carries no messages: only what to say and how.
@@ -21,10 +27,8 @@ Reply with minified JSON only, on one line: no code fence, narration, roleplay o
 Other keys are slots: arrays of short noun phrases with article and key traits, at most 6 words ("a perfumed white shirt"), innermost layer first. Slots: ${SLOT_LIST}.
 topwear = shirts, sweaters, jackets, coats, dresses; bottomwear = trousers, jeans, skirts, shorts; footwear = shoes, boots; footunderwear = socks, tights; topunderwear, bottomunderwear = bra, undershirt, underpants only; eyes-accessory = glasses; bottom-accessory = hips; bags = backpack, handbag.
 The example shows the format only; never copy its values.
-Example: {"location":"at a bookstore","pose":"standing by a shelf","action":"flipping through a book","hair":"a loose braid","topwear":["a grey hoodie"],"bottomwear":["black leggings"],"footwear":["white sneakers"]}`;
+Example: ${JSON.stringify(EXAMPLE)}`;
 
-/** The example's values, to notice a Kin that copied them instead of answering. */
-const EXAMPLE = JSON.parse(OUTFIT_PROMPT.match(/Example: (\{.*\})/)[1]);
 const flat = (v) => (Array.isArray(v) ? v.join('|') : String(v ?? '')).trim().toLowerCase();
 
 /** True when at least three of the example's values come back unchanged: a copy, not a reading. */

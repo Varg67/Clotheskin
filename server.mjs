@@ -18,7 +18,7 @@ const PUBLIC = ['dev', 'screen', 'src', 'run', 'sample'];
 export function createAppServer() {
   return createServer(async (req, res) => {
     try {
-      const url = new URL(req.url, 'http://localhost');
+      const url = new URL(req.url || '/', 'http://localhost');
       let rel = normalize(decodeURIComponent(url.pathname)).replace(/^[/\\]+/, '');
       if (rel === '') rel = 'dev/index.html';
       const abs = join(root, rel);

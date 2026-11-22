@@ -12,7 +12,13 @@ const FILES_ONLY_AFTER_MS = 1500; // the page answered files but not the Kins th
 
 export function boot() {
   const root = document.getElementById('app');
+  if (!root) return; // not the screen's page
   const channel = frameChannel(window);
+  if (!channel) {
+    const none = { root, channel: null, connect: async () => null, start: async () => {}, isStarted: () => false };
+    notConnected(none, 'Clotheskin is a Kindroid app: open it from Apps in Kindroid. To try it on your computer, run npm start and open the page it prints.');
+    return;
+  }
   let started = false;
 
   /**
@@ -20,16 +26,14 @@ export function boot() {
    * also counts, after a short wait: the App Library takes its picture of the screen from the sample/ files, with no
    * Kindroid around (the names then come from status.json; if the Kins come later, the app takes them then).
    */
-  function connect(timeout) {
-    return new Promise((resolve) => {
-      let done = false;
-      const finish = (v) => { if (!done) { done = true; resolve(v); } };
-      channel.kins(timeout).then((kins) => finish({ kins }), () => { if (!channel.heard) finish(null); });
-      channel.read(SETTINGS_FILE).then(() => setTimeout(() => finish({ kins: null }), FILES_ONLY_AFTER_MS), () => finish(null));
-    });
-  }
+  const connect = (timeout) => new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    channel.kins(timeout).then((kins) => finish({ kins }), () => { if (!channel.heard) finish(null); });
+    channel.read(SETTINGS_FILE).then(() => setTimeout(() => finish({ kins: null }), FILES_ONLY_AFTER_MS), () => finish(null));
+  });
 
-  async function start(kins) {
+  const start = async (kins) => {
     if (started) return;
     started = true;
     const hadFocus = root.contains(document.activeElement);
@@ -39,13 +43,9 @@ export function boot() {
       const el = root.querySelector('[data-key="update"], [data-key^="pick-"], button');
       if (el) el.focus();
     }
-  }
+  };
 
   const link = { root, channel, connect, start, isStarted: () => started };
-  if (!channel) {
-    notConnected(link, 'Clotheskin is a Kindroid app: open it from Apps in Kindroid. To try it on your computer, run npm start and open the page it prints.');
-    return;
-  }
   connect().then((c) => {
     if (c) start(c.kins);
     else notConnected(link, 'The page around Clotheskin did not answer. It keeps trying by itself for a few minutes; if it keeps failing, close and reopen the app. Kindroid may be busy or under maintenance.');

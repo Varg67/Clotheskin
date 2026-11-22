@@ -18,7 +18,7 @@ const NOT_ASLEEP = /\b(not|never|no longer|unable to|can['’]?t|cannot|trying t
  */
 export function sentenceMark(text) {
   let h = 0x811c9dc5;
-  for (const ch of String(text ?? '')) { h ^= ch.codePointAt(0); h = Math.imul(h, 0x01000193) >>> 0; }
+  for (const ch of String(text ?? '')) { h ^= ch.codePointAt(0) ?? 0; h = Math.imul(h, 0x01000193) >>> 0; }
   return h.toString(16).padStart(8, '0');
 }
 
@@ -71,7 +71,7 @@ const falsy = (v) => v === false || /^(false|no|n|awake|not sleeping)$/i.test(St
 /** @returns {{ ok: true, sleeping: boolean, wakeAt: string|null } | Failure} */
 export function parseSleepAnswer(text) {
   const p = parseAnswerObject(text);
-  if (p.ok === false) return p;
+  if (!p.ok) return p;
   const o = p.value;
   const key = Object.keys(o).find((k) => /^(sleeping|asleep|is_?sleeping)$/i.test(k));
   if (!key) return { ok: false, error: 'The answer does not say whether the Kin is asleep.' };
@@ -95,7 +95,7 @@ const NO_DREAM = /^(none|nothing|no dream|n\/?a|unknown|-+)?$/i;
  */
 export function parseDreamAnswer(text) {
   const p = parseAnswerObject(text);
-  if (p.ok === false) return p;
+  if (!p.ok) return p;
   const { dream, remembered } = dreamFields(p.value);
   if (typeof dream !== 'string') return { ok: false, error: '"dream" must be a text.' };
   const summary = cleanString(dream, 240).replace(/^["“]|["”]$/g, '');
@@ -112,7 +112,7 @@ const dreamFields = (o) => ({ dream: o.dream ?? o.summary ?? '', remembered: Str
  */
 function parseAnswerObject(text) {
   const p = parseJsonObject(text);
-  if (p.ok === false) return p;
+  if (!p.ok) return p;
   const o = p.value;
   if (!o || typeof o !== 'object' || Array.isArray(o)) return { ok: false, error: 'The answer must be a JSON object.' };
   return { ok: true, value: o };

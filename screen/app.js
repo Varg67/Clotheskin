@@ -211,7 +211,8 @@ function bareKey(text, i, out) {
 function bareWord(text, i) {
   if (!/[A-Za-z]/.test(text[i])) return null;
   BARE_WORD.lastIndex = i;
-  const w = BARE_WORD.exec(text)[0];
+  const m = BARE_WORD.exec(text);
+  const w = m ? m[0] : text[i]; // always a match: text[i] is a letter
   return { out: PYTHON[w] ?? w, end: i + w.length - 1 };
 }
 
@@ -339,7 +340,7 @@ const NOT_ASLEEP = /\b(not|never|no longer|unable to|can['’]?t|cannot|trying t
  */
 function sentenceMark(text) {
   let h = 0x811c9dc5;
-  for (const ch of String(text ?? '')) { h ^= ch.codePointAt(0); h = Math.imul(h, 0x01000193) >>> 0; }
+  for (const ch of String(text ?? '')) { h ^= ch.codePointAt(0) ?? 0; h = Math.imul(h, 0x01000193) >>> 0; }
   return h.toString(16).padStart(8, '0');
 }
 
@@ -392,7 +393,7 @@ const falsy = (v) => v === false || /^(false|no|n|awake|not sleeping)$/i.test(St
 /** @returns {{ ok: true, sleeping: boolean, wakeAt: string|null } | Failure} */
 function parseSleepAnswer(text) {
   const p = parseAnswerObject(text);
-  if (p.ok === false) return p;
+  if (!p.ok) return p;
   const o = p.value;
   const key = Object.keys(o).find((k) => /^(sleeping|asleep|is_?sleeping)$/i.test(k));
   if (!key) return { ok: false, error: 'The answer does not say whether the Kin is asleep.' };
@@ -416,7 +417,7 @@ const NO_DREAM = /^(none|nothing|no dream|n\/?a|unknown|-+)?$/i;
  */
 function parseDreamAnswer(text) {
   const p = parseAnswerObject(text);
-  if (p.ok === false) return p;
+  if (!p.ok) return p;
   const { dream, remembered } = dreamFields(p.value);
   if (typeof dream !== 'string') return { ok: false, error: '"dream" must be a text.' };
   const summary = cleanString(dream, 240).replace(/^["“]|["”]$/g, '');
@@ -433,7 +434,7 @@ const dreamFields = (o) => ({ dream: o.dream ?? o.summary ?? '', remembered: Str
  */
 function parseAnswerObject(text) {
   const p = parseJsonObject(text);
-  if (p.ok === false) return p;
+  if (!p.ok) return p;
   const o = p.value;
   if (!o || typeof o !== 'object' || Array.isArray(o)) return { ok: false, error: 'The answer must be a JSON object.' };
   return { ok: true, value: o };
@@ -474,6 +475,43 @@ const { snapInterval, retryDelay, errorKind, DEFAULT_INTERVAL_S, ERRORS_BEFORE_W
 const { safeTimeZone } = __req("src/core/time.js");
 const { REMEMBERED } = __req("src/core/sleep.js");
 const { oneLine } = __req("src/core/text.js");
+/** @import { ErrorKind } from './schedule.js' */
+
+/**
+ * settings.json, as the screen writes it.
+ * @typedef {object} Settings
+ * @property {1} v
+ * @property {string|null} kinId the Kin of the current roleplay: the only one read
+ * @property {'running'|'paused'|'stopped'} autoState Start / Pause / Stop
+ * @property {number} intervalS how often the automatic update reads, in seconds (15 min to 4 h)
+ * @property {string} tz the person's IANA time zone (wake-up times are on their clock)
+ * @property {string} theme
+ * @property {boolean} tellDream tell the Kin its dream (kin tell), so it can remember it during the day
+ * @property {boolean} reachOut and let it bring the dream up by itself (kin tell --reach-out)
+ * @property {string|null} stoppedAt when Stop was last pressed (ISO time)
+ *
+ * The card's sentences of the last reading. Hair and makeup only when the Kin described them.
+ * @typedef {{ location: string, doing: string, outfit: string, hair: string|null, makeup: string|null, at: string|null }} StoredReading
+ * @typedef {{ wakeAt: string, until: string }} Night  when the Kin wakes up, and from when the dream question is due
+ * @typedef {{ dream: string|null, remembered: string, at: string }} StoredDream
+ *
+ * One Kin's entry in status.json, as the run writes it.
+ * @typedef {object} Entry
+ * @property {string|null} name
+ * @property {StoredReading|null} reading
+ * @property {string|null} lastRunAt the last time a step ran for this Kin (reading, sleep or dream question)
+ * @property {string|null} retryAt after an error, or a step that did not fit in a run: when to try again
+ * @property {number} failures errors in a row (they slow the next try down)
+ * @property {number} serverFailures Kindroid's own errors in a row (three show the server warning)
+ * @property {string|null} errorKind
+ * @property {string|null} error
+ * @property {string|null} note what the person is told instead of the error
+ * @property {Night|null} sleep
+ * @property {string|null} sleptOn the fingerprint of the "asleep" sentence of the last night
+ * @property {StoredDream|null} dream
+ *
+ * @typedef {{ v: 1, kins: Object<string, Entry> }} Status
+ */
 
 const SETTINGS_FILE = 'settings.json';
 const STATUS_FILE = 'status.json';
@@ -508,6 +546,7 @@ const iso = (v) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? new 
 const count = (v) => (Number.isInteger(v) && v > 0 ? Math.min(v, 99) : 0);
 
 /** settings.json (text or object) -> a complete, valid settings object. */
+/** @returns {Settings} */
 function normalizeSettings(raw) {
   const o = parse(raw);
   return {
@@ -526,26 +565,37 @@ function normalizeSettings(raw) {
 const objectOr = (v) => (v && typeof v === 'object' ? v : null);
 
 /** The last reading (the card's sentences): kept only with an outfit sentence. */
+/** @returns {StoredReading|null} */
 function normalizeReading(given) {
   const r = objectOr(given);
-  if (!r || !sentence(r.outfit, 600)) return null;
-  return { location: sentence(r.location, 300) || '', doing: sentence(r.doing, 300) || '', outfit: sentence(r.outfit, 600), hair: sentence(r.hair, 200), makeup: sentence(r.makeup, 200), at: iso(r.at) };
+  const outfit = r && sentence(r.outfit, 600);
+  if (!r || !outfit) return null;
+  return { location: sentence(r.location, 300) || '', doing: sentence(r.doing, 300) || '', outfit, hair: sentence(r.hair, 200), makeup: sentence(r.makeup, 200), at: iso(r.at) };
 }
 
 /** The night: when the Kin wakes up, and from when the dream question is due. Both times, or no night. */
+/** @returns {Night|null} */
 function normalizeSleep(given) {
-  const s = objectOr(given);
-  return s && iso(s.wakeAt) && iso(s.until) ? { wakeAt: iso(s.wakeAt), until: iso(s.until) } : null;
+  const night = objectOr(given);
+  const wakeAt = night && iso(night.wakeAt);
+  const until = night && iso(night.until);
+  return wakeAt && until ? { wakeAt, until } : null;
 }
 
 /** The last dream: kept only with the time it was told. */
+/** @returns {StoredDream|null} */
 function normalizeDream(given) {
   const d = objectOr(given);
-  if (!d || !iso(d.at)) return null;
-  return { dream: sentence(d.dream, 300), remembered: REMEMBERED.includes(d.remembered) ? d.remembered : 'some', at: iso(d.at) };
+  const at = d && iso(d.at);
+  if (!d || !at) return null;
+  return { dream: sentence(d.dream, 300), remembered: REMEMBERED.includes(d.remembered) ? d.remembered : 'some', at };
 }
 
-/** One Kin's entry in status.json, complete and valid. */
+/**
+ * One Kin's entry in status.json, complete and valid.
+ * @param {any} [e]
+ * @returns {Entry}
+ */
 function normalizeEntry(e = {}) {
   return {
     name: str(e.name, 120),
@@ -563,9 +613,13 @@ function normalizeEntry(e = {}) {
   };
 }
 
-/** status.json (text or object) -> { v, kins: { id: entry } }. */
+/**
+ * status.json (text or object) -> { v, kins: { id: entry } }.
+ * @returns {Status}
+ */
 function normalizeStatus(raw) {
   const o = parse(raw);
+  /** @type {Object<string, Entry>} */
   const kins = {};
   if (o.kins && typeof o.kins === 'object') {
     for (const [id, e] of Object.entries(o.kins)) if (str(id, 120)) kins[id] = normalizeEntry(e && typeof e === 'object' ? e : {});
@@ -598,6 +652,10 @@ function plannedAt(entry, settings) {
 // ---------------------------------------------------------------- what a run does to an entry (pure: no I/O)
 
 /** A step went through: errors, notes and any slowing down are over. */
+/**
+ * @param {Entry} entry
+ * @returns {Entry}
+ */
 function succeeded(entry) {
   return { ...entry, failures: 0, serverFailures: 0, errorKind: null, error: null, note: null, retryAt: null };
 }
@@ -605,6 +663,11 @@ function succeeded(entry) {
 /**
  * A step failed: errors in a row slow the next try down (retryDelay); only Kindroid errors count towards the server
  * warning, a Kin's unusable answer does not. `note` is what the person is told instead of the error, if anything.
+ */
+/**
+ * @param {Entry} entry
+ * @param {{ kind?: ErrorKind, error: string, note?: string|null, now: Date, intervalS: number }} failure
+ * @returns {Entry}
  */
 function failedEntry(entry, { kind: given, error, note = null, now, intervalS }) {
   const kind = errorKind(error, given || ERROR.SERVER);
@@ -621,6 +684,11 @@ function failedEntry(entry, { kind: given, error, note = null, now, intervalS })
 }
 
 /** The run's own time ran out before a question: nothing failed, the step waits for the next start. */
+/**
+ * @param {Entry} entry
+ * @param {{ now: Date, note: string }} when
+ * @returns {Entry}
+ */
 function postponedEntry(entry, { now, note }) {
   return { ...entry, retryAt: new Date(now.getTime() + TICK_S * 1000).toISOString(), note };
 }
@@ -634,6 +702,10 @@ const newer = (a, b) => (!a ? b : !b ? a : (a.at || '') >= (b.at || '') ? a : b)
  * save. The night goes to the run that changed it (asked the dream question, started a night); if both did, to the
  * one that started later. The newest reading and dream are kept either way. Returns { entry, concurrent, theirs }:
  * concurrent when another run did save in between, theirs when its night was kept.
+ */
+/**
+ * @param {{ current?: Entry, start?: Entry|null, next: Entry }} entries
+ * @returns {{ entry: Entry, concurrent: boolean, theirs: boolean }}
  */
 function mergeConcurrent({ current, start, next }) {
   if (!current || !start || current.lastRunAt === start.lastRunAt) return { entry: next, concurrent: false, theirs: false };
@@ -706,7 +778,10 @@ function joinNatural(list) {
   if (list.length <= 1) return list.join('');
   return `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
 }
-return { capitalizeFirst, cleanString, oneLine, toSentence, clipWords, trimEndPunctuation, stripWrapping, joinNatural };
+
+/** What went wrong, as text, whatever was thrown (an Error, a string, anything): never "undefined". */
+const errorMessage = (e) => (e instanceof Error ? e.message : String(e));
+return { capitalizeFirst, cleanString, oneLine, toSentence, clipWords, trimEndPunctuation, stripWrapping, joinNatural, errorMessage };
 });
 
 __def("src/core/time.js", function () {
@@ -974,6 +1049,7 @@ class Channel {
   write(path, body) {
     const prev = this.writes[path] || Promise.resolve();
     const next = prev.catch(() => {}).then(() => this.wait(`files.write:${path}`, { timeout: this.t.write, message: { kin: 'files.write', path, body } }))
+      // `=== false`, not `!r.ok`: in the page's replies a missing ok means it worked.
       .then((r) => { if (r.ok === false) throw new Error(`Kindroid did not save ${path}.`); return true; });
     this.writes[path] = next;
     return next;
@@ -1106,7 +1182,13 @@ const FILES_ONLY_AFTER_MS = 1500; // the page answered files but not the Kins th
 
 function boot() {
   const root = document.getElementById('app');
+  if (!root) return; // not the screen's page
   const channel = frameChannel(window);
+  if (!channel) {
+    const none = { root, channel: null, connect: async () => null, start: async () => {}, isStarted: () => false };
+    notConnected(none, 'Clotheskin is a Kindroid app: open it from Apps in Kindroid. To try it on your computer, run npm start and open the page it prints.');
+    return;
+  }
   let started = false;
 
   /**
@@ -1114,16 +1196,14 @@ function boot() {
    * also counts, after a short wait: the App Library takes its picture of the screen from the sample/ files, with no
    * Kindroid around (the names then come from status.json; if the Kins come later, the app takes them then).
    */
-  function connect(timeout) {
-    return new Promise((resolve) => {
-      let done = false;
-      const finish = (v) => { if (!done) { done = true; resolve(v); } };
-      channel.kins(timeout).then((kins) => finish({ kins }), () => { if (!channel.heard) finish(null); });
-      channel.read(SETTINGS_FILE).then(() => setTimeout(() => finish({ kins: null }), FILES_ONLY_AFTER_MS), () => finish(null));
-    });
-  }
+  const connect = (timeout) => new Promise((resolve) => {
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    channel.kins(timeout).then((kins) => finish({ kins }), () => { if (!channel.heard) finish(null); });
+    channel.read(SETTINGS_FILE).then(() => setTimeout(() => finish({ kins: null }), FILES_ONLY_AFTER_MS), () => finish(null));
+  });
 
-  async function start(kins) {
+  const start = async (kins) => {
     if (started) return;
     started = true;
     const hadFocus = root.contains(document.activeElement);
@@ -1133,13 +1213,9 @@ function boot() {
       const el = root.querySelector('[data-key="update"], [data-key^="pick-"], button');
       if (el) el.focus();
     }
-  }
+  };
 
   const link = { root, channel, connect, start, isStarted: () => started };
-  if (!channel) {
-    notConnected(link, 'Clotheskin is a Kindroid app: open it from Apps in Kindroid. To try it on your computer, run npm start and open the page it prints.');
-    return;
-  }
   connect().then((c) => {
     if (c) start(c.kins);
     else notConnected(link, 'The page around Clotheskin did not answer. It keeps trying by itself for a few minutes; if it keeps failing, close and reopen the app. Kindroid may be busy or under maintenance.');
@@ -1191,6 +1267,8 @@ __def("src/screen/store.js", function () {
 const { normalizeSettings, normalizeStatus, normalizeEntry, afterStop, SETTINGS_FILE, STATUS_FILE, ACTION, AUTO } = __req("src/core/state.js");
 const { deviceTimeZone } = __req("src/core/time.js");
 const { changesToTell } = __req("src/screen/texts.js");
+/** @import { Settings, Status } from '../core/state.js' */
+/** @typedef {{ id: string, name: string }} Who */
 
 const RUN_WORDS = { [AUTO.RUNNING]: 'started', [AUTO.PAUSED]: 'paused', [AUTO.STOPPED]: 'stopped' };
 
@@ -1201,7 +1279,11 @@ const RUN_WORDS = { [AUTO.RUNNING]: 'started', [AUTO.PAUSED]: 'paused', [AUTO.ST
  * the screen: the names then come from status.json).
  */
 function initialState(kins) {
-  return {
+  /**
+   * @type {{ kins: Who[], kinsKnown: boolean, settings: Settings, status: Status, statusText: string|null, loaded: boolean,
+   *   busy: Object<string, string>, error: { kinId?: string, save?: boolean, text: string }|null, picking: boolean, settingsOpen: boolean }}
+   */
+  const S = {
     kins: kins || [],
     kinsKnown: Array.isArray(kins),
     settings: normalizeSettings(null),
@@ -1213,6 +1295,7 @@ function initialState(kins) {
     picking: false, // the Kin list is open on the card
     settingsOpen: false,
   };
+  return S;
 }
 
 /** The Kins to show: the page's list, or (a still picture of the screen) the names status.json remembers. */

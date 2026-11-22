@@ -3,6 +3,8 @@
 import { normalizeSettings, normalizeStatus, normalizeEntry, afterStop, SETTINGS_FILE, STATUS_FILE, ACTION, AUTO } from '../core/state.js';
 import { deviceTimeZone } from '../core/time.js';
 import { changesToTell } from './texts.js';
+/** @import { Settings, Status } from '../core/state.js' */
+/** @typedef {{ id: string, name: string }} Who */
 
 const RUN_WORDS = { [AUTO.RUNNING]: 'started', [AUTO.PAUSED]: 'paused', [AUTO.STOPPED]: 'stopped' };
 
@@ -13,7 +15,11 @@ const RUN_WORDS = { [AUTO.RUNNING]: 'started', [AUTO.PAUSED]: 'paused', [AUTO.ST
  * the screen: the names then come from status.json).
  */
 export function initialState(kins) {
-  return {
+  /**
+   * @type {{ kins: Who[], kinsKnown: boolean, settings: Settings, status: Status, statusText: string|null, loaded: boolean,
+   *   busy: Object<string, string>, error: { kinId?: string, save?: boolean, text: string }|null, picking: boolean, settingsOpen: boolean }}
+   */
+  const S = {
     kins: kins || [],
     kinsKnown: Array.isArray(kins),
     settings: normalizeSettings(null),
@@ -25,6 +31,7 @@ export function initialState(kins) {
     picking: false, // the Kin list is open on the card
     settingsOpen: false,
   };
+  return S;
 }
 
 /** The Kins to show: the page's list, or (a still picture of the screen) the names status.json remembers. */

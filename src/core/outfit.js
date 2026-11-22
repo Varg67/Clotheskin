@@ -40,6 +40,7 @@ const LOOSE_SLOTS = new Set(['clothing', 'accessories']); // pieces grouped with
  * pose, …) are skipped without a warning; a key that is no slot is ignored with one.
  */
 function outfitFromObject(doc, nested = false) {
+  /** @type {{ outfit: Outfit, warnings: string[], errors: string[] }} */
   const found = { outfit: {}, warnings: [], errors: [] };
   for (const [key, value] of Object.entries(doc)) readSlot(found, key, value, nested);
   return found;
@@ -68,7 +69,7 @@ function mergeFound(found, inner) {
 /** @returns {{ ok: true, doc: Object<string, any> } | Failure} */
 function parseObject(text) {
   const parsed = parseJsonObject(text);
-  if (parsed.ok === false) return parsed;
+  if (!parsed.ok) return parsed;
   // A Kin that wraps its one object in a list ([{...}]) is understood.
   const value = Array.isArray(parsed.value) && parsed.value.length === 1 && isPlainObject(parsed.value[0]) ? parsed.value[0] : parsed.value;
   if (!isPlainObject(value)) return { ok: false, error: 'The answer must be a JSON object.' };
@@ -115,7 +116,7 @@ export function notEnglishKeys(doc) {
  */
 export function parseReading(text) {
   const p = parseObject(text);
-  if (p.ok === false) return p;
+  if (!p.ok) return p;
   const { outfit, warnings, errors } = outfitFromObject(p.doc);
   const read = (field, clean) => {
     const key = Object.keys(p.doc).find((k) => readingFieldOf(k) === field);
@@ -140,7 +141,11 @@ export function parseReading(text) {
   return { ok: true, outfit, location, pose, action, hair, makeup, warnings, notEnglish: notEnglishKeys(p.doc) };
 }
 
-/** The sentences shown on the card. A partial result (nothing read) gives the "nothing described" sentences. */
+/**
+ * The sentences shown on the card. A partial result (nothing read) gives the "nothing described" sentences.
+ * @param {Partial<Reading>} [reading]
+ * @returns {{ location: string, doing: string, outfit: string, hair: string, makeup: string }}
+ */
 export function describeReading({ outfit = {}, location = null, pose = null, action = null, hair = null, makeup = null } = {}) {
   return { location: describeLocation(location), doing: describeDoing({ pose, action }), outfit: describeOutfit(outfit), hair: describeHair(hair), makeup: describeMakeup(makeup) };
 }

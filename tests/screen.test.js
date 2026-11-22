@@ -92,3 +92,9 @@ test('the screen is one classic script that older Safari can run, and keeps no d
   assert.ok(!/color-mix\(|:has\(|@container/.test(css), 'no CSS newer than Safari 14');
   assert.match(css, /min-height: 100vh; min-height: 100dvh/, 'dvh has a fallback');
 });
+
+test('the screen carries none of the answer reader (outfit.js, prompt.js): only the run reads the Kin\'s answers', () => {
+  const app = readFileSync(new URL('../screen/app.js', import.meta.url), 'utf8');
+  for (const f of ['src/core/outfit.js', 'src/core/prompt.js']) assert.ok(!app.includes(`__def("${f}"`), `${f} is in the screen`);
+  assert.ok(app.length < 80000, `screen/app.js is ${app.length} characters`);
+});

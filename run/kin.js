@@ -12,9 +12,9 @@
 import { execFile } from 'node:child_process';
 import { oneLine } from '../src/core/text.js';
 
-export const END_LIMIT = 500; // kin end keeps at most 500 characters
+const END_LIMIT = 500; // kin end keeps at most 500 characters
 
-export class KinError extends Error {
+class KinError extends Error {
   constructor(message, { code = null, stderr = '', timedOut = false } = {}) {
     super(message);
     this.code = code;

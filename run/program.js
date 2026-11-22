@@ -12,7 +12,8 @@ import { buildOutfitPrompt, buildFollowUpPrompt, buildCorrectionPrompt, SLEEP_PR
 import { parseReading, describeReading } from '../src/core/outfit.js';
 import { looksAsleep, sentenceMark, planSleep, parseSleepAnswer, parseDreamAnswer, describeDream, dreamFact, DREAM_TTL_HOURS } from '../src/core/sleep.js';
 import { retryDelay, errorKind, isDue, TICK_S } from '../src/core/schedule.js';
-import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, forgetOld, carryOver, SETTINGS_FILE, STATUS_FILE, ACTION, OPS } from '../src/core/state.js';
+import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, forgetOld, carryOver, SETTINGS_FILE, STATUS_FILE, ACTION, OPS } from '../src/core/state.js';
+import { NOT_DESCRIBED } from '../src/core/constants.js';
 import { describeNow } from '../src/core/time.js';
 import { formatWhen } from '../src/core/format.js';
 import { oneLine } from '../src/core/text.js';
@@ -43,8 +44,9 @@ export async function runProgram({ event, kin, clock = () => new Date(), log = (
     return failed(`Could not read the app's files, so nothing was changed: ${e.message}`);
   }
   const ctx = { kin, clock, log, settings, retryAfterMs, deadline: Date.now() + budgetMs };
-  // Erase what may no longer be kept (a dream older than a day, anything from before Stop). Every start does this,
-  // even while stopped, so the file holds no more than the screen says.
+  // Erase what may no longer be kept (a dream older than a day; the night, dream and slowing down from before Stop).
+  // Every start does this, even while stopped, so the file holds no more than the screen says, and every step below
+  // starts from an entry that Stop has already been applied to.
   if (forgetOld(status, settings, clock()).changed) {
     try {
       const fresh = forgetOld(normalizeStatus(await kin.get(STATUS_FILE)), settings, clock());
@@ -68,7 +70,7 @@ async function scheduled(ctx, status) {
   if (settings.autoState === 'paused') return ok('Automatic update is paused.');
   if (!settings.kinId) return ok('No Kin is selected.');
 
-  const entry = afterStop(status.kins[settings.kinId] || normalizeEntry(), settings); // Stop forgot the night before it
+  const entry = status.kins[settings.kinId] || normalizeEntry();
   const at = plannedAt(entry, settings);
   // most starts end here, without asking anything; the line shows in Kindroid's log, so it is on the person's clock
   if (!isDue(at, clock())) return ok(`Nothing to do yet: next update around ${formatWhen(at, { timeZone: settings.tz, now: clock() })}.`);
@@ -83,7 +85,7 @@ async function onAction(ctx, status, event) {
   const id = typeof event.kin === 'string' && event.kin ? event.kin : (typeof input.kin === 'string' ? input.kin : '');
   if (!id) return failed('No Kin was given.');
   const op = OPS.includes(input.op) ? input.op : 'read';
-  const entry = afterStop(status.kins[id] || normalizeEntry(), ctx.settings);
+  const entry = status.kins[id] || normalizeEntry();
   const who = await attachedKin(ctx, id, entry);
   if (!who.ok) return who.result;
   // Wake now asks about the dream at once; Update status reads, and if the Kin turns out awake its night ends.
@@ -126,7 +128,9 @@ async function read(ctx, who, entry) {
   e.serverFailures = 0; // Kindroid answered
   const line = `${who.name}: ${[reading.location, reading.doing, reading.outfit, reading.hair, reading.makeup].filter(Boolean).join(' ')}`;
 
-  // Sleep is read from what the Kin said just now, never from a pose kept from an earlier reading.
+  // Sleep is read from what the Kin said just now, never from a pose kept from an earlier reading. An answer that says
+  // nothing about the pose or action is not a sign of being awake: the night, if any, and its mark stay as they are.
+  if (fresh.doing === NOT_DESCRIBED.doing) { await save(ctx, who.id, succeeded(e), entry); return ok(line); }
   if (!looksAsleep(fresh.doing)) {
     await save(ctx, who.id, succeeded({ ...e, sleep: null, sleptOn: null }), entry); // awake: any night is over
     return ok(line);

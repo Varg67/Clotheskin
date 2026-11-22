@@ -42,3 +42,22 @@ test('the sample/ folder is laid out like the data folder the screen reads', () 
   const settings = JSON.parse(readFileSync(join(root, 'sample/settings.json'), 'utf8'));
   assert.ok(status.kins[settings.kinId].reading.outfit);
 });
+
+test('COMO-INSTALAR.md lists exactly the files Kindroid runs (the ones npm run pack packs)', () => {
+  const guide = readFileSync(join(root, 'COMO-INSTALAR.md'), 'utf8');
+  const listed = guide.split('## Os ')[1].split('```')[1].trim().split('\n').map((l) => l.trim()).sort();
+  const runs = spawnSync('git', ['ls-files', 'kin.json', 'package.json', 'main.js', 'run', 'src/core', 'screen', 'sample'], { cwd: root, encoding: 'utf8' }).stdout.trim().split('\n').sort();
+  assert.deepEqual(listed, runs);
+  assert.match(guide, new RegExp(`## Os ${runs.length} arquivos`));
+});
+
+test('the run imports only files that Kindroid gets: nothing from tests/, dev/ or scripts/', () => {
+  for (const f of ['main.js', 'run/kin.js', 'run/program.js', ...readdirSync(join(root, 'src/core')).map((x) => `src/core/${x}`)]) {
+    const text = readFileSync(join(root, f), 'utf8');
+    for (const [, spec] of text.matchAll(/^import .* from '([^']+)';$/gm)) {
+      if (spec.startsWith('node:')) continue;
+      const target = join(root, f, '..', spec).slice(root.length);
+      assert.match(target, /^(main\.js|run\/|src\/core\/)/, `${f} imports ${spec}`);
+    }
+  }
+});

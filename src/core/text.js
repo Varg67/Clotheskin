@@ -2,7 +2,7 @@
 // joiner is kept: emoji sequences need it.
 const INVISIBLE = /[\u200B\u2060\uFEFF\u00AD]/g;
 /** Never ends in half of an emoji (a lone surrogate) after a cut. */
-export const dropHalfChar = (s) => s.replace(/[\uD800-\uDBFF]$/, '');
+const dropHalfChar = (s) => s.replace(/[\uD800-\uDBFF]$/, '');
 
 export function capitalizeFirst(s) {
   const str = String(s ?? '');

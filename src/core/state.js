@@ -9,11 +9,11 @@ import { snapInterval, DEFAULT_INTERVAL_S, ERRORS_BEFORE_WARNING } from './sched
 import { safeTimeZone } from './time.js';
 import { REMEMBERED, DREAM_TTL_HOURS } from './sleep.js';
 import { oneLine } from './text.js';
-import { NOT_DESCRIBED } from './outfit.js';
+import { NOT_DESCRIBED } from './constants.js';
 
 export const SETTINGS_FILE = 'settings.json';
 export const STATUS_FILE = 'status.json';
-export const RUN_STATES = ['running', 'paused', 'stopped'];
+const RUN_STATES = ['running', 'paused', 'stopped'];
 export const THEMES = { warm: 'Warm (default)', sage: 'Sage green' };
 /** The program's one action (kin.json), used by the screen. One action, so one input rule. */
 export const ACTION = 'update_status';
@@ -57,7 +57,7 @@ export function normalizeSettings(raw) {
 }
 
 /** The sentences of a reading, each kept until the Kin says something new about it. */
-export const READING_FIELDS = ['location', 'doing', 'outfit', 'hair', 'makeup'];
+const READING_FIELDS = ['location', 'doing', 'outfit', 'hair', 'makeup'];
 const seenOf = (o) => Object.fromEntries(READING_FIELDS.filter((k) => o && iso(o[k])).map((k) => [k, iso(o[k])]));
 const said = (k, v) => typeof v === 'string' && v.trim() !== '' && v !== NOT_DESCRIBED[k];
 

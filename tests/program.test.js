@@ -491,3 +491,37 @@ test('a pose kept from an earlier reading never starts a night: sleep is read fr
   assert.equal(k.entry().reading.doing, 'Lying in bed, sleeping.', 'still shown, as last seen');
   assert.equal(k.entry().sleep, null);
 });
+
+test('an answer that says nothing about the pose is not "awake": Update status at night keeps the night', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', ...SAO_PAULO } });
+  const night = { sleep: { wakeAt: '2026-11-21T10:30:00.000Z', until: '2026-11-21T10:20:00.000Z' }, sleptOn: '0000abcd', lastRunAt: '2026-11-21T02:00:00Z' };
+  k.files.set('status.json', JSON.stringify({ kins: { k1: { name: 'Isa', ...night } } }));
+  k.at('2026-11-21T04:00:00Z');
+  k.answers.reading.push(JSON.stringify({ topwear: ['an oversized T-shirt'] })); // nothing about the pose
+  const r = await press(k);
+  assert.equal(r.ok, true);
+  assert.deepEqual(k.entry().sleep, night.sleep, 'the night goes on: the dream is still asked in the morning');
+  assert.equal(k.entry().sleptOn, '0000abcd');
+  assert.deepEqual(k.asks(), ['reading'], 'no sleep question');
+});
+
+test('after a night, an answer without a pose keeps the mark: the same still "asleep" chat does not start a second night', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', intervalS: 900, ...SAO_PAULO } });
+  k.answers.reading.push(ASLEEP);
+  k.answers.sleep.push('{"sleeping":true,"wake_at":"07:30"}');
+  k.at('2026-11-21T02:10:00Z'); // 23:10 in São Paulo
+  await tick(k);
+  k.at(k.entry().sleep.until);
+  k.answers.dream.push('{"dream":"A train","remembered":"some"}');
+  await tick(k); // woke up, dream asked
+  const mark = k.entry().sleptOn;
+  assert.ok(mark);
+  k.advance(20);
+  k.answers.reading.splice(0, Infinity, JSON.stringify({ topwear: ['pyjamas'] })); // nothing about the pose
+  await tick(k);
+  assert.equal(k.entry().sleptOn, mark, 'the mark stays');
+  k.advance(20);
+  k.answers.reading.splice(0, Infinity, ASLEEP); // the chat has not moved: the same "asleep" sentence
+  await tick(k);
+  assert.deepEqual(k.asks(), ['reading', 'sleep', 'dream', 'reading', 'reading'], 'no second sleep question');
+});

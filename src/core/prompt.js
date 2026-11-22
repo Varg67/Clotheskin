@@ -69,7 +69,7 @@ If you remember no dream at all: {"dream":"","remembered":"nothing"}
  * Asked once more, in the same run, when the Kin's answer could not be read (roleplay, narration, another language):
  * the same question, after a short correction. Self-contained: it does not rely on the Kin remembering the first ask.
  */
-export const CORRECTION = '[DIRECTIVE — OUT OF CHARACTER] Your previous reply to this directive could not be used: it was roleplay, narration or not the JSON asked for. Do not continue the roleplay. Answer the directive below with the JSON line only.';
+const CORRECTION = '[DIRECTIVE — OUT OF CHARACTER] Your previous reply to this directive could not be used: it was roleplay, narration or not the JSON asked for. Do not continue the roleplay. Answer the directive below with the JSON line only.';
 export function buildCorrectionPrompt(prompt) {
   return `${CORRECTION}\n${prompt}`;
 }

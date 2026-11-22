@@ -1,7 +1,7 @@
 // The whole "tracker" logic: read the Kin's JSON, put its branches in order, add commas, show a sentence.
 // Nothing here is saved: every reading stands on its own.
 // Five sentences: location, pose and action, outfit, hair, makeup.
-import { ACCESSORY_SLOTS, BAG_SLOT, WEAR_SLOTS } from './constants.js';
+import { ACCESSORY_SLOTS, BAG_SLOT, WEAR_SLOTS, NOT_DESCRIBED } from './constants.js';
 import { cleanString, capitalizeFirst } from './text.js';
 import { parseJsonObject } from './json.js';
 import { looksCopiedFromExample } from './prompt.js';
@@ -36,9 +36,9 @@ const LOOSE_CLOTHING = new Set(['clothing', 'clothes', 'outfit', 'wearing', 'gar
 const LOOSE_ACCESSORIES = new Set(['accessories', 'accessory', 'extras', 'jewelry', 'jewellery', 'acessorios', 'acessorio', 'joias']);
 
 /** Branches in reading order: head to toe, then accessories, then bags. Underwear goes last (see describe). */
-export const CLOTHING_ORDER = ['headwear', 'topwear', 'bottomwear', 'footwear', 'footunderwear', 'clothing'];
-export const UNDERWEAR_ORDER = ['topunderwear', 'bottomunderwear'];
-export const ACCESSORY_ORDER = [...ACCESSORY_SLOTS, BAG_SLOT, 'accessories'];
+const CLOTHING_ORDER = ['headwear', 'topwear', 'bottomwear', 'footwear', 'footunderwear', 'clothing'];
+const UNDERWEAR_ORDER = ['topunderwear', 'bottomunderwear'];
+const ACCESSORY_ORDER = [...ACCESSORY_SLOTS, BAG_SLOT, 'accessories'];
 
 const PLACEHOLDER = /^(unknown|unspecified|undefined|null|none|nothing|no\s.*|not (mentioned|specified|stated|known|visible|described)|n\/?a|-+|\?+)$/i;
 const MAX_PER_SLOT = 8;
@@ -109,18 +109,6 @@ function parseObject(text) {
   return { ok: true, doc };
 }
 
-/**
- * Turns the Kin's answer into { slot: [pieces] }. Unknown keys are ignored with a warning; a wrong value type
- * is an error (nothing is guessed). `{}` is valid and means "no outfit described".
- */
-export function parseOutfit(text) {
-  const p = parseObject(text);
-  if (!p.ok) return p;
-  const { outfit, warnings, errors } = outfitFromObject(p.doc);
-  if (errors.length) return { ok: false, error: errors.join(' ') };
-  return { ok: true, outfit, warnings };
-}
-
 // ---- shared cleanup for location, pose and action
 const CLOTHES_CLAUSE = /\s*[,;–—-]?\s*\b(wearing|dressed)\b.*$/i; // "…, wearing a robe"
 
@@ -181,13 +169,6 @@ export function cleanLocation(v) {
  * "in the kitchen" -> "In the kitchen." Only a bare noun phrase is adjusted: articles and proper names get "in",
  * "home" gets "at"; any other bare word, and anything Portuguese, is shown as written.
  */
-/** What a sentence says when the Kin's answer said nothing about it: such a sentence is never carried over. */
-export const NOT_DESCRIBED = Object.freeze({
-  location: 'No location described in the recent chat.',
-  doing: 'No pose or action described in the recent chat.',
-  outfit: 'No outfit described in the recent chat.',
-});
-
 export function describeLocation(value) {
   if (!value) return NOT_DESCRIBED.location;
   const v = value.trim();
@@ -242,8 +223,8 @@ export function describeDoing({ pose, action } = {}) {
 }
 
 // ---- hair and makeup: one short phrase each ("long black hair in a ponytail", "red lipstick and eyeliner")
-export const NO_HAIR = 'No hair described in the recent chat.';
-export const NO_MAKEUP = 'No makeup described in the recent chat.';
+const NO_HAIR = 'No hair described in the recent chat.';
+const NO_MAKEUP = 'No makeup described in the recent chat.';
 const MAX_LOOK = 100;
 // Saying "none" may mean "not mentioned"; only an explicit "no makeup" means a bare face.
 const BARE_FACE = /^(no make-?up( at all)?|without (any )?make-?up|make-?up[- ]free|bare[- ]?faced?|a bare face|natural,? no make-?up|((i|she|he)\s*(['’]m|am|is|['’]s)\s+)?not wearing (any )?make-?up( at all| today)?)$/i;
@@ -264,8 +245,8 @@ function lookPhrase(v) {
   return s.length > MAX_LOOK ? `${s.slice(0, MAX_LOOK).replace(/\s+\S*$/, '')}…` : s;
 }
 
-export const cleanHair = (v) => lookPhrase(v);
-export function cleanMakeup(v) {
+const cleanHair = (v) => lookPhrase(v);
+function cleanMakeup(v) {
   if (typeof v === 'string' && BARE_FACE.test(cleanString(v, 200).replace(/[.!\s]+$/, ''))) return 'no makeup';
   const s = lookPhrase(v);
   return typeof s === 'string' && BARE_FACE.test(s) ? 'no makeup' : s;
@@ -273,9 +254,9 @@ export function cleanMakeup(v) {
 
 const sentence = (s) => capitalizeFirst(s.endsWith('…') ? s : `${s}.`);
 /** "Long black hair in a ponytail." */
-export const describeHair = (value) => (value ? sentence(value) : NO_HAIR);
+const describeHair = (value) => (value ? sentence(value) : NO_HAIR);
 /** "Red lipstick and eyeliner." / "No makeup." */
-export const describeMakeup = (value) => (value ? sentence(value) : NO_MAKEUP);
+const describeMakeup = (value) => (value ? sentence(value) : NO_MAKEUP);
 
 // ---- English only: the Kin is asked to answer in English (fewer tokens, and the sentences are English). Portuguese
 // keys and values are still read, but they are reported so the diagnostics show whether the Kin follows the rule.

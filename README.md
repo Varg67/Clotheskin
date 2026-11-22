@@ -94,25 +94,21 @@ npm run try -- action    # the screen's Update status
 
 ## Send it to Kindroid
 
-```bash
-export KIN_TOKEN=kk_...  KIN_PROGRAM=clotheskin
-git add -A && git commit -m "Clotheskin"
-node kin.mjs send .
-```
+What worked: the Workshop agent fetches each file from GitHub's raw URLs (`raw.githubusercontent.com/<owner>/Clotheskin/<branch>/<path>`), so nothing is retyped or "improved" on the way. The files Kindroid runs are the ones `npm run pack` puts in `dist/clotheskin.tar.gz`: `kin.json`, `package.json`, `main.js`, `run/`, `src/core/`, `screen/` and `sample/`. `COMO-INSTALAR.md` (in Portuguese) has the message for the agent.
 
 Then, in Kindroid: Apps → **Waiting for you** → Allow. It reads your Kin's chat, so it always waits for you. To have it follow a Kin, open the app's settings → **Kins** and tick the Kin. Open the screen, pick the Kin of your roleplay, and press **Start**.
 
-## Still to confirm on the first real run
+## Confirmed in Kindroid (November 2026)
 
-Everything above is tested against the guide and the dev harness, not yet inside Kindroid.
+1. **Saving.** `kin files put <path>` takes the body on stdin (as Kin Bank and Planner do); a missing file is `kin: 404 …` on stderr.
+2. **`kin ask`** prints the Kin's answer on stdout, and the questions do not show up in the Kin's chat.
+3. **The grants** `kin:read` and `chat:read:2`, the **schedule trigger** every 15 minutes, and the one **action** are accepted. A start with nothing due ends with "Nothing to do yet: next update around 3:27 AM." in the Workshop log.
+4. **The screen** loads in the panel and reads and writes its files.
+5. **The Kin's answers.** A roleplay model sometimes answers the first readings in character, in the chat's language. So every question is framed as an out-of-character directive (`[DIRECTIVE — OUT OF CHARACTER …]` … `[END DIRECTIVE]`), and an answer that cannot be read is asked once more in the same run with a short correction.
+6. **What the chat leaves out.** When the recent chat says nothing about the outfit (or the place, the hair…), the card keeps the last known sentence, marked "seen 2:40 AM", instead of "No outfit described".
+7. **The App Library review** asked for two things, both done: the Kin is told its dream only if the person turns it on (off by default, on the screen's **Dreams** card), and the dream is erased from `status.json` after a day or after Stop, as the screen says.
 
-1. **`kin ask` output.** It prints the Kin's answer on stdout, as plain text: Aurora Alert reads it that way. The Kin answers with JSON rather than in character.
-2. **`kin files get` for a missing file.** It fails with a "404" or "not found" message (Bunny & Fox BBS checks for `404`). Any other failure is treated as "could not read", and nothing is written over.
-3. **`kin kins` format.** It prints `id<TAB>name`, one per line.
-4. **The screen's single `app.js`.** It loads in the frame (also on phones and older Safari, 14.1+), and the screen re-sends its handshake until the page answers.
-5. **The App Library picture.** The picture is taken with the `sample/` files answered and no Kin list. The screen shows the sample after 1.5 s and saves nothing.
-6. **Questions stay out of the chat.** The `kin ask` questions do not show up in the Kin's chat or memory.
-7. **The run's container clock.** The run does not rely on its clock zone: wake-up times use the time zone the screen saved.
+Still to watch: the night and the dream with a real Kin over a whole night, and several Kins in one account.
 
 ## Limits
 

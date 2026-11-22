@@ -13,3 +13,13 @@ export const ACCESSORY_SLOTS = [
 
 export const BAG_SLOT = 'bags';
 export const WEAR_SLOTS = [...CLOTHING_SLOTS, ...ACCESSORY_SLOTS, BAG_SLOT];
+
+/**
+ * What a reading's sentence says when the Kin's answer said nothing about it. Such a sentence is never carried over
+ * from one reading to the next (state.js). Here, not in outfit.js, so the screen does not pull in the answer reader.
+ */
+export const NOT_DESCRIBED = Object.freeze({
+  location: 'No location described in the recent chat.',
+  doing: 'No pose or action described in the recent chat.',
+  outfit: 'No outfit described in the recent chat.',
+});

@@ -40,7 +40,7 @@ function unwrap(value, repaired) {
 }
 
 /** The top-level {...} spans of a text, aware of quoted strings (both quote styles). */
-export function balancedObjects(text) {
+function balancedObjects(text) {
   const out = [];
   let depth = 0; let start = -1; let quote = null;
   for (let i = 0; i < text.length; i += 1) {
@@ -62,7 +62,7 @@ export function balancedObjects(text) {
  * Loose JSON to strict JSON, outside strings only: drops // and /* *\/ comments and trailing commas, turns
  * 'single-quoted' strings into "double-quoted" ones, quotes bare keys, and maps True/False/None.
  */
-export function normalizeLoose(text) {
+function normalizeLoose(text) {
   let out = '';
   for (let i = 0; i < text.length; i += 1) {
     const c = text[i];

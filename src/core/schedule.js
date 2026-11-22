@@ -3,12 +3,12 @@
 // speak in minutes and hours. Shared by the run (which decides) and the screen (which shows the next time).
 
 export const TICK_S = 900; // the schedule trigger fires every 15 minutes
-export const DUE_SLACK_S = 450; // half a start: a reading due at 10:30:04 is done by the 10:30 start, and a start a few minutes late does not push the next one back
+const DUE_SLACK_S = 450; // half a start: a reading due at 10:30:04 is done by the 10:30 start, and a start a few minutes late does not push the next one back
 /** The ruler's stops, in seconds: from one start of the program (15 min) to every 16th (4 h). */
 export const INTERVAL_STEPS = [900, 1800, 2700, 3600, 5400, 7200, 10800, 14400];
 export const DEFAULT_INTERVAL_S = 1800;
 export const MAX_RETRY_S = 3600; // after many errors in a row, readings slow down to at most one an hour
-export const ERRORS_BEFORE_SLOWING = 2; // the first error is retried at the normal interval
+const ERRORS_BEFORE_SLOWING = 2; // the first error is retried at the normal interval
 export const ERRORS_BEFORE_WARNING = 3;
 export const MAINTENANCE_RETRY_S = 1800;
 

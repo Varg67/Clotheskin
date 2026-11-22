@@ -1,40 +1,12 @@
 // The whole "tracker" logic: read the Kin's JSON, put its branches in order, add commas, show a sentence.
 // Nothing here is saved: every reading stands on its own.
 // Five sentences: location, pose and action, outfit, hair, makeup.
-import { ACCESSORY_SLOTS, BAG_SLOT, WEAR_SLOTS } from './constants.js';
+import { ACCESSORY_SLOTS, BAG_SLOT } from './constants.js';
+import { readingFieldOf, normalizeSlot, looseGroupOf, isPortugueseKey } from './vocabulary.js';
 import { cleanString, capitalizeFirst, toSentence, clipWords, trimEndPunctuation, stripWrapping } from './text.js';
 import { parseJsonObject } from './json.js';
 import { looksCopiedFromExample } from './prompt.js';
 /** @import { Failure } from './json.js' */
-
-/** Key matching ignores case, spaces, underscores and hyphens: "Top Wear", "top_wear" and "topwear" are one key. */
-// Accents are dropped so a Kin that translates the keys ("localização", "maquiagem") still matches.
-const fold = (s) => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-const keyName = (k) => fold(k).replace(/[\s_-]+/g, '');
-
-// ---- slot words: the identifiers are obscure ("topunderwear"), so common slips are understood
-const SLOT_ALIASES = (() => {
-  const m = Object.fromEntries(WEAR_SLOTS.map((s) => [keyName(s), s]));
-  Object.assign(m, {
-    top: 'topwear', tops: 'topwear', bottom: 'bottomwear', bottoms: 'bottomwear',
-    shoes: 'footwear', shoe: 'footwear', boots: 'footwear', hat: 'headwear', cap: 'headwear',
-    socks: 'footunderwear', stockings: 'footunderwear', tights: 'footunderwear',
-    bra: 'topunderwear', undershirt: 'topunderwear', underwear: 'bottomunderwear', underpants: 'bottomunderwear', panties: 'bottomunderwear',
-    glasses: 'eyes-accessory', necklace: 'neck-accessory', earrings: 'ears-accessory', bracelet: 'arms-accessory', watch: 'arms-accessory',
-    ring: 'hands-accessory', gloves: 'hands-accessory', belt: 'waist-accessory', bag: 'bags', backpack: 'bags', handbag: 'bags',
-    // a Kin chatting in Portuguese may translate the slot names
-    sapatos: 'footwear', calcados: 'footwear', tenis: 'footwear', chapeu: 'headwear', bone: 'headwear', meias: 'footunderwear',
-    oculos: 'eyes-accessory', colar: 'neck-accessory', brincos: 'ears-accessory', pulseira: 'arms-accessory', relogio: 'arms-accessory',
-    anel: 'hands-accessory', cinto: 'waist-accessory', bolsa: 'bags', mochila: 'bags', bolsas: 'bags',
-  });
-  return m;
-})();
-// Own keys only: "constructor" or "toString" from the Kin must not find Object's built-ins.
-export const normalizeSlot = (v) => (typeof v === 'string' && Object.prototype.hasOwnProperty.call(SLOT_ALIASES, keyName(v)) ? SLOT_ALIASES[keyName(v)] : undefined);
-
-// A Kin that ignores the slot names and answers {"clothing":[...],"accessories":[...]} is still understood.
-const LOOSE_CLOTHING = new Set(['clothing', 'clothes', 'outfit', 'wearing', 'garments', 'roupa', 'roupas', 'vestindo', 'traje', 'vestuario']);
-const LOOSE_ACCESSORIES = new Set(['accessories', 'accessory', 'extras', 'jewelry', 'jewellery', 'acessorios', 'acessorio', 'joias']);
 
 /** Branches in reading order: head to toe, then accessories, then bags. Underwear goes last (see describe). */
 const CLOTHING_ORDER = ['headwear', 'topwear', 'bottomwear', 'footwear', 'footunderwear', 'clothing'];
@@ -59,15 +31,6 @@ function cleanPieces(v) {
   return out.slice(0, MAX_PER_SLOT);
 }
 
-// The Kin may name the key differently; all of these mean "where you are".
-const isLocationKey = (k) => ['location', 'place', 'where', 'currentlocation', 'currentplace', 'localizacao', 'local', 'lugar', 'onde'].includes(keyName(k));
-// "position" counts as pose: it was the original name of that field.
-const isPoseKey = (k) => ['pose', 'posture', 'position', 'stance', 'bodyposition', 'postura', 'posicao'].includes(keyName(k));
-const isActionKey = (k) => ['action', 'activity', 'doing', 'doingnow', 'currentaction', 'currentactivity', 'currentlydoing', 'acao', 'atividade', 'fazendo'].includes(keyName(k));
-const isHairKey = (k) => ['hair', 'hairstyle', 'hairdo', 'haircut', 'cabelo', 'penteado'].includes(keyName(k));
-const isMakeupKey = (k) => ['makeup', 'cosmetics', 'facemakeup', 'maquiagem', 'maquilhagem'].includes(keyName(k));
-const isReadingKey = (k) => isLocationKey(k) || isPoseKey(k) || isActionKey(k) || isHairKey(k) || isMakeupKey(k);
-
 /** Slots from a parsed JSON object. Location, pose and action belong to the reading, so they are skipped here without a warning. */
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
@@ -76,10 +39,8 @@ function outfitFromObject(doc, nested = false) {
   const warnings = [];
   const errors = [];
   for (const [key, value] of Object.entries(doc)) {
-    if (isReadingKey(key)) continue;
-    let slot = normalizeSlot(key);
-    if (!slot && LOOSE_CLOTHING.has(keyName(key))) slot = 'clothing';
-    if (!slot && LOOSE_ACCESSORIES.has(keyName(key))) slot = 'accessories';
+    if (readingFieldOf(key)) continue;
+    const slot = normalizeSlot(key) || looseGroupOf(key);
     if (!slot) { warnings.push(`"${key}" is not a slot and was ignored`); continue; }
     if (value === null || value === undefined || value === false) continue;
     // {"outfit":{"topwear":[…],"bottomwear":[…]}}: a Kin that groups the slots under one key is understood.
@@ -106,8 +67,8 @@ function parseObject(text) {
   if (doc === null || typeof doc !== 'object' || Array.isArray(doc)) return { ok: false, error: 'The answer must be a JSON object.' };
   // {"Isa":{…}} or {"status":{…}}: one key holding the real answer is opened, if the answer is inside it.
   const keys = Object.keys(doc);
-  if (keys.length === 1 && isPlainObject(doc[keys[0]]) && !normalizeSlot(keys[0]) && !LOOSE_CLOTHING.has(keyName(keys[0])) && !LOOSE_ACCESSORIES.has(keyName(keys[0]))
-    && Object.keys(doc[keys[0]]).some((k) => isReadingKey(k) || normalizeSlot(k))) doc = doc[keys[0]];
+  if (keys.length === 1 && isPlainObject(doc[keys[0]]) && !normalizeSlot(keys[0]) && !looseGroupOf(keys[0])
+    && Object.keys(doc[keys[0]]).some((k) => readingFieldOf(k) || normalizeSlot(k))) doc = doc[keys[0]];
   return { ok: true, doc };
 }
 
@@ -260,9 +221,6 @@ const describeMakeup = (value) => (value ? toSentence(value) : NO_MAKEUP);
 
 // ---- English only: the Kin is asked to answer in English (fewer tokens, and the sentences are English). Portuguese
 // keys and values are still read, but they are reported so the diagnostics show whether the Kin follows the rule.
-const PT_KEYS = new Set(['localizacao', 'local', 'lugar', 'onde', 'postura', 'posicao', 'acao', 'atividade', 'fazendo', 'cabelo', 'penteado', 'maquiagem', 'maquilhagem',
-  'roupa', 'roupas', 'vestindo', 'traje', 'vestuario', 'acessorios', 'acessorio', 'joias', 'sapatos', 'calcados', 'tenis', 'chapeu', 'bone', 'meias', 'oculos', 'colar',
-  'brincos', 'pulseira', 'relogio', 'anel', 'cinto', 'bolsa', 'bolsas', 'mochila']);
 const PT_WORDS = 'uma|um|umas|uns|com|na|nas|nos|da|das|dos|em|sem|meu|minha|seu|sua|estou|está|esta|sentada|sentado|deitada|deitado|vestindo|usando|calça|calca|camisa|camiseta|vestido|saia|jaqueta|casaco|tênis|sapato|sapatos|bota|botas|meia|meias|bolsa|mochila|óculos|colar|brinco|brincos|cabelo|preso|presa|solto|solta|batom|maquiagem|rímel|sala|quarto|cozinha|banheiro|casa|cama|sofá|tomando|lendo|bebendo|olhando|conversando|cozinhando';
 const PT_WORD = new RegExp(`(?<![\\p{L}.])(${PT_WORDS})(?![\\p{L}])`, 'iu');
 // ã or õ inside a lowercase word ("algodão", "botões"); a capitalised name ("São Paulo") is a place, not a slip.
@@ -274,7 +232,7 @@ const textsOf = (v) => (typeof v === 'string' ? [v] : Array.isArray(v) ? v.flatM
 /** The keys of an answer that were written (key or value) in Portuguese instead of English. At most 8. */
 export function notEnglishKeys(doc) {
   if (!isPlainObject(doc)) return [];
-  return Object.entries(doc).filter(([k, v]) => PT_KEYS.has(keyName(k)) || textsOf(v).some((t) => PT_TEXT.test(t))).map(([k]) => String(k).slice(0, 30)).slice(0, 8);
+  return Object.entries(doc).filter(([k, v]) => isPortugueseKey(k) || textsOf(v).some((t) => PT_TEXT.test(t))).map(([k]) => String(k).slice(0, 30)).slice(0, 8);
 }
 
 /**
@@ -293,19 +251,18 @@ export function parseReading(text) {
   const p = parseObject(text);
   if (p.ok === false) return p;
   const { outfit, warnings, errors } = outfitFromObject(p.doc);
-  const keyOf = (test) => Object.keys(p.doc).find(test);
-  const read = (test, clean, label) => {
-    const key = keyOf(test);
+  const read = (field, clean) => {
+    const key = Object.keys(p.doc).find((k) => readingFieldOf(k) === field);
     if (!key || p.doc[key] === false) return null;
     const v = clean(p.doc[key]);
-    if (v === undefined) errors.push(`"${label}" must be a text.`);
+    if (v === undefined) errors.push(`"${field}" must be a text.`);
     return v ?? null;
   };
-  let location = read(isLocationKey, cleanLocation, 'location');
-  let pose = read(isPoseKey, cleanPose, 'pose');
-  const action = read(isActionKey, cleanAction, 'action');
-  const hair = read(isHairKey, lookPhrase, 'hair');
-  const makeup = read(isMakeupKey, cleanMakeup, 'makeup');
+  let location = read('location', cleanLocation);
+  let pose = read('pose', cleanPose);
+  const action = read('action', cleanAction);
+  const hair = read('hair', lookPhrase);
+  const makeup = read('makeup', cleanMakeup);
   // A pose that is really a place ("in the kitchen") is not a pose. It becomes the location if there is none.
   if (pose && PLACE_ONLY_START.test(pose) && !POSTURE_WORD.test(pose)) {
     if (!location) location = cleanLocation(pose);

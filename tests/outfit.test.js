@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { describeOutfit, joinNatural, normalizeSlot, parseReading, describeReading } from '../src/core/outfit.js';
+import { describeOutfit, joinNatural, parseReading, describeReading } from '../src/core/outfit.js';
+import { normalizeSlot } from '../src/core/vocabulary.js';
 import { DEMO_SCENES } from '../dev/scenes.js';
 
 const say = (json) => { const p = parseReading(typeof json === 'string' ? json : JSON.stringify(json)); assert.ok(p.ok, p.error); return describeOutfit(p.outfit); };

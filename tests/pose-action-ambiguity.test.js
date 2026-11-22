@@ -178,3 +178,28 @@ test('the cleaners keep their contract: null for nothing, undefined for a wrong 
   assert.equal(describeDoing({}), NOD);
   assert.equal(describeDoing({ pose: null, action: 'reading' }), 'Reading.');
 });
+
+// ---- What the Kin says is not what it does (real test, Nov 2026)
+
+test('speech is not an action: "asking Ari to check whether Marina is in the kitchen" is talking with Ari', () => {
+  assert.equal(doing({ pose: 'standing by the counter', action: 'asking Ari to check whether Marina is in the kitchen' }), 'Standing by the counter, talking with Ari.');
+  assert.equal(act('telling you that dinner is ready'), 'Talking with you.');
+  assert.equal(act('asking her sister to come down'), 'Talking with her sister.');
+  assert.equal(act('reminding Ari not to forget the keys'), 'Talking with Ari.');
+});
+
+test('a speech clause after the action goes; the action stays', () => {
+  assert.equal(act('ordering pizza and asking Ariel to stop shouting at Marina'), 'Ordering pizza.');
+  assert.equal(act('drinking coffee while yelling at the TV'), 'Drinking coffee.');
+  assert.equal(act('cooking, telling Marina about her day'), 'Cooking.');
+});
+
+test('short actions that only look like speech stay as they are', () => {
+  for (const a of ['asking for help', 'telling a story', 'talking with Ari', 'saying goodbye to Ari', 'watching TV and laughing', 'singing along to the radio'])
+    assert.equal(act(a), `${a[0].toUpperCase()}${a.slice(1)}.`, a);
+});
+
+test('the prompt limits the action to 5 words and rules out what the Kin says and what others do', () => {
+  const p = buildOutfitPrompt({ name: 'Isa' });
+  assert.match(p, /"action": what you are doing now, a short -ing phrase of at most 5 words \("drinking coffee", "talking with Ari"\); not what you say or what others do/);
+});

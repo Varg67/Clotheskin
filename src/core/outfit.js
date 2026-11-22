@@ -202,12 +202,27 @@ export function cleanPose(v) {
 }
 
 /** What the Kin is doing now ("drinking coffee"). Plans and things already finished are not an action. */
+// What the Kin says is not what it does (real test: "asking Ari to check whether Marina is in the kitchen").
+// A speech clause after the action goes: "ordering pizza and asking Ariel to stop shouting" -> "ordering pizza".
+const SPEECH_CLAUSE = /\s*(?:,|\band\b|\bwhile\b)\s+(?:asking|telling|saying|reminding|begging|urging|warning|assuring|promising|informing|instructing|explaining|answering|replying|complaining|shouting|yelling|calling|whispering|arguing|pleading|insisting)\b.*$/i;
+// An action that is only speech to someone becomes talking with them: "asking Ari to check …" -> "talking with Ari".
+const SPEECH_TO = /^(?:asking|telling|reminding|begging|urging|warning|assuring|promising|informing|instructing|ordering|convincing|persuading)\s+((?:\S+\s+){0,2}?\S+?)\s+(?:to|that|whether|if|about|why|how|what|where|when|not)\b/i;
+const SPEECH_WORD = /^(to|that|whether|if|about|why|how|what|where|when|not|for|me|it|this)$/i;
+
+function withoutSpeech(s) {
+  const t = s.replace(SPEECH_CLAUSE, '');
+  if (t !== s && t.trim()) return t.trim();
+  const m = s.match(SPEECH_TO);
+  if (m && !SPEECH_WORD.test(m[1].split(/\s+/)[0])) return `talking with ${m[1]}`;
+  return s;
+}
+
 export function cleanAction(v) {
   let s = rawText(v, 400);
   if (s === null || s === undefined) return s;
   let prev;
   do { prev = s; s = s.replace(/^((currently|right now|now|just|still|actually)\s+)+/i, '').replace(SUBJECT, ''); } while (s !== prev);
-  s = s.replace(/[.;,!?\s]+$/, '');
+  s = withoutSpeech(s.replace(/[.;,!?\s]+$/, '')).replace(/[.;,!?\s]+$/, '');
   if (!s || NO_VALUE.test(s) || NO_ACTION.test(s) || PLAN_OR_PAST.test(s) || GOING_TO_VERB.test(s) || FUTURE_WORD.test(s) || FEELING.test(s)) return null;
   return clipWords(s, MAX_DOING);
 }

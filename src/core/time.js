@@ -28,7 +28,10 @@ export function zonedParts(date, tz) {
   }
   const p = {};
   for (const { type, value } of f.formatToParts(date)) p[type] = value;
-  return { y: Number(p.year), m: Number(p.month), d: Number(p.day), h: Number(p.hour) % 24, min: Number(p.minute), s: Number(p.second), weekday: p.weekday };
+  return {
+    y: Number(p.year), m: Number(p.month), d: Number(p.day),
+    h: Number(p.hour) % 24, min: Number(p.minute), s: Number(p.second), weekday: p.weekday,
+  };
 }
 
 /**

@@ -52,6 +52,8 @@ const RULES = {
   'max-params': ['error', 4],
   'max-depth': ['error', 4],
   'max-lines-per-function': ['error', { max: 60, skipComments: true, skipBlankLines: true }],
+  // 140 columns of code; a long sentence, template or regular expression is not split (it would read worse)
+  'max-len': ['error', { code: 140, ignoreStrings: true, ignoreTemplateLiterals: true, ignoreRegExpLiterals: true, ignoreUrls: true }],
 };
 
 export default [

@@ -28,7 +28,8 @@ const ANSWERS = [
 ];
 
 test('perf: reading an answer, clean or messy, takes well under a millisecond', async () => {
-  const ms = await averageMs(() => { for (const a of ANSWERS) { const p = parseReading(a); if (p.ok) describeReading(p); } }, 400) / ANSWERS.length;
+  const readAll = () => { for (const a of ANSWERS) { const p = parseReading(a); if (p.ok) describeReading(p); } };
+  const ms = await averageMs(readAll, 400) / ANSWERS.length;
   assert.ok(ms < 0.5, `${ms.toFixed(3)} ms per answer`);
 });
 

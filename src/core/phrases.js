@@ -95,6 +95,9 @@ export function cleanPose(v) {
   return clipWords(s, MAX_DOING);
 }
 
+// Placeholders, idleness, plans, things already done and feelings: none of these is what the Kin is doing now.
+const NOT_AN_ACTION = [NO_VALUE, NO_ACTION, PLAN_OR_PAST, GOING_TO_VERB, FUTURE_WORD, FEELING];
+
 /** What the Kin is doing now ("drinking coffee"). Plans and things already finished are not an action. */
 export function cleanAction(v) {
   let s = rawText(v, 400);
@@ -102,7 +105,7 @@ export function cleanAction(v) {
   let prev;
   do { prev = s; s = s.replace(/^((currently|right now|now|just|still|actually)\s+)+/i, '').replace(SUBJECT, ''); } while (s !== prev);
   s = trimEndPunctuation(s);
-  if (!s || NO_VALUE.test(s) || NO_ACTION.test(s) || PLAN_OR_PAST.test(s) || GOING_TO_VERB.test(s) || FUTURE_WORD.test(s) || FEELING.test(s)) return null;
+  if (!s || NOT_AN_ACTION.some((re) => re.test(s))) return null;
   return clipWords(s, MAX_DOING);
 }
 

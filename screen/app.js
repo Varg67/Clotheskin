@@ -240,7 +240,9 @@ __def("src/core/schedule.js", function () {
 // speak in minutes and hours. Shared by the run (which decides) and the screen (which shows the next time).
 
 const TICK_S = 900; // the schedule trigger fires every 15 minutes
-const DUE_SLACK_S = 450; // half a start: a reading due at 10:30:04 is done by the 10:30 start, and a start a few minutes late does not push the next one back
+// Half a start: a reading due at 10:30:04 is done by the 10:30 start, and a start a few minutes late does not push the
+// next one back.
+const DUE_SLACK_S = 450;
 /** The ruler's stops, in seconds: from one start of the program (15 min) to every 16th (4 h). */
 const INTERVAL_STEPS = [900, 1800, 2700, 3600, 5400, 7200, 10800, 14400];
 const DEFAULT_INTERVAL_S = 1800;
@@ -271,7 +273,10 @@ function snapInterval(seconds) {
  */
 function retryDelay(intervalS, failures, kind) {
   let delay = intervalS;
-  if (failures >= ERRORS_BEFORE_SLOWING) delay = Math.max(intervalS, Math.min(MAX_RETRY_S, intervalS * 2 ** (failures - ERRORS_BEFORE_SLOWING + 1)));
+  if (failures >= ERRORS_BEFORE_SLOWING) {
+    const doubled = intervalS * 2 ** (failures - ERRORS_BEFORE_SLOWING + 1);
+    delay = Math.max(intervalS, Math.min(MAX_RETRY_S, doubled));
+  }
   if (kind === ERROR.MAINTENANCE) delay = Math.max(delay, MAINTENANCE_RETRY_S);
   return delay;
 }
@@ -371,8 +376,9 @@ function parseClockTime(v) {
 const from12h = (h, ampm) => (h < 1 || h > 12 ? null : (h % 12) + (ampm === 'p' ? 12 : 0));
 
 /**
- * From the Kin's wake-up time (on the person's clock, zone `tz`) to a plan: { wakeAt, until } (until = when the dream question is asked), or null when
- * there is nothing to wait for (waking up within MIN_SLEEP_S) or the time is not believable (beyond MAX_SLEEP_S).
+ * From the Kin's wake-up time (on the person's clock, zone `tz`) to a plan: { wakeAt, until } (until = when the dream
+ * question is asked), or null when there is nothing to wait for (waking up within MIN_SLEEP_S) or the time is not
+ * believable (beyond MAX_SLEEP_S).
  */
 function planSleep(wakeText, now, tz) {
   const t = parseClockTime(wakeText);
@@ -634,7 +640,7 @@ function normalizeStatus(raw) {
  */
 function afterStop(entry, settings) {
   if (!entry || !settings.stoppedAt || (entry.lastRunAt && entry.lastRunAt > settings.stoppedAt)) return entry;
-  return { ...entry, sleep: null, sleptOn: null, dream: null, retryAt: null, failures: 0, serverFailures: 0, errorKind: null, error: null, note: null };
+  return { ...succeeded(entry), sleep: null, sleptOn: null, dream: null };
 }
 
 /**
@@ -713,7 +719,8 @@ function mergeConcurrent({ current, start, next }) {
   const weChanged = nightOf(next) !== nightOf(start);
   const theirs = theyChanged && (!weChanged || (current.lastRunAt || '') >= (next.lastRunAt || ''));
   const night = theirs ? { sleep: current.sleep, sleptOn: current.sleptOn } : {};
-  return { entry: { ...next, ...night, dream: newer(next.dream, current.dream), reading: newer(next.reading, current.reading) }, concurrent: true, theirs };
+  const entry = { ...next, ...night, dream: newer(next.dream, current.dream), reading: newer(next.reading, current.reading) };
+  return { entry, concurrent: true, theirs };
 }
 
 /** A stored reading as one text: "In the kitchen. Standing, making coffee. Wearing a grey hoodie." ('' for none). */
@@ -726,8 +733,8 @@ function readingText(reading) {
 function warningOf(entry) {
   if (!entry) return null;
   if (entry.errorKind === ERROR.MAINTENANCE) return { kind: ERROR.MAINTENANCE };
-  if (entry.errorKind === ERROR.SERVER && entry.serverFailures >= ERRORS_BEFORE_WARNING) return { kind: ERROR.SERVER, failures: entry.serverFailures };
-  return null;
+  if (entry.errorKind !== ERROR.SERVER || entry.serverFailures < ERRORS_BEFORE_WARNING) return null;
+  return { kind: ERROR.SERVER, failures: entry.serverFailures };
 }
 return { SETTINGS_FILE, STATUS_FILE, AUTO, THEMES, ACTION, OPS, DEFAULT_SETTINGS, normalizeSettings, normalizeEntry, normalizeStatus, afterStop, plannedAt, succeeded, failedEntry, postponedEntry, mergeConcurrent, readingText, warningOf };
 });
@@ -815,7 +822,10 @@ function zonedParts(date, tz) {
   }
   const p = {};
   for (const { type, value } of f.formatToParts(date)) p[type] = value;
-  return { y: Number(p.year), m: Number(p.month), d: Number(p.day), h: Number(p.hour) % 24, min: Number(p.minute), s: Number(p.second), weekday: p.weekday };
+  return {
+    y: Number(p.year), m: Number(p.month), d: Number(p.day),
+    h: Number(p.hour) % 24, min: Number(p.minute), s: Number(p.second), weekday: p.weekday,
+  };
 }
 
 /**
@@ -1281,7 +1291,8 @@ const RUN_WORDS = { [AUTO.RUNNING]: 'started', [AUTO.PAUSED]: 'paused', [AUTO.ST
 function initialState(kins) {
   /**
    * @type {{ kins: Who[], kinsKnown: boolean, settings: Settings, status: Status, statusText: string|null, loaded: boolean,
-   *   busy: Object<string, string>, error: { kinId?: string, save?: boolean, text: string }|null, picking: boolean, settingsOpen: boolean }}
+   *   busy: Object<string, string>, error: { kinId?: string, save?: boolean, text: string }|null,
+   *   picking: boolean, settingsOpen: boolean }}
    */
   const S = {
     kins: kins || [],

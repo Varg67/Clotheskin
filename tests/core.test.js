@@ -123,7 +123,8 @@ test('entry transitions: a failure slows the next try down; an unusable answer i
   const answer = failedEntry(e, { kind: 'answer', error: 'The answer is not valid JSON.', note: 'Try again', now, intervalS: 900 });
   assert.deepEqual([answer.serverFailures, answer.note], [0, 'Try again']);
   assert.equal(failedEntry(e, { error: 'Scheduled maintenance until 3 AM', now, intervalS: 900 }).errorKind, 'maintenance');
-  assert.deepEqual(succeeded(server), { ...server, failures: 0, serverFailures: 0, errorKind: null, error: null, note: null, retryAt: null });
+  const cleared = { failures: 0, serverFailures: 0, errorKind: null, error: null, note: null, retryAt: null };
+  assert.deepEqual(succeeded(server), { ...server, ...cleared });
   const later = postponedEntry(server, { now, note: 'waits' });
   assert.deepEqual([later.failures, later.retryAt, later.note], [2, '2026-11-20T22:15:00.000Z', 'waits']);
 });

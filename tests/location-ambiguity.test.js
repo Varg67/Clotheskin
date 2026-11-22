@@ -11,7 +11,11 @@ import { fakeKindroid } from './support/fake-kindroid.js';
 import { DEMO_SCENES } from '../dev/scenes.js';
 
 const NONE = 'No location described in the recent chat.';
-const where = (location) => { const p = parseReading(JSON.stringify({ location })); assert.ok(p.ok, p.error); return describeReading(p).location; };
+const where = (location) => {
+  const p = parseReading(JSON.stringify({ location }));
+  assert.ok(p.ok, p.error);
+  return describeReading(p).location;
+};
 
 // ---- 1. "The place only, not your posture or what you are doing": the Kin adds posture or activity anyway
 test('posture or activity in front of the place is dropped; the place stays', () => {

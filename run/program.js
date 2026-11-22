@@ -12,8 +12,10 @@ import { buildOutfitPrompt, buildFollowUpPrompt, SLEEP_PROMPT, DREAM_PROMPT, KIN
 import { parseReading, describeReading } from '../src/core/outfit.js';
 import { looksAsleep, sentenceMark, planSleep, parseSleepAnswer, parseDreamAnswer, describeDream, dreamFact, DREAM_TTL_HOURS } from '../src/core/sleep.js';
 import { errorKind, isDue, ERROR } from '../src/core/schedule.js';
-import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, readingText, succeeded, failedEntry, postponedEntry, mergeConcurrent,
-  SETTINGS_FILE, STATUS_FILE, ACTION, OPS, AUTO } from '../src/core/state.js';
+import {
+  normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, readingText,
+  succeeded, failedEntry, postponedEntry, mergeConcurrent, SETTINGS_FILE, STATUS_FILE, ACTION, OPS, AUTO,
+} from '../src/core/state.js';
 import { describeNow } from '../src/core/time.js';
 import { oneLine, errorMessage } from '../src/core/text.js';
 
@@ -33,7 +35,8 @@ const MIN_ASK_MS = 15000; // a question with less time than this left waits for 
  * @property {() => Promise<Who[]>} kins the Kins attached to the program
  *
  * What every step gets: the kin functions, the clock, the log, the settings and the run's deadline (ms).
- * @typedef {{ kin: KinApi, clock: () => Date, log: (line: string) => void, settings: Settings, retryAfterMs: number, deadline: number }} Ctx
+ * @typedef {{ kin: KinApi, clock: () => Date, log: (line: string) => void, settings: Settings,
+ *   retryAfterMs: number, deadline: number }} Ctx
  * @typedef {{ id: string, name: string }} Who
  * @typedef {{ ok: true, text: string } | { ok: false, kind: ErrorKind, error: string }} AskResult
  * @typedef {{ kind?: ErrorKind, error: string, length?: number }} Outcome  what went wrong in a step
@@ -273,7 +276,7 @@ async function ask(ctx, who, prompt) {
     } catch (e) {
       const kind = errorKind(errorMessage(e), ERROR.SERVER);
       ctx.log(`kin ask failed (${kind}, try ${attempt}, ${Date.now() - started} ms)`);
-      if (attempt >= 2 || kind === ERROR.MAINTENANCE || ctx.deadline - Date.now() - RESERVE_MS - ctx.retryAfterMs < MIN_ASK_MS) return { ok: false, kind, error: errorMessage(e) };
+      if (!canRetry(ctx, attempt, kind)) return { ok: false, kind, error: errorMessage(e) };
       await sleepMs(ctx.retryAfterMs);
     }
   }
@@ -283,6 +286,12 @@ async function ask(ctx, who, prompt) {
  * Records a failure: errors in a row slow the next try down; only Kindroid errors count towards the server warning.
  * `entry` is what this run would save, `base` the entry it started from (see save), `note` the words for the person.
  */
+/** One more try: only after the first, never during maintenance, and only if a question still fits after the pause. */
+function canRetry(ctx, attempt, kind) {
+  const leftAfterPause = ctx.deadline - Date.now() - RESERVE_MS - ctx.retryAfterMs;
+  return attempt < 2 && kind !== ERROR.MAINTENANCE && leftAfterPause >= MIN_ASK_MS;
+}
+
 /**
  * @param {Ctx} ctx
  * @param {{ who: Who, entry: Entry, outcome: Outcome, now: Date, note?: string|null, base?: Entry|null }} failure

@@ -168,7 +168,7 @@ export function normalizeStatus(raw) {
  */
 export function afterStop(entry, settings) {
   if (!entry || !settings.stoppedAt || (entry.lastRunAt && entry.lastRunAt > settings.stoppedAt)) return entry;
-  return { ...entry, sleep: null, sleptOn: null, dream: null, retryAt: null, failures: 0, serverFailures: 0, errorKind: null, error: null, note: null };
+  return { ...succeeded(entry), sleep: null, sleptOn: null, dream: null };
 }
 
 /**
@@ -247,7 +247,8 @@ export function mergeConcurrent({ current, start, next }) {
   const weChanged = nightOf(next) !== nightOf(start);
   const theirs = theyChanged && (!weChanged || (current.lastRunAt || '') >= (next.lastRunAt || ''));
   const night = theirs ? { sleep: current.sleep, sleptOn: current.sleptOn } : {};
-  return { entry: { ...next, ...night, dream: newer(next.dream, current.dream), reading: newer(next.reading, current.reading) }, concurrent: true, theirs };
+  const entry = { ...next, ...night, dream: newer(next.dream, current.dream), reading: newer(next.reading, current.reading) };
+  return { entry, concurrent: true, theirs };
 }
 
 /** A stored reading as one text: "In the kitchen. Standing, making coffee. Wearing a grey hoodie." ('' for none). */
@@ -260,7 +261,7 @@ export function readingText(reading) {
 export function warningOf(entry) {
   if (!entry) return null;
   if (entry.errorKind === ERROR.MAINTENANCE) return { kind: ERROR.MAINTENANCE };
-  if (entry.errorKind === ERROR.SERVER && entry.serverFailures >= ERRORS_BEFORE_WARNING) return { kind: ERROR.SERVER, failures: entry.serverFailures };
-  return null;
+  if (entry.errorKind !== ERROR.SERVER || entry.serverFailures < ERRORS_BEFORE_WARNING) return null;
+  return { kind: ERROR.SERVER, failures: entry.serverFailures };
 }
 

@@ -3,7 +3,9 @@
 // speak in minutes and hours. Shared by the run (which decides) and the screen (which shows the next time).
 
 export const TICK_S = 900; // the schedule trigger fires every 15 minutes
-const DUE_SLACK_S = 450; // half a start: a reading due at 10:30:04 is done by the 10:30 start, and a start a few minutes late does not push the next one back
+// Half a start: a reading due at 10:30:04 is done by the 10:30 start, and a start a few minutes late does not push the
+// next one back.
+const DUE_SLACK_S = 450;
 /** The ruler's stops, in seconds: from one start of the program (15 min) to every 16th (4 h). */
 export const INTERVAL_STEPS = [900, 1800, 2700, 3600, 5400, 7200, 10800, 14400];
 export const DEFAULT_INTERVAL_S = 1800;
@@ -34,7 +36,10 @@ export function snapInterval(seconds) {
  */
 export function retryDelay(intervalS, failures, kind) {
   let delay = intervalS;
-  if (failures >= ERRORS_BEFORE_SLOWING) delay = Math.max(intervalS, Math.min(MAX_RETRY_S, intervalS * 2 ** (failures - ERRORS_BEFORE_SLOWING + 1)));
+  if (failures >= ERRORS_BEFORE_SLOWING) {
+    const doubled = intervalS * 2 ** (failures - ERRORS_BEFORE_SLOWING + 1);
+    delay = Math.max(intervalS, Math.min(MAX_RETRY_S, doubled));
+  }
   if (kind === ERROR.MAINTENANCE) delay = Math.max(delay, MAINTENANCE_RETRY_S);
   return delay;
 }

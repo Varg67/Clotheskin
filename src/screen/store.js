@@ -17,7 +17,8 @@ const RUN_WORDS = { [AUTO.RUNNING]: 'started', [AUTO.PAUSED]: 'paused', [AUTO.ST
 export function initialState(kins) {
   /**
    * @type {{ kins: Who[], kinsKnown: boolean, settings: Settings, status: Status, statusText: string|null, loaded: boolean,
-   *   busy: Object<string, string>, error: { kinId?: string, save?: boolean, text: string }|null, picking: boolean, settingsOpen: boolean }}
+   *   busy: Object<string, string>, error: { kinId?: string, save?: boolean, text: string }|null,
+   *   picking: boolean, settingsOpen: boolean }}
    */
   const S = {
     kins: kins || [],

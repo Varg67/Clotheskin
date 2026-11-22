@@ -82,7 +82,8 @@ function openWrapper(doc) {
   if (keys.length !== 1) return doc;
   const [key] = keys;
   const inner = doc[key];
-  const wraps = isPlainObject(inner) && !normalizeSlot(key) && !looseGroupOf(key) && Object.keys(inner).some((k) => readingFieldOf(k) || normalizeSlot(k));
+  const isOwnKey = (k) => readingFieldOf(k) || normalizeSlot(k);
+  const wraps = isPlainObject(inner) && !normalizeSlot(key) && !looseGroupOf(key) && Object.keys(inner).some(isOwnKey);
   return wraps ? inner : doc;
 }
 
@@ -99,7 +100,8 @@ const textsOf = (v) => (typeof v === 'string' ? [v] : Array.isArray(v) ? v.flatM
 /** The keys of an answer that were written (key or value) in Portuguese instead of English. At most 8. */
 export function notEnglishKeys(doc) {
   if (!isPlainObject(doc)) return [];
-  return Object.entries(doc).filter(([k, v]) => isPortugueseKey(k) || textsOf(v).some((t) => PT_TEXT.test(t))).map(([k]) => String(k).slice(0, 30)).slice(0, 8);
+  const portuguese = ([k, v]) => isPortugueseKey(k) || textsOf(v).some((t) => PT_TEXT.test(t));
+  return Object.entries(doc).filter(portuguese).map(([k]) => String(k).slice(0, 30)).slice(0, 8);
 }
 
 /**
@@ -147,7 +149,13 @@ export function parseReading(text) {
  * @returns {{ location: string, doing: string, outfit: string, hair: string, makeup: string }}
  */
 export function describeReading({ outfit = {}, location = null, pose = null, action = null, hair = null, makeup = null } = {}) {
-  return { location: describeLocation(location), doing: describeDoing({ pose, action }), outfit: describeOutfit(outfit), hair: describeHair(hair), makeup: describeMakeup(makeup) };
+  return {
+    location: describeLocation(location),
+    doing: describeDoing({ pose, action }),
+    outfit: describeOutfit(outfit),
+    hair: describeHair(hair),
+    makeup: describeMakeup(makeup),
+  };
 }
 
 const inOrder = (outfit, order) => order.flatMap((slot) =>

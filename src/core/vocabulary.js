@@ -44,9 +44,11 @@ const LOOSE_WORDS = {
  * @param {Object<string, { en: string[], pt: string[] }>} table
  * @returns {Array<[string, string]>}
  */
-const entries = (table) => Object.entries(table).flatMap(([meaning, { en, pt }]) => [...en, ...pt].map((w) => /** @type {[string, string]} */ ([w, meaning])));
+const entries = (table) => Object.entries(table).flatMap(([meaning, { en, pt }]) => [...en, ...pt].map((w) => pair(w, meaning)));
+/** @returns {[string, string]} */
+const pair = (word, meaning) => [word, meaning];
 const READING_BY_WORD = new Map(entries(READING_WORDS));
-const SLOT_BY_WORD = new Map([...WEAR_SLOTS.map((s) => /** @type {[string, string]} */ ([keyName(s), s])), ...entries(SLOT_WORDS)]);
+const SLOT_BY_WORD = new Map([...WEAR_SLOTS.map((s) => pair(keyName(s), s)), ...entries(SLOT_WORDS)]);
 const LOOSE_BY_WORD = new Map(entries(LOOSE_WORDS));
 const PORTUGUESE = new Set([READING_WORDS, SLOT_WORDS, LOOSE_WORDS].flatMap((table) => Object.values(table).flatMap(({ pt }) => pt)));
 

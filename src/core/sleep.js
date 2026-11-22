@@ -49,8 +49,9 @@ export function parseClockTime(v) {
 const from12h = (h, ampm) => (h < 1 || h > 12 ? null : (h % 12) + (ampm === 'p' ? 12 : 0));
 
 /**
- * From the Kin's wake-up time (on the person's clock, zone `tz`) to a plan: { wakeAt, until } (until = when the dream question is asked), or null when
- * there is nothing to wait for (waking up within MIN_SLEEP_S) or the time is not believable (beyond MAX_SLEEP_S).
+ * From the Kin's wake-up time (on the person's clock, zone `tz`) to a plan: { wakeAt, until } (until = when the dream
+ * question is asked), or null when there is nothing to wait for (waking up within MIN_SLEEP_S) or the time is not
+ * believable (beyond MAX_SLEEP_S).
  */
 export function planSleep(wakeText, now, tz) {
   const t = parseClockTime(wakeText);

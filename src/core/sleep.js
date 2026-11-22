@@ -1,6 +1,6 @@
 // The sleep cycle: is the Kin asleep, when does it wake up, what did it dream. Pure functions shared by the run (which
 // asks) and the screen (which shows).
-import { cleanString } from './text.js';
+import { cleanString, toSentence } from './text.js';
 import { parseJsonObject } from './json.js';
 import { nextWallTime } from './time.js';
 /** @import { Failure } from './json.js' */
@@ -103,12 +103,13 @@ export function parseDreamAnswer(text) {
   return { ok: true, dream: summary, remembered: remembered ?? 'some' };
 }
 
-/** The dream as shown on the card: "Flying over the sea with my sister. Remembers most of it." */
-/** @param {Partial<Dream>} [d] */
+/**
+ * The dream as shown on the card: "Flying over the sea with my sister. Remembers most of it."
+ * @param {Partial<Dream>} [d]
+ */
 export function describeDream({ dream, remembered } = {}) {
   if (!dream) return 'No dream remembered.';
-  const text = /[.!?…]$/.test(dream) ? dream : `${dream}.`;
-  return `${text.charAt(0).toUpperCase()}${text.slice(1)} ${REMEMBERED_TEXT[remembered] || ''}`.trim();
+  return `${toSentence(dream)} ${REMEMBERED_TEXT[remembered] || ''}`.trim();
 }
 
 /**

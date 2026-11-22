@@ -20,3 +20,20 @@ export function oneLine(text, max = 500) {
   if (s.length <= max) return s;
   return `${dropHalfChar(s.slice(0, max - 1))}…`;
 }
+
+/** "in the kitchen" -> "In the kitchen." No period after one already there, or after the "…" of a cut. */
+export function toSentence(s) {
+  const str = String(s ?? '');
+  return capitalizeFirst(/[.!?…]$/.test(str) ? str : `${str}.`);
+}
+
+/** Cuts at a word boundary and marks the cut with "…". */
+export function clipWords(s, max) {
+  return s.length > max ? `${s.slice(0, max).replace(/\s+\S*$/, '')}…` : s;
+}
+
+/** Drops the punctuation and spaces at the end ("in the kitchen." -> "in the kitchen"). */
+export const trimEndPunctuation = (s) => s.replace(/[.;,!?\s]+$/, '');
+
+/** Drops what a model wraps a value in: markdown emphasis, quotes and brackets ("**'in the kitchen'**"). */
+export const stripWrapping = (s) => s.replace(/^[\s*_"'“”‘’()[\]]+/, '').replace(/[\s*_"'“”‘’()[\]]+$/, '');

@@ -2,7 +2,7 @@
 // Nothing here is saved: every reading stands on its own.
 // Five sentences: location, pose and action, outfit, hair, makeup.
 import { ACCESSORY_SLOTS, BAG_SLOT, WEAR_SLOTS } from './constants.js';
-import { cleanString, capitalizeFirst } from './text.js';
+import { cleanString, capitalizeFirst, toSentence, clipWords, trimEndPunctuation, stripWrapping } from './text.js';
 import { parseJsonObject } from './json.js';
 import { looksCopiedFromExample } from './prompt.js';
 /** @import { Failure } from './json.js' */
@@ -123,11 +123,9 @@ function rawText(v, max) {
     s = v.map((x) => x.trim()).filter(Boolean).slice(0, 3).join(', ');
   } else if (typeof v === 'string') s = v;
   else return undefined;
-  return cleanString(s, max).replace(/^[\s*_"'“”‘’()[\]]+/, '').replace(/[\s*_"'“”‘’()[\]]+$/, '').replace(/[.;,!?\s]+$/, '');
+  return trimEndPunctuation(stripWrapping(cleanString(s, max)));
 }
 
-/** Cuts at a word boundary and marks the cut with "…". */
-const clipWords = (s, max) => (s.length > max ? `${s.slice(0, max).replace(/\s+\S*$/, '')}…` : s);
 
 // ---- location: a short phrase that already starts with in / at / on ("in the kitchen", "at the hospital")
 const EN_PREP = 'in|inside|at|on|outside|near|nearby|by|under|over|above|below|around|across|along|between|beside|behind|next|close|through|from|to|towards?|back|upstairs|downstairs';
@@ -155,7 +153,7 @@ export function cleanLocation(v) {
   s = s.replace(CLOTHES_CLAUSE, '')                                          // clothes do not belong here
     .replace(/\s*[,;]\s*[A-Za-z]+ing\b.*$/i, '')                           // ", cooking dinner"
     .replace(/\s+(while|as|and)\s+[A-Za-z]+ing\b.*$/i, '')                 // "while reading"
-    .replace(/[.;,!?\s]+$/, '');
+    .replace(/[.;,!?\s]+$/, ''); // the clauses above may leave a comma behind
   // A lowercase posture or activity first ("sitting on the sofa", "cooking in the kitchen") is dropped when a place follows.
   const lead = s.match(/^([a-z]+ing|seated|perched|sat|stood|lay)(?:\s+(.*))?$/);
   if (lead && !IS_MOTION.test(lead[1])) {
@@ -178,7 +176,7 @@ export function describeLocation(value) {
   if (STARTS_PLACE.test(v) || STARTS_PORTUGUESE.test(v)) phrase = v;
   else if (/^home$/i.test(v)) phrase = 'at home';
   else if (/^(the|a|an|my|our|his|her|their|your)\b/i.test(v) || /^[A-Z]/.test(v)) phrase = `in ${v}`;
-  return capitalizeFirst(phrase.endsWith('…') ? phrase : `${phrase}.`);
+  return toSentence(phrase);
 }
 
 // ---- pose and action
@@ -198,7 +196,7 @@ const MAX_DOING = 80;
 export function cleanPose(v) {
   let s = rawText(v, 400);
   if (s === null || s === undefined) return s;
-  s = s.replace(CLOTHES_CLAUSE, '').replace(/[.;,!?\s]+$/, '');
+  s = trimEndPunctuation(s.replace(CLOTHES_CLAUSE, ''));
   if (!s || NO_VALUE.test(s) || NO_ACTION.test(s)) return null;
   return clipWords(s, MAX_DOING);
 }
@@ -209,7 +207,7 @@ export function cleanAction(v) {
   if (s === null || s === undefined) return s;
   let prev;
   do { prev = s; s = s.replace(/^((currently|right now|now|just|still|actually)\s+)+/i, '').replace(SUBJECT, ''); } while (s !== prev);
-  s = s.replace(/[.;,!?\s]+$/, '');
+  s = trimEndPunctuation(s);
   if (!s || NO_VALUE.test(s) || NO_ACTION.test(s) || PLAN_OR_PAST.test(s) || GOING_TO_VERB.test(s) || FUTURE_WORD.test(s) || FEELING.test(s)) return null;
   return clipWords(s, MAX_DOING);
 }
@@ -223,8 +221,7 @@ export function describeDoing({ pose, action } = {}) {
   if (pose) parts.push(pose);
   if (action && !(pose && pose.toLowerCase().includes(action.toLowerCase()))) parts.push(action);
   if (!parts.length) return 'No pose or action described in the recent chat.';
-  const text = parts.join(', ');
-  return capitalizeFirst(text.endsWith('…') ? text : `${text}.`);
+  return toSentence(parts.join(', '));
 }
 
 // ---- hair and makeup: one short phrase each ("long black hair in a ponytail", "red lipstick and eyeliner")
@@ -240,14 +237,14 @@ function lookPhrase(v) {
   let s;
   if (Array.isArray(v)) {
     if (v.some((x) => typeof x !== 'string')) return undefined;
-    s = joinNatural(v.map((x) => cleanString(x, MAX_LOOK).replace(/[.;,!?\s]+$/, '')).filter(Boolean).slice(0, 4));
+    s = joinNatural(v.map((x) => trimEndPunctuation(cleanString(x, MAX_LOOK))).filter(Boolean).slice(0, 4));
   } else if (typeof v === 'string') s = v;
   else return undefined;
-  s = cleanString(s, 400).replace(/^[\s*_"'“”‘’()[\]]+/, '').replace(/[\s*_"'“”‘’()[\]]+$/, '').replace(/[.;,!?\s]+$/, '')
+  s = trimEndPunctuation(stripWrapping(cleanString(s, 400)))
     .replace(/^(my|her|his|their) (hair|make-?up) (is|are)\s+/i, '')
     .replace(/^((i|she|he)\s+(have|has|['’]ve got|has got|am wearing|is wearing)|i['’]ve got|(she|he)['’]s got|i['’]m wearing|she['’]s wearing|he['’]s wearing|wearing)\s+/i, '');
   if (!s || NO_VALUE.test(s)) return null;
-  return s.length > MAX_LOOK ? `${s.slice(0, MAX_LOOK).replace(/\s+\S*$/, '')}…` : s;
+  return clipWords(s, MAX_LOOK);
 }
 
 function cleanMakeup(v) {
@@ -256,11 +253,10 @@ function cleanMakeup(v) {
   return typeof s === 'string' && BARE_FACE.test(s) ? 'no makeup' : s;
 }
 
-const sentence = (s) => capitalizeFirst(s.endsWith('…') ? s : `${s}.`);
 /** "Long black hair in a ponytail." */
-const describeHair = (value) => (value ? sentence(value) : NO_HAIR);
+const describeHair = (value) => (value ? toSentence(value) : NO_HAIR);
 /** "Red lipstick and eyeliner." / "No makeup." */
-const describeMakeup = (value) => (value ? sentence(value) : NO_MAKEUP);
+const describeMakeup = (value) => (value ? toSentence(value) : NO_MAKEUP);
 
 // ---- English only: the Kin is asked to answer in English (fewer tokens, and the sentences are English). Portuguese
 // keys and values are still read, but they are reported so the diagnostics show whether the Kin follows the rule.

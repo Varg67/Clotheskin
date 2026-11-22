@@ -264,7 +264,7 @@ return { TICK_S, INTERVAL_STEPS, DEFAULT_INTERVAL_S, MAX_RETRY_S, ERRORS_BEFORE_
 __def("src/core/sleep.js", function () {
 // The sleep cycle: is the Kin asleep, when does it wake up, what did it dream. Pure functions shared by the run (which
 // asks) and the screen (which shows).
-const { cleanString } = __req("src/core/text.js");
+const { cleanString, toSentence } = __req("src/core/text.js");
 const { parseJsonObject } = __req("src/core/json.js");
 const { nextWallTime } = __req("src/core/time.js");
 /** @import { Failure } from './json.js' */
@@ -367,12 +367,13 @@ function parseDreamAnswer(text) {
   return { ok: true, dream: summary, remembered: remembered ?? 'some' };
 }
 
-/** The dream as shown on the card: "Flying over the sea with my sister. Remembers most of it." */
-/** @param {Partial<Dream>} [d] */
+/**
+ * The dream as shown on the card: "Flying over the sea with my sister. Remembers most of it."
+ * @param {Partial<Dream>} [d]
+ */
 function describeDream({ dream, remembered } = {}) {
   if (!dream) return 'No dream remembered.';
-  const text = /[.!?…]$/.test(dream) ? dream : `${dream}.`;
-  return `${text.charAt(0).toUpperCase()}${text.slice(1)} ${REMEMBERED_TEXT[remembered] || ''}`.trim();
+  return `${toSentence(dream)} ${REMEMBERED_TEXT[remembered] || ''}`.trim();
 }
 
 /**
@@ -536,7 +537,24 @@ function oneLine(text, max = 500) {
   if (s.length <= max) return s;
   return `${dropHalfChar(s.slice(0, max - 1))}…`;
 }
-return { capitalizeFirst, cleanString, oneLine };
+
+/** "in the kitchen" -> "In the kitchen." No period after one already there, or after the "…" of a cut. */
+function toSentence(s) {
+  const str = String(s ?? '');
+  return capitalizeFirst(/[.!?…]$/.test(str) ? str : `${str}.`);
+}
+
+/** Cuts at a word boundary and marks the cut with "…". */
+function clipWords(s, max) {
+  return s.length > max ? `${s.slice(0, max).replace(/\s+\S*$/, '')}…` : s;
+}
+
+/** Drops the punctuation and spaces at the end ("in the kitchen." -> "in the kitchen"). */
+const trimEndPunctuation = (s) => s.replace(/[.;,!?\s]+$/, '');
+
+/** Drops what a model wraps a value in: markdown emphasis, quotes and brackets ("**'in the kitchen'**"). */
+const stripWrapping = (s) => s.replace(/^[\s*_"'“”‘’()[\]]+/, '').replace(/[\s*_"'“”‘’()[\]]+$/, '');
+return { capitalizeFirst, cleanString, oneLine, toSentence, clipWords, trimEndPunctuation, stripWrapping };
 });
 
 __def("src/core/time.js", function () {

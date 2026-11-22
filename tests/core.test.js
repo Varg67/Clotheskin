@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { toSentence, clipWords, trimEndPunctuation, stripWrapping } from '../src/core/text.js';
 import { zonedParts, zonedTime, nextWallTime, describeNow, safeTimeZone } from '../src/core/time.js';
 import { INTERVAL_STEPS, formatInterval, snapInterval, retryDelay, errorKind, isDue, startDueFor, MAX_RETRY_S, MAINTENANCE_RETRY_S } from '../src/core/schedule.js';
 import { normalizeSettings, normalizeStatus, normalizeEntry, warningOf, DEFAULT_SETTINGS } from '../src/core/state.js';
@@ -90,4 +91,16 @@ test('the warning: maintenance at once, server errors from the third in a row', 
 test('the dream fact told to the Kin: plain, second person, no quotes that could break it', () => {
   assert.equal(dreamFact({ dream: 'I was flying over "the" sea', remembered: 'most' }), 'While you slept, you dreamt: "I was flying over \'the\' sea". Now that you are awake you remember most of it.');
   assert.equal(dreamFact({ dream: null, remembered: 'nothing' }), null);
+});
+
+test('text helpers: a sentence gets one period and a capital; cuts happen at a word', () => {
+  assert.equal(toSentence('in the kitchen'), 'In the kitchen.');
+  assert.equal(toSentence('flying over the sea!'), 'Flying over the sea!');
+  assert.equal(toSentence('walking to the…'), 'Walking to the…');
+  assert.equal(toSentence(''), '.');
+  assert.equal(clipWords('a long grey hoodie', 12), 'a long grey…');
+  assert.equal(clipWords('short', 12), 'short');
+  assert.equal(trimEndPunctuation('in the kitchen.; '), 'in the kitchen');
+  assert.equal(stripWrapping('**"in the kitchen"**'), 'in the kitchen');
+  assert.equal(stripWrapping('(at home)'), 'at home');
 });

@@ -56,10 +56,23 @@ Requires Node 22+. No dependencies at run time.
 
 ```bash
 npm start            # the dev harness: http://localhost:5173
-npm test             # unit tests (node --test), ~110 checks, a few seconds
+npm test             # unit tests (node --test), ~160 checks, a few seconds
 npm run test:e2e     # browser tests on the dev harness (Playwright + Chromium)
 npm run build        # rebuilds screen/app.js and kin.json (tests fail if either is stale)
 ```
+
+**Checks before a commit.** The lint and type tools live in `tools/`, with their own lockfile, never in the root
+`package.json`: Kindroid installs the root lockfile at every start of a run, so anything there would be installed, and
+paid for, every 15 minutes.
+
+```bash
+npm run tools        # once: installs ESLint and TypeScript into tools/ (development only)
+npm run check        # lint, unit tests with coverage limits, performance budgets, generated files up to date
+npm run typecheck    # tsc on the JavaScript (JSDoc types)
+npm run test:perf    # performance budgets alone (tests/perf/)
+```
+
+The refactoring plan, with what was measured, is `docs/plano-de-refatoracao.md` (in Portuguese).
 
 **The dev harness** (`dev/`) is a stand-in for Kindroid.
 - **The real pieces.** It shows the real screen in a 390-point frame and answers its messages (`kins`, `files.read`, `files.write`, `action`) as the guide describes. Actions and the "15-minute start" run the **real** `run/program.js`.
@@ -90,7 +103,9 @@ npm run try -- action    # the screen's Update status
 | `screen/` | what Kindroid serves: `index.html`, `app.js` (**generated**: one classic script from `src/`, no modules, checked for features newer than Safari 14.1), `styles.css`, `theme.css` |
 | `sample/` | sample `settings.json` and `status.json` for the App Library card's picture |
 | `dev/` | the dev harness |
-| `tests/` | unit tests, `run-main.test.js` (the real `node main.js` with a stand-in `kin`), `e2e/screen.cjs` |
+| `tests/` | unit tests, `run-main.test.js` (the real `node main.js` with a stand-in `kin`), `e2e/screen.cjs`, `perf/` (performance budgets), `run-cost.test.js` (the `kin` calls of each kind of start) |
+| `tools/` | development tools only (ESLint, TypeScript), outside the root lockfile; `tools/run.mjs` runs them |
+| `eslint.config.mjs`, `jsconfig.json` | lint (also: no Node in the program and shared logic) and type check settings |
 
 ## Send it to Kindroid
 
@@ -113,6 +128,7 @@ Everything above is tested against the guide and the dev harness, not yet inside
 5. **The App Library picture.** The picture is taken with the `sample/` files answered and no Kin list. The screen shows the sample after 1.5 s and saves nothing.
 6. **Questions stay out of the chat.** The `kin ask` questions do not show up in the Kin's chat or memory.
 7. **The run's container clock.** The run does not rely on its clock zone: wake-up times use the time zone the screen saved.
+8. **Only the root lockfile is installed.** A run installs the root `package-lock.json` (no packages) and never `tools/package-lock.json`. The first real run's time shows it: a start with nothing due should end in seconds.
 
 ## Limits
 

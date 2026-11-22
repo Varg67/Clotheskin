@@ -1,0 +1,10 @@
+{
+  "name": "clotheskin-dev-tools",
+  "private": true,
+  "description": "Development tools only (lint and type check). Kept out of the root package.json on purpose: Kindroid installs the root lockfile at every start of a run, and these must never be installed there.",
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "eslint": "^10.1.0",
+    "typescript": "^6.0.2"
+  }
+}

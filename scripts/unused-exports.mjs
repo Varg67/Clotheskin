@@ -4,6 +4,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isMainModule } from './lib/generated.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SCANNED = ['main.js', 'server.mjs', 'run', 'src', 'dev', 'scripts', 'tests'];
@@ -50,8 +51,7 @@ function unusedExports() {
   return all.filter((f) => !f.startsWith('tests/')).flatMap((f) => exportsOf(code.get(f)).map((n) => `${f}#${n}`)).filter((k) => !used.has(k));
 }
 
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
-if (isMain) {
+if (isMainModule(import.meta.url)) {
   const unused = unusedExports();
   if (unused.length) {
     console.error(`Exported but imported by no other file (make them local, or remove them if nothing uses them):\n  ${unused.join('\n  ')}`);

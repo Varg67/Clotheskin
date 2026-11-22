@@ -1,8 +1,7 @@
 // Generates kin.json, the only file Kindroid reads (guide: "What a program is").
 //   node scripts/build-manifest.mjs          writes kin.json
 //   node scripts/build-manifest.mjs --check  fails if kin.json is not what this gives (a test runs this)
-import { readFileSync, writeFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { isMainModule, writeOrCheck } from './lib/generated.mjs';
 import { ACTION, OPS } from '../src/core/state.js';
 
 export const CHAT_DAYS = 2; // the Kin sees 2 days of its chat: an outfit described yesterday is still in view
@@ -34,16 +33,4 @@ export function buildManifest() {
   };
 }
 
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
-if (isMain) {
-  const target = new URL('../kin.json', import.meta.url);
-  const text = `${JSON.stringify(buildManifest(), null, 2)}\n`;
-  if (process.argv.includes('--check')) {
-    let current = '';
-    try { current = readFileSync(target, 'utf8'); } catch { /* missing */ }
-    if (current !== text) { console.error('kin.json is out of date: run npm run build'); process.exit(1); }
-  } else {
-    writeFileSync(target, text);
-    console.log('kin.json written');
-  }
-}
+if (isMainModule(import.meta.url)) writeOrCheck('kin.json', `${JSON.stringify(buildManifest(), null, 2)}\n`);

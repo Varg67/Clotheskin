@@ -1,7 +1,6 @@
 // Generates docs/real-kin-test-script.md, the plan for the first test with a real Kin (in Portuguese, for the person
 // running it). `node scripts/build-test-script.mjs` writes it; `--check` compares (a test runs it).
-import { readFileSync, writeFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { isMainModule, writeOrCheck } from './lib/generated.mjs';
 import { SCENARIOS, expected, STEPS, SHORTEST_INTERVAL } from './real-kin-scenarios.mjs';
 import { CHAT_DAYS } from './build-manifest.mjs';
 
@@ -93,15 +92,4 @@ ${[...SCENARIOS, ...STEPS].map((s) => `| ${s.id} |  |  |  |  |`).join('\n')}
   return `${out.join('\n')}\n`;
 }
 
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
-if (isMain) {
-  const target = new URL('../docs/real-kin-test-script.md', import.meta.url);
-  if (process.argv.includes('--check')) {
-    let current = '';
-    try { current = readFileSync(target, 'utf8'); } catch { /* missing */ }
-    if (current !== renderScript()) { console.error('docs/real-kin-test-script.md is out of date: run npm run build'); process.exit(1); }
-  } else {
-    writeFileSync(target, renderScript());
-    console.log('docs/real-kin-test-script.md written');
-  }
-}
+if (isMainModule(import.meta.url)) writeOrCheck('docs/real-kin-test-script.md', renderScript());

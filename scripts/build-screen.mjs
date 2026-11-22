@@ -6,9 +6,10 @@
 // published program puts it), and every screen file is uploaded one by one. One classic script avoids both risks:
 // no module loading, no top-level await, one file. No dependency either: the sources keep to a small, checked subset
 // of module syntax (named imports and exports), and each module becomes a function in a tiny registry.
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isMainModule, writeOrCheck } from './lib/generated.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const ENTRY = 'src/screen/main.js';
@@ -74,16 +75,4 @@ __req(${JSON.stringify(ENTRY)}).boot();
 `;
 }
 
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
-if (isMain) {
-  const text = buildScreen();
-  const target = join(ROOT, OUT);
-  if (process.argv.includes('--check')) {
-    let current = '';
-    try { current = readFileSync(target, 'utf8'); } catch { /* missing */ }
-    if (current !== text) { console.error(`${OUT} is out of date: run npm run build`); process.exit(1); }
-  } else {
-    writeFileSync(target, text);
-    console.log(`${OUT} written (${text.length} characters)`);
-  }
-}
+if (isMainModule(import.meta.url)) writeOrCheck(OUT, buildScreen());

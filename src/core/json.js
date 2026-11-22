@@ -1,3 +1,6 @@
+/** The longest answer that is searched and repaired; a longer one is read only if it is strict JSON. */
+export const MAX_ANSWER_CHARS = 20000;
+
 /**
  * Extracts a JSON object from what a Kin answered. A roleplay model often wraps it: narration before or after, a code
  * fence, a remark with braces after it ("Hope that helps {wink}"), the format example echoed before the real answer.
@@ -8,6 +11,12 @@
 export function parseJsonObject(text) {
   const raw = String(text ?? '').trim();
   if (!raw) return { ok: false, error: 'The answer is empty.' };
+  // The questions ask for one line of JSON (a few hundred characters). A longer answer is still read if it is strict
+  // JSON (one linear parse), but it is not searched and repaired: every {...} in it would be one more parse. It is
+  // refused without quoting it.
+  if (raw.length > MAX_ANSWER_CHARS) {
+    try { return unwrap(JSON.parse(raw), false); } catch { return { ok: false, error: `The answer is too long to be read (${raw.length} characters).` }; }
+  }
   const candidates = [raw];
   const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fence) candidates.push(fence[1].trim());

@@ -1,9 +1,9 @@
-// Bugs found while planning the refactoring (docs/plano-de-refatoracao.md, section 1.2). Each test is marked todo
-// until its fix lands; the fix removes the mark, so the bug cannot come back.
+// Bugs found while planning the refactoring (docs/plano-de-refatoracao.md, section 1.2), one test each, written
+// before the fix (as todo) and kept after it, so the bug cannot come back.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runProgram, ACTION } from '../run/program.js';
-import { describeReading } from '../src/core/outfit.js';
+import { describeReading, parseReading } from '../src/core/outfit.js';
 import { fakeKindroid, READING } from './support/fake-kindroid.js';
 
 const tick = (k) => runProgram({ event: { trigger: 'schedule' }, kin: k.kin, clock: k.clock, retryAfterMs: 0 });
@@ -47,9 +47,16 @@ test('B2: a reading with no time left waits for the next start, without an error
   assert.deepEqual(k.asks(), ['reading'], 'no question was started');
 });
 
-test('B3: describing a reading never throws on a partial result', { todo: 'refactoring plan, phase 1.3' }, () => {
+test('B3: describing a reading never throws on a partial result', () => {
   for (const partial of [{}, { ok: false, error: 'x' }, { outfit: null }]) {
     const d = describeReading(partial);
     assert.equal(d.outfit, 'No outfit described in the recent chat.');
   }
+});
+
+test('B4: an answer far longer than asked is refused before parsing, without quoting it', () => {
+  const r = parseReading(`Sure! ${'*She looks around the secret garden.* '.repeat(2000)} {"location":"in the garden"}`);
+  assert.equal(r.ok, false);
+  assert.match(r.error, /too long/);
+  assert.doesNotMatch(r.error, /garden/);
 });

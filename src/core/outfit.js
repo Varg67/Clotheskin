@@ -318,8 +318,8 @@ export function parseReading(text) {
   return { ok: true, outfit, location, pose, action, hair, makeup, warnings, notEnglish: notEnglishKeys(p.doc) };
 }
 
-/** The sentences shown on the card. */
-export function describeReading({ outfit, location, pose, action, hair = null, makeup = null }) {
+/** The sentences shown on the card. A partial result (nothing read) gives the "nothing described" sentences. */
+export function describeReading({ outfit = {}, location = null, pose = null, action = null, hair = null, makeup = null } = {}) {
   return { location: describeLocation(location), doing: describeDoing({ pose, action }), outfit: describeOutfit(outfit), hair: describeHair(hair), makeup: describeMakeup(makeup) };
 }
 
@@ -338,7 +338,8 @@ const inOrder = (outfit, order) => order.flatMap((slot) =>
  * The sentence: "Wearing a leather jacket, a perfumed white shirt and blue jeans, with glasses."
  * Underwear is only mentioned when there is nothing else to say about clothing.
  */
-export function describeOutfit(outfit) {
+export function describeOutfit(given) {
+  const outfit = isPlainObject(given) ? given : {};
   let clothing = inOrder(outfit, CLOTHING_ORDER);
   const accessories = inOrder(outfit, ACCESSORY_ORDER);
   if (!clothing.length) clothing = inOrder(outfit, UNDERWEAR_ORDER);

@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseReading, describeReading } from '../../src/core/outfit.js';
-import { parseJsonObject } from '../../src/core/json.js';
+import { parseJsonObject, MAX_ANSWER_CHARS } from '../../src/core/json.js';
 import { nextWallTime } from '../../src/core/time.js';
 import { runProgram } from '../../run/program.js';
 import { fakeKindroid, READING } from '../support/fake-kindroid.js';
@@ -32,25 +32,32 @@ test('perf: reading an answer, clean or messy, takes well under a millisecond', 
   assert.ok(ms < 0.5, `${ms.toFixed(3)} ms per answer`);
 });
 
+// Adversarial answers as long as an answer may be (MAX_ANSWER_CHARS): the worst a model can make the parser do.
+// Measured at 20,000 characters: thousands of small {...} ~50 ms (each is one more parse), everything else < 10 ms.
+const fill = (unit, before = '', after = '') => before + unit.repeat(Math.floor((MAX_ANSWER_CHARS - before.length - after.length) / unit.length)) + after;
 const ADVERSARIAL = {
-  'unbalanced braces': '{'.repeat(50000),
-  'an open quote': `{"location":"${'x'.repeat(100000)}`,
-  'nested brackets': `${'{"a":['.repeat(5000)}1${']}'.repeat(5000)}`,
-  'many small objects': 'x {a} '.repeat(10000),
-  'a very long key': `{${'k'.repeat(100000)}: 1}`,
+  'bare words': fill('ab, ', '{'),
+  'many small objects': fill('x {a} '),
+  'unbalanced braces': fill('{'),
+  'an open quote': fill('x', '{"location":"'),
+  'nested brackets': fill('{"a":['),
+  'a very long key': fill('k', '{', ': 1}'),
 };
-// Every candidate {...} is parsed in turn: thousands of them cost ~3.5 us per character today (60 KB: ~210 ms).
-const TODO = { 'many small objects': 'refactoring plan, phase 1.4 (B4): no size limit on the answer yet' };
 for (const [name, text] of Object.entries(ADVERSARIAL)) {
-  test(`perf: an adversarial answer (${name}, ${Math.round(text.length / 1000)} KB) is handled in under 250 ms`, { todo: TODO[name] }, () => {
+  test(`perf: an adversarial answer at the length limit (${name}) is handled in under 150 ms`, () => {
+    assert.ok(text.length <= MAX_ANSWER_CHARS && text.length > MAX_ANSWER_CHARS - 10);
     const ms = once(() => parseJsonObject(text));
-    assert.ok(ms < 250, `${ms.toFixed(0)} ms`);
+    assert.ok(ms < 150, `${ms.toFixed(0)} ms`);
   });
 }
 
-test('perf: 200 KB of bare words is handled in under 100 ms', { todo: 'refactoring plan, phase 1.4 (B4): grows faster than linear today' }, () => {
-  const ms = once(() => parseJsonObject(`{${'ab, '.repeat(50000)}`));
-  assert.ok(ms < 100, `${ms.toFixed(0)} ms`);
+test('perf: an answer over the length limit that is not strict JSON is refused at once, without quoting it', () => {
+  const text = `{location: '${'secret scene '.repeat(20000)}'}`;
+  let r;
+  const ms = once(() => { r = parseJsonObject(text); });
+  assert.ok(ms < 5, `${ms.toFixed(1)} ms`);
+  assert.equal(r.ok, false);
+  assert.doesNotMatch(r.error, /secret/);
 });
 
 test('perf: a whole run with an instant Kin takes a few milliseconds of the run\'s own time', async () => {

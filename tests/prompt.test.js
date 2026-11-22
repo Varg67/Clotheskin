@@ -9,7 +9,8 @@ test('the prompt demands English-only, concise, one-line JSON and pins down the 
   assert.match(p, /^\[DIRECTIVE — OUT OF CHARACTER\. This is not a roleplay message/);
   assert.match(p, /\n\[END DIRECTIVE\] Your whole reply is one line of minified JSON in English: it starts with \{ and ends with \}\.$/);
   assert.match(p, /^Task: you are Isa\./m);
-  assert.match(p, /English only: every key and value in English, even when the chat is in Portuguese; translate it/);
+  assert.match(p, /English only: every key and value in English, whatever language the chat is in; translate it/);
+  assert.ok(!/Portuguese/.test(p), 'any companion, any language: the question names no particular one');
   assert.match(p, /short noun phrases with article and key traits, at most 6 words/);
   assert.match(p, /minified JSON only, on one line/);
   assert.match(p, /Apply later changes: something taken off is no longer worn/);

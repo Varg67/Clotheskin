@@ -14,6 +14,7 @@ import { looksAsleep, sentenceMark, planSleep, parseSleepAnswer, parseDreamAnswe
 import { retryDelay, errorKind, isDue, TICK_S } from '../src/core/schedule.js';
 import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, forgetOld, SETTINGS_FILE, STATUS_FILE, ACTION, OPS } from '../src/core/state.js';
 import { describeNow } from '../src/core/time.js';
+import { formatWhen } from '../src/core/format.js';
 import { oneLine } from '../src/core/text.js';
 
 export { ACTION, OPS }; // the program's one action (src/core/state.js): one input rule, nothing checked against another's
@@ -69,7 +70,8 @@ async function scheduled(ctx, status) {
 
   const entry = afterStop(status.kins[settings.kinId] || normalizeEntry(), settings); // Stop forgot the night before it
   const at = plannedAt(entry, settings);
-  if (!isDue(at, clock())) return ok(`Nothing due before ${at}.`); // most starts end here, without asking anything
+  // most starts end here, without asking anything; the line shows in Kindroid's log, so it is on the person's clock
+  if (!isDue(at, clock())) return ok(`Nothing to do yet: next update around ${formatWhen(at, { timeZone: settings.tz, now: clock() })}.`);
 
   const who = await attachedKin(ctx, settings.kinId, entry);
   if (!who.ok) return who.result;

@@ -438,3 +438,14 @@ test('the sleep and dream questions get the same correction', async () => {
   await tick(k);
   assert.equal(k.entry().dream.dream, 'I was swimming in a warm sea');
 });
+
+test('a start with nothing due says when the next update is, on the person\'s clock (the line shows in Kindroid\'s log)', async () => {
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', intervalS: 3600, ...SAO_PAULO } });
+  k.answers.reading.push(AWAKE);
+  k.at('2026-11-22T05:27:35Z'); // 02:27 in São Paulo
+  await tick(k);
+  k.advance(15);
+  const r = await tick(k);
+  assert.equal(r.message, 'Nothing to do yet: next update around 3:27 AM.');
+  assert.ok(!/\d{4}-\d\d-\d\dT/.test(r.message), 'no ISO timestamp');
+});

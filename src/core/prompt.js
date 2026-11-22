@@ -10,7 +10,7 @@ const SLOT_LIST = [...CLOTHING_SLOTS, ...ACCESSORY_SLOTS, BAG_SLOT].join(', ');
  * the prompt carries no messages: only what to say and how.
  */
 export const OUTFIT_PROMPT = `[DIRECTIVE — OUT OF CHARACTER. This is not a roleplay message and the person never sees it. Do not answer as {{name}} speaking: no *actions*, no dialogue, no narration.]
-English only: every key and value in English, even when the chat is in Portuguese; translate it ("na cozinha" -> "in the kitchen").
+English only: every key and value in English, whatever language the chat is in; translate it ("na cozinha", "en la cocina" -> "in the kitchen").
 Task: you are {{name}}. From your recent chat with the person, report where you are, your pose, what you are doing, what you are wearing, and your hair and makeup, as of your last message.
 Only what the recent chat states; never guess or invent: if the recent chat does not say it, leave that key out, and {} is a correct answer. Not from your memories, journal, backstory or earlier days, unless the recent chat says it is still so. Apply later changes: something taken off is no longer worn, a place you have left is no longer where you are, a finished action is no longer what you are doing. Ignore plans, wishes and hypothetical outfits. Describe only yourself.
 Format: minified JSON only, on one line; no code fence or comment.

@@ -6,12 +6,26 @@ import { runProgram } from './run/program.js';
 
 const log = (m) => console.error(`[clotheskin] ${m}`); // stderr: diagnostics only, never the scene
 
+// What starts a run is a small JSON (an action's input is at most 16,000 characters): far more is not a trigger.
+const MAX_STDIN_CHARS = 1024 * 1024;
+
 async function readStdin() {
   if (process.stdin.isTTY) return '';
   let data = '';
   process.stdin.setEncoding('utf8');
-  for await (const chunk of process.stdin) data += chunk;
+  for await (const chunk of process.stdin) {
+    data += chunk;
+    if (data.length > MAX_STDIN_CHARS) throw new Error('its input is too large to be a trigger');
+  }
   return data;
+}
+
+/** The trigger: { event } when stdin is a JSON object (nothing on stdin is an empty trigger), otherwise { problem }. */
+function parseEvent(text) {
+  let event;
+  try { event = JSON.parse(text || '{}'); } catch { return { problem: 'Clotheskin was started with input that is not JSON.' }; }
+  if (!event || typeof event !== 'object' || Array.isArray(event)) return { problem: 'Clotheskin was started with JSON that is not a trigger.' };
+  return { event };
 }
 
 // kin.json gives a run 2 minutes. program.js keeps to 100 s; if anything still hangs, this ends the run properly
@@ -40,10 +54,8 @@ const watchdog = setTimeout(async () => {
 
 let result;
 try {
-  const text = await readStdin();
-  let event;
-  try { event = JSON.parse(text || '{}'); } catch { result = { ok: false, message: 'Clotheskin was started with input that is not JSON.' }; }
-  if (!result) result = await runProgram({ event, kin, log });
+  const { event, problem } = parseEvent(await readStdin());
+  result = problem ? { ok: false, message: problem } : await runProgram({ event, kin, log });
 } catch (e) {
   result = { ok: false, message: `Clotheskin could not finish: ${e.message}` };
 }

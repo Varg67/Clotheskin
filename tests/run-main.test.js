@@ -60,6 +60,16 @@ test('stdin that is not JSON still ends with kin end --failed', () => {
   assert.deepEqual(r.ends, [['end', '--failed', 'Clotheskin was started with input that is not JSON.']]);
 });
 
+test('stdin that is JSON but not an object, or far too large, still ends with kin end --failed', () => {
+  for (const stdin of ['3', 'null', '["schedule"]', `{"trigger":"schedule","pad":"${'x'.repeat(1100000)}"}`]) {
+    const r = run(null, { stdin });
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.ends.length, 1, 'kin end exactly once');
+    assert.equal(r.ends[0][1], '--failed', stdin.slice(0, 20));
+    assert.ok(!r.calls.some((c) => c[0] === 'ask'), 'nothing is asked');
+  }
+});
+
 test('kin end itself failing: exit code 1 and the message on stderr, no crash', () => {
   const r = run({ trigger: 'schedule' }, { options: { answer: ANSWER, endFails: true } });
   assert.equal(r.code, 1);

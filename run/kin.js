@@ -9,7 +9,7 @@
 //  - `kin files get` of a missing file is "not found" (null), any other failure is an error: the caller must then
 //    not write over the file it could not read.
 import { execFile } from 'node:child_process';
-import { writeFileSync, rmSync, mkdtempSync } from 'node:fs';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { oneLine } from '../src/core/text.js';
@@ -73,13 +73,13 @@ export function createKin({ bin = process.env.KIN_BIN || 'kin', defaultTimeoutMs
     },
     /** Saves text as a file of the program's folder (through /tmp: a shared program's folder is read-only). */
     async put(path, text) {
-      const dir = mkdtempSync(join(tmpdir(), 'clotheskin-'));
-      const file = join(dir, 'body');
+      const dir = await mkdtemp(join(tmpdir(), 'clotheskin-'));
       try {
-        writeFileSync(file, text);
+        const file = join(dir, 'body');
+        await writeFile(file, text);
         await call(['files', 'put', path, file]);
       } finally {
-        rmSync(dir, { recursive: true, force: true });
+        await rm(dir, { recursive: true, force: true });
       }
     },
     /** The Kins attached to the program: [{ id, name }] (kin kins prints one per line: id, a tab, the name). */

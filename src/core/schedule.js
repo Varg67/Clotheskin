@@ -35,16 +35,29 @@ export function snapInterval(seconds) {
 export function retryDelay(intervalS, failures, kind) {
   let d = intervalS;
   if (failures >= ERRORS_BEFORE_SLOWING) d = Math.max(intervalS, Math.min(MAX_RETRY_S, intervalS * 2 ** (failures - ERRORS_BEFORE_SLOWING + 1)));
-  if (kind === 'maintenance') d = Math.max(d, MAINTENANCE_RETRY_S);
+  if (kind === ERROR.MAINTENANCE) d = Math.max(d, MAINTENANCE_RETRY_S);
   return d;
 }
 
+/**
+ * What went wrong in a step. SERVER, MAINTENANCE, ANSWER and INPUT are saved in status.json; TIME (the run's own time
+ * ran out) never is: the step just waits for the next start.
+ */
+export const ERROR = Object.freeze({ SERVER: 'server', MAINTENANCE: 'maintenance', ANSWER: 'answer', INPUT: 'input', TIME: 'time' });
+
 // Words that say Kindroid is down on purpose. A bare 502/503 is a hiccup: it is tried again, not waited out.
 const MAINTENANCE = /\b(maintenance|scheduled downtime|outage)\b/i;
-/** 'maintenance' when a Kindroid error says so, otherwise the kind given. A Kin's own words are never checked. */
-export function errorKind(message, kind = 'server') {
-  if (kind === 'answer') return 'answer';
-  return MAINTENANCE.test(String(message ?? '')) ? 'maintenance' : kind;
+/** @typedef {typeof ERROR[keyof typeof ERROR]} ErrorKind */
+
+/**
+ * 'maintenance' when a Kindroid error says so, otherwise the kind given. A Kin's own words are never checked.
+ * @param {unknown} message
+ * @param {ErrorKind} [kind]
+ * @returns {ErrorKind}
+ */
+export function errorKind(message, kind = ERROR.SERVER) {
+  if (kind === ERROR.ANSWER) return ERROR.ANSWER;
+  return MAINTENANCE.test(String(message ?? '')) ? ERROR.MAINTENANCE : kind;
 }
 
 /** Milliseconds of an ISO time, or null for nothing or a time that cannot be read (both mean "at once"). */

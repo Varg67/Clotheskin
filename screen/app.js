@@ -218,16 +218,29 @@ function snapInterval(seconds) {
 function retryDelay(intervalS, failures, kind) {
   let d = intervalS;
   if (failures >= ERRORS_BEFORE_SLOWING) d = Math.max(intervalS, Math.min(MAX_RETRY_S, intervalS * 2 ** (failures - ERRORS_BEFORE_SLOWING + 1)));
-  if (kind === 'maintenance') d = Math.max(d, MAINTENANCE_RETRY_S);
+  if (kind === ERROR.MAINTENANCE) d = Math.max(d, MAINTENANCE_RETRY_S);
   return d;
 }
 
+/**
+ * What went wrong in a step. SERVER, MAINTENANCE, ANSWER and INPUT are saved in status.json; TIME (the run's own time
+ * ran out) never is: the step just waits for the next start.
+ */
+const ERROR = Object.freeze({ SERVER: 'server', MAINTENANCE: 'maintenance', ANSWER: 'answer', INPUT: 'input', TIME: 'time' });
+
 // Words that say Kindroid is down on purpose. A bare 502/503 is a hiccup: it is tried again, not waited out.
 const MAINTENANCE = /\b(maintenance|scheduled downtime|outage)\b/i;
-/** 'maintenance' when a Kindroid error says so, otherwise the kind given. A Kin's own words are never checked. */
-function errorKind(message, kind = 'server') {
-  if (kind === 'answer') return 'answer';
-  return MAINTENANCE.test(String(message ?? '')) ? 'maintenance' : kind;
+/** @typedef {typeof ERROR[keyof typeof ERROR]} ErrorKind */
+
+/**
+ * 'maintenance' when a Kindroid error says so, otherwise the kind given. A Kin's own words are never checked.
+ * @param {unknown} message
+ * @param {ErrorKind} [kind]
+ * @returns {ErrorKind}
+ */
+function errorKind(message, kind = ERROR.SERVER) {
+  if (kind === ERROR.ANSWER) return ERROR.ANSWER;
+  return MAINTENANCE.test(String(message ?? '')) ? ERROR.MAINTENANCE : kind;
 }
 
 /** Milliseconds of an ISO time, or null for nothing or a time that cannot be read (both mean "at once"). */
@@ -249,7 +262,7 @@ function startDueFor(at, now) {
   const q = TICK_S * 1000;
   return new Date(Math.ceil(from / q) * q);
 }
-return { TICK_S, INTERVAL_STEPS, DEFAULT_INTERVAL_S, MAX_RETRY_S, ERRORS_BEFORE_WARNING, MAINTENANCE_RETRY_S, formatInterval, snapInterval, retryDelay, errorKind, isDue, startDueFor };
+return { TICK_S, INTERVAL_STEPS, DEFAULT_INTERVAL_S, MAX_RETRY_S, ERRORS_BEFORE_WARNING, MAINTENANCE_RETRY_S, formatInterval, snapInterval, retryDelay, ERROR, errorKind, isDue, startDueFor };
 });
 
 __def("src/core/sleep.js", function () {
@@ -389,14 +402,17 @@ __def("src/core/state.js", function () {
 //                  the night (hibernation) and the last dream.
 // One writer per file, so the screen and a run never overwrite each other. Both are normalised on every read: a
 // damaged or hand-edited file can never break the screen or the run, it only falls back to defaults.
-const { snapInterval, DEFAULT_INTERVAL_S, ERRORS_BEFORE_WARNING } = __req("src/core/schedule.js");
+const { snapInterval, DEFAULT_INTERVAL_S, ERRORS_BEFORE_WARNING, ERROR } = __req("src/core/schedule.js");
 const { safeTimeZone } = __req("src/core/time.js");
 const { REMEMBERED } = __req("src/core/sleep.js");
 const { oneLine } = __req("src/core/text.js");
 
 const SETTINGS_FILE = 'settings.json';
 const STATUS_FILE = 'status.json';
-const RUN_STATES = ['running', 'paused', 'stopped'];
+/** Start / Pause / Stop of the automatic update. */
+const AUTO = Object.freeze({ RUNNING: 'running', PAUSED: 'paused', STOPPED: 'stopped' });
+const RUN_STATES = Object.values(AUTO);
+const SAVED_ERRORS = [ERROR.SERVER, ERROR.MAINTENANCE, ERROR.ANSWER, ERROR.INPUT];
 const THEMES = { warm: 'Warm (default)', sage: 'Sage green' };
 /** The program's one action (kin.json), used by the screen. One action, so one input rule. */
 const ACTION = 'update_status';
@@ -405,7 +421,7 @@ const OPS = ['read', 'wake'];
 const DEFAULT_SETTINGS = Object.freeze({
   v: 1,
   kinId: null, // the Kin of the current roleplay: the only one read
-  autoState: 'stopped', // Start / Pause / Stop
+  autoState: AUTO.STOPPED, // Start / Pause / Stop
   intervalS: DEFAULT_INTERVAL_S, // how often the automatic update reads, in seconds (15 min to 4 h)
   tz: 'UTC', // the person's IANA time zone (wake-up times are on their clock)
   theme: 'warm',
@@ -454,7 +470,7 @@ function normalizeEntry(e = {}) {
     retryAt: iso(e.retryAt), // after an error: when to try again (kept when the ruler moves)
     failures: count(e.failures),
     serverFailures: count(e.serverFailures),
-    errorKind: ['server', 'maintenance', 'answer', 'input'].includes(e.errorKind) ? e.errorKind : null,
+    errorKind: SAVED_ERRORS.includes(e.errorKind) ? e.errorKind : null,
     error: str(e.error, 500),
     note: str(e.note, 500),
     sleep,
@@ -504,11 +520,11 @@ function readingText(reading) {
 /** A warning about Kindroid itself for a Kin's entry, or null. */
 function warningOf(entry) {
   if (!entry) return null;
-  if (entry.errorKind === 'maintenance') return { kind: 'maintenance' };
-  if (entry.errorKind === 'server' && entry.serverFailures >= ERRORS_BEFORE_WARNING) return { kind: 'server', failures: entry.serverFailures };
+  if (entry.errorKind === ERROR.MAINTENANCE) return { kind: ERROR.MAINTENANCE };
+  if (entry.errorKind === ERROR.SERVER && entry.serverFailures >= ERRORS_BEFORE_WARNING) return { kind: ERROR.SERVER, failures: entry.serverFailures };
   return null;
 }
-return { SETTINGS_FILE, STATUS_FILE, THEMES, ACTION, OPS, DEFAULT_SETTINGS, normalizeSettings, normalizeEntry, normalizeStatus, afterStop, plannedAt, readingText, warningOf };
+return { SETTINGS_FILE, STATUS_FILE, AUTO, THEMES, ACTION, OPS, DEFAULT_SETTINGS, normalizeSettings, normalizeEntry, normalizeStatus, afterStop, plannedAt, readingText, warningOf };
 });
 
 __def("src/core/text.js", function () {
@@ -632,14 +648,14 @@ __def("src/screen/app.js", function () {
 // work, every 15 minutes or when Update status is pressed; the screen never asks the Kin anything itself.
 const { h, keepFocus } = __req("src/screen/dom.js");
 const { icon, spinner, poseIcon, hairIcon } = __req("src/screen/icons.js");
-const { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, warningOf, readingText, SETTINGS_FILE, STATUS_FILE, ACTION, THEMES } = __req("src/core/state.js");
-const { INTERVAL_STEPS, formatInterval, snapInterval, startDueFor } = __req("src/core/schedule.js");
+const { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, warningOf, readingText, SETTINGS_FILE, STATUS_FILE, ACTION, THEMES, AUTO } = __req("src/core/state.js");
+const { INTERVAL_STEPS, formatInterval, snapInterval, startDueFor, ERROR } = __req("src/core/schedule.js");
 const { describeDream, DREAM_TTL_HOURS } = __req("src/core/sleep.js");
 const { deviceTimeZone } = __req("src/core/time.js");
 const { formatClock, formatRelative, formatWhen } = __req("src/core/format.js");
 
 const POLL_MS = 60000; // status.json is read again every minute while the screen is visible
-const RUN_WORDS = { running: 'started', paused: 'paused', stopped: 'stopped' };
+const RUN_WORDS = { [AUTO.RUNNING]: 'started', [AUTO.PAUSED]: 'paused', [AUTO.STOPPED]: 'stopped' };
 
 /**
  * Starts the screen on a connected channel. `kins` is the first list from the page (null when the page answered
@@ -770,7 +786,7 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
 
   function setRun(state) {
     if (S.settings.autoState === state) return;
-    saveSettings(state === 'stopped' ? { autoState: state, stoppedAt: clock().toISOString() } : { autoState: state });
+    saveSettings(state === AUTO.STOPPED ? { autoState: state, stoppedAt: clock().toISOString() } : { autoState: state });
     announce(`Automatic update ${RUN_WORDS[state]}.`);
   }
 
@@ -780,14 +796,14 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
 
   function warningText(w, entry) {
     const when = ` The next try is around ${nextTry(entry)}.`;
-    return w.kind === 'maintenance' ? `Kindroid seems to be under maintenance.${when}` : `Kindroid has not answered ${w.failures} times in a row. It may be down.${when}`;
+    return w.kind === ERROR.MAINTENANCE ? `Kindroid seems to be under maintenance.${when}` : `Kindroid has not answered ${w.failures} times in a row. It may be down.${when}`;
   }
 
   /** The last run's problem in plain words (the technical detail in brackets, for anyone who reports it). */
   function problemText(e, kin) {
     if (e.note) return e.note;
-    if (e.errorKind === 'answer') return `${kin.name}'s answer could not be read: ${e.error}`;
-    if (e.errorKind === 'server') return `Kindroid did not answer this time (${e.error}). It tries again around ${nextTry(e)}.`;
+    if (e.errorKind === ERROR.ANSWER) return `${kin.name}'s answer could not be read: ${e.error}`;
+    if (e.errorKind === ERROR.SERVER) return `Kindroid did not answer this time (${e.error}). It tries again around ${nextTry(e)}.`;
     return e.error;
   }
 
@@ -840,7 +856,7 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
     const busy = S.busy[kin.id];
     const dream = e.dream && e.dream.dream && now.getTime() - Date.parse(e.dream.at) < DREAM_TTL_HOURS * 3600e3 ? e.dream : null;
     const others = list.length - 1;
-    const warning = S.settings.autoState === 'running' ? warningOf(e) : null;
+    const warning = S.settings.autoState === AUTO.RUNNING ? warningOf(e) : null;
     const problem = S.error && (S.error.save || S.error.kinId === kin.id) ? S.error.text : e.error ? problemText(e, kin) : null;
 
     return h('section', { class: 'card', 'aria-label': `${kin.name}: current status` },
@@ -880,12 +896,12 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
     const now = clock();
     const night = e.sleep;
     let status;
-    if (run === 'stopped') status = 'Stopped. Press Start to update automatically.';
+    if (run === AUTO.STOPPED) status = 'Stopped. Press Start to update automatically.';
     else if (night) {
       const asleep = new Date(night.until) > now ? `Asleep until ${at(night.wakeAt)}. The dream question comes around ${nextTry(e)}. ` : `Waking up: the dream question comes around ${nextTry(e)}. `;
-      status = run === 'paused' ? `${asleep}Paused: nothing is asked until you press Resume.`
+      status = run === AUTO.PAUSED ? `${asleep}Paused: nothing is asked until you press Resume.`
         : [asleep, busy ? null : h('button', { type: 'button', class: 'link-btn', 'data-key': 'wake-now', onClick: () => update('wake') }, 'Wake now')];
-    } else if (run === 'paused') status = 'Paused: nothing is asked until you press Resume.';
+    } else if (run === AUTO.PAUSED) status = 'Paused: nothing is asked until you press Resume.';
     else status = `Next update around ${nextTry(e)}.`;
     const control = (key, text, iconName, enabled, state, focusAfter) => h('button', {
       type: 'button', class: `btn small${key === 'auto-start' ? ' primary' : ''}`, 'data-key': key, disabled: !enabled,
@@ -894,11 +910,11 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
     return h('div', { class: 'auto', role: 'group', 'aria-labelledby': 'auto-title' },
       h('div', { class: 'auto-head' },
         h('span', { class: 'row-label', id: 'auto-title' }, 'Automatic update'),
-        h('span', { class: `auto-state ${run}`, 'data-testid': 'auto-state' }, { running: 'Running', paused: 'Paused', stopped: 'Stopped' }[run])),
+        h('span', { class: `auto-state ${run}`, 'data-testid': 'auto-state' }, { [AUTO.RUNNING]: 'Running', [AUTO.PAUSED]: 'Paused', [AUTO.STOPPED]: 'Stopped' }[run])),
       h('div', { class: 'auto-controls' },
-        control('auto-start', run === 'paused' ? 'Resume' : 'Start', 'play', run !== 'running', 'running', 'auto-pause'),
-        control('auto-pause', 'Pause', 'pause', run === 'running', 'paused', 'auto-start'),
-        control('auto-stop', 'Stop', 'stop', run !== 'stopped', 'stopped', 'auto-start')),
+        control('auto-start', run === AUTO.PAUSED ? 'Resume' : 'Start', 'play', run !== AUTO.RUNNING, AUTO.RUNNING, 'auto-pause'),
+        control('auto-pause', 'Pause', 'pause', run === AUTO.RUNNING, AUTO.PAUSED, 'auto-start'),
+        control('auto-stop', 'Stop', 'stop', run !== AUTO.STOPPED, AUTO.STOPPED, 'auto-start')),
       h('div', { class: 'auto-head' }, h('label', { class: 'row-label', for: 'auto-ruler' }, 'How often'), out),
       h('input', { type: 'range', id: 'auto-ruler', class: 'ruler', 'data-key': 'auto-ruler', min: 0, max: INTERVAL_STEPS.length - 1, step: 1, value: Math.max(0, INTERVAL_STEPS.indexOf(value)), 'aria-valuetext': label(value),
         onPointerdown: () => { dragging = true; },

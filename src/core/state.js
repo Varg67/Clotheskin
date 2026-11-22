@@ -5,14 +5,17 @@
 //                  the night (hibernation) and the last dream.
 // One writer per file, so the screen and a run never overwrite each other. Both are normalised on every read: a
 // damaged or hand-edited file can never break the screen or the run, it only falls back to defaults.
-import { snapInterval, DEFAULT_INTERVAL_S, ERRORS_BEFORE_WARNING } from './schedule.js';
+import { snapInterval, DEFAULT_INTERVAL_S, ERRORS_BEFORE_WARNING, ERROR } from './schedule.js';
 import { safeTimeZone } from './time.js';
 import { REMEMBERED } from './sleep.js';
 import { oneLine } from './text.js';
 
 export const SETTINGS_FILE = 'settings.json';
 export const STATUS_FILE = 'status.json';
-const RUN_STATES = ['running', 'paused', 'stopped'];
+/** Start / Pause / Stop of the automatic update. */
+export const AUTO = Object.freeze({ RUNNING: 'running', PAUSED: 'paused', STOPPED: 'stopped' });
+const RUN_STATES = Object.values(AUTO);
+const SAVED_ERRORS = [ERROR.SERVER, ERROR.MAINTENANCE, ERROR.ANSWER, ERROR.INPUT];
 export const THEMES = { warm: 'Warm (default)', sage: 'Sage green' };
 /** The program's one action (kin.json), used by the screen. One action, so one input rule. */
 export const ACTION = 'update_status';
@@ -21,7 +24,7 @@ export const OPS = ['read', 'wake'];
 export const DEFAULT_SETTINGS = Object.freeze({
   v: 1,
   kinId: null, // the Kin of the current roleplay: the only one read
-  autoState: 'stopped', // Start / Pause / Stop
+  autoState: AUTO.STOPPED, // Start / Pause / Stop
   intervalS: DEFAULT_INTERVAL_S, // how often the automatic update reads, in seconds (15 min to 4 h)
   tz: 'UTC', // the person's IANA time zone (wake-up times are on their clock)
   theme: 'warm',
@@ -70,7 +73,7 @@ export function normalizeEntry(e = {}) {
     retryAt: iso(e.retryAt), // after an error: when to try again (kept when the ruler moves)
     failures: count(e.failures),
     serverFailures: count(e.serverFailures),
-    errorKind: ['server', 'maintenance', 'answer', 'input'].includes(e.errorKind) ? e.errorKind : null,
+    errorKind: SAVED_ERRORS.includes(e.errorKind) ? e.errorKind : null,
     error: str(e.error, 500),
     note: str(e.note, 500),
     sleep,
@@ -120,8 +123,8 @@ export function readingText(reading) {
 /** A warning about Kindroid itself for a Kin's entry, or null. */
 export function warningOf(entry) {
   if (!entry) return null;
-  if (entry.errorKind === 'maintenance') return { kind: 'maintenance' };
-  if (entry.errorKind === 'server' && entry.serverFailures >= ERRORS_BEFORE_WARNING) return { kind: 'server', failures: entry.serverFailures };
+  if (entry.errorKind === ERROR.MAINTENANCE) return { kind: ERROR.MAINTENANCE };
+  if (entry.errorKind === ERROR.SERVER && entry.serverFailures >= ERRORS_BEFORE_WARNING) return { kind: ERROR.SERVER, failures: entry.serverFailures };
   return null;
 }
 

@@ -11,8 +11,8 @@
 import { buildOutfitPrompt, buildFollowUpPrompt, SLEEP_PROMPT, DREAM_PROMPT, KIN_ASK_LIMIT } from '../src/core/prompt.js';
 import { parseReading, describeReading } from '../src/core/outfit.js';
 import { looksAsleep, sentenceMark, planSleep, parseSleepAnswer, parseDreamAnswer, describeDream, dreamFact, DREAM_TTL_HOURS } from '../src/core/sleep.js';
-import { retryDelay, errorKind, isDue, TICK_S } from '../src/core/schedule.js';
-import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, readingText, SETTINGS_FILE, STATUS_FILE, ACTION, OPS } from '../src/core/state.js';
+import { retryDelay, errorKind, isDue, TICK_S, ERROR } from '../src/core/schedule.js';
+import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, readingText, SETTINGS_FILE, STATUS_FILE, ACTION, OPS, AUTO } from '../src/core/state.js';
 import { describeNow } from '../src/core/time.js';
 import { oneLine } from '../src/core/text.js';
 
@@ -51,8 +51,8 @@ export async function runProgram({ event, kin, clock = () => new Date(), log = (
 
 async function scheduled(ctx, status) {
   const { settings, clock } = ctx;
-  if (settings.autoState === 'stopped') return ok('Automatic update is stopped.');
-  if (settings.autoState === 'paused') return ok('Automatic update is paused.');
+  if (settings.autoState === AUTO.STOPPED) return ok('Automatic update is stopped.');
+  if (settings.autoState === AUTO.PAUSED) return ok('Automatic update is paused.');
   if (!settings.kinId) return ok('No Kin is selected.');
 
   const entry = afterStop(status.kins[settings.kinId] || normalizeEntry(), settings); // Stop forgot the night before it
@@ -85,7 +85,7 @@ async function attachedKin(ctx, id, entry) {
   try { kins = await ctx.kin.kins(); } catch (e) {
     const who = { id, name: entry.name || id };
     const now = ctx.clock();
-    const outcome = { kind: 'server', error: `Could not list the Kins: ${e.message}` };
+    const outcome = { kind: ERROR.SERVER, error: `Could not list the Kins: ${e.message}` };
     return { ok: false, result: await fail(ctx, { who, entry: { ...entry, lastRunAt: now.toISOString() }, outcome, now, base: entry }) };
   }
   const kin = kins.find((k) => k.id === id);
@@ -102,11 +102,11 @@ async function read(ctx, who, entry) {
   const e = { ...entry, name: who.name, lastRunAt: now.toISOString() };
 
   const answer = await ask(ctx, who, buildOutfitPrompt({ name: who.name }));
-  if (!answer.ok && answer.kind === 'time') return postpone(ctx, { who, entry: e, now, base: entry, note: 'The reading waits for the next start of the app.' });
+  if (!answer.ok && answer.kind === ERROR.TIME) return postpone(ctx, { who, entry: e, now, base: entry, note: 'The reading waits for the next start of the app.' });
   if (!answer.ok) return fail(ctx, { who, entry: e, outcome: answer, now, base: entry });
   const parsed = parseReading(answer.text);
   if (parsed.ok === false) {
-    const outcome = { kind: 'answer', error: `${parsed.error} Nothing was changed.`, length: answer.text.length };
+    const outcome = { kind: ERROR.ANSWER, error: `${parsed.error} Nothing was changed.`, length: answer.text.length };
     return fail(ctx, { who, entry: e, outcome, now, base: entry });
   }
   const reading = describeReading(parsed);
@@ -128,7 +128,7 @@ async function read(ctx, who, entry) {
   // The reading is kept before the sleep question: if the run is cut short, it is not lost.
   await save(ctx, who.id, e, entry);
   const s = await ask(ctx, who, buildFollowUpPrompt(SLEEP_PROMPT, { name: who.name, now: describeNow(now, settings.tz) }));
-  if (!s.ok && s.kind === 'time') {
+  if (!s.ok && s.kind === ERROR.TIME) {
     const note = 'The sleep question waits for the next start of the app.';
     return postpone(ctx, { who, entry: succeeded(e), now, base: e, note, message: `${line} The sleep question waits for the next start.` });
   }
@@ -139,7 +139,7 @@ async function read(ctx, who, entry) {
   const p = parseSleepAnswer(s.text);
   if (p.ok === false) {
     const note = `The sleep question did not get a clear answer (${p.error}) It is asked again at the next update.`;
-    return fail(ctx, { who, entry: e, outcome: { kind: 'answer', error: p.error }, now, note, base: e });
+    return fail(ctx, { who, entry: e, outcome: { kind: ERROR.ANSWER, error: p.error }, now, note, base: e });
   }
   const plan = p.sleeping ? planSleep(p.wakeAt, now, settings.tz) : null;
   await save(ctx, who.id, succeeded({ ...e, sleptOn: mark, sleep: plan ? { wakeAt: plan.wakeAt.toISOString(), until: plan.until.toISOString() } : null }), e);
@@ -154,7 +154,7 @@ async function wake(ctx, who, entry) {
   const e = { ...entry, name: who.name, lastRunAt: now.toISOString() };
   const d = await ask(ctx, who, buildFollowUpPrompt(DREAM_PROMPT, { name: who.name, now: describeNow(now, settings.tz) }));
   // the night goes on in both cases below
-  if (!d.ok && d.kind === 'time') return postpone(ctx, { who, entry: e, now, base: entry, note: 'The dream question waits for the next start of the app.' });
+  if (!d.ok && d.kind === ERROR.TIME) return postpone(ctx, { who, entry: e, now, base: entry, note: 'The dream question waits for the next start of the app.' });
   if (!d.ok) {
     const note = `The dream question could not be asked (${d.error}). It is asked again at the next update.`;
     return fail(ctx, { who, entry: e, outcome: d, now, note, base: entry });
@@ -182,19 +182,19 @@ async function wake(ctx, who, entry) {
  * time. { ok, text } or { ok: false, kind, error } with kind server | maintenance | input | time (no time left).
  */
 async function ask(ctx, who, prompt) {
-  if (prompt.length > KIN_ASK_LIMIT) return { ok: false, kind: 'input', error: 'The question to the Kin is too long.' };
+  if (prompt.length > KIN_ASK_LIMIT) return { ok: false, kind: ERROR.INPUT, error: 'The question to the Kin is too long.' };
   for (let attempt = 1; ; attempt += 1) {
     const left = ctx.deadline - Date.now() - RESERVE_MS;
-    if (left < MIN_ASK_MS) return { ok: false, kind: 'time', error: 'Not enough time left in this run.' };
+    if (left < MIN_ASK_MS) return { ok: false, kind: ERROR.TIME, error: 'Not enough time left in this run.' };
     const started = Date.now();
     try {
       const text = await ctx.kin.ask(prompt, { kin: who.id, timeoutMs: Math.min(ASK_TIMEOUT_MS, left) });
       ctx.log(`kin ask: ${text.length} characters in ${Date.now() - started} ms`);
       return { ok: true, text };
     } catch (e) {
-      const kind = errorKind(e.message, 'server');
+      const kind = errorKind(e.message, ERROR.SERVER);
       ctx.log(`kin ask failed (${kind}, try ${attempt}, ${Date.now() - started} ms)`);
-      if (attempt >= 2 || kind === 'maintenance' || ctx.deadline - Date.now() - RESERVE_MS - ctx.retryAfterMs < MIN_ASK_MS) return { ok: false, kind, error: e.message };
+      if (attempt >= 2 || kind === ERROR.MAINTENANCE || ctx.deadline - Date.now() - RESERVE_MS - ctx.retryAfterMs < MIN_ASK_MS) return { ok: false, kind, error: e.message };
       await sleepMs(ctx.retryAfterMs);
     }
   }
@@ -209,13 +209,13 @@ function succeeded(e) {
  * `entry` is what this run would save, `base` the entry it started from (see save), `note` the words for the person.
  */
 async function fail(ctx, { who, entry: e, outcome, now, note = null, base }) {
-  const kind = errorKind(outcome.error, outcome.kind || 'server');
-  if (kind === 'answer' && outcome.length !== undefined) ctx.log(`answer not usable (${outcome.length} characters)`);
+  const kind = errorKind(outcome.error, outcome.kind || ERROR.SERVER);
+  if (kind === ERROR.ANSWER && outcome.length !== undefined) ctx.log(`answer not usable (${outcome.length} characters)`);
   const failures = e.failures + 1;
   const next = {
     ...e,
     failures,
-    serverFailures: kind === 'answer' ? 0 : e.serverFailures + 1,
+    serverFailures: kind === ERROR.ANSWER ? 0 : e.serverFailures + 1,
     errorKind: kind,
     error: oneLine(outcome.error, 300),
     note: note || null,

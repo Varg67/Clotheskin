@@ -2,14 +2,14 @@
 // work, every 15 minutes or when Update status is pressed; the screen never asks the Kin anything itself.
 import { h, keepFocus } from './dom.js';
 import { icon, spinner, poseIcon, hairIcon } from './icons.js';
-import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, warningOf, readingText, SETTINGS_FILE, STATUS_FILE, ACTION, THEMES } from '../core/state.js';
-import { INTERVAL_STEPS, formatInterval, snapInterval, startDueFor } from '../core/schedule.js';
+import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, warningOf, readingText, SETTINGS_FILE, STATUS_FILE, ACTION, THEMES, AUTO } from '../core/state.js';
+import { INTERVAL_STEPS, formatInterval, snapInterval, startDueFor, ERROR } from '../core/schedule.js';
 import { describeDream, DREAM_TTL_HOURS } from '../core/sleep.js';
 import { deviceTimeZone } from '../core/time.js';
 import { formatClock, formatRelative, formatWhen } from '../core/format.js';
 
 const POLL_MS = 60000; // status.json is read again every minute while the screen is visible
-const RUN_WORDS = { running: 'started', paused: 'paused', stopped: 'stopped' };
+const RUN_WORDS = { [AUTO.RUNNING]: 'started', [AUTO.PAUSED]: 'paused', [AUTO.STOPPED]: 'stopped' };
 
 /**
  * Starts the screen on a connected channel. `kins` is the first list from the page (null when the page answered
@@ -140,7 +140,7 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
 
   function setRun(state) {
     if (S.settings.autoState === state) return;
-    saveSettings(state === 'stopped' ? { autoState: state, stoppedAt: clock().toISOString() } : { autoState: state });
+    saveSettings(state === AUTO.STOPPED ? { autoState: state, stoppedAt: clock().toISOString() } : { autoState: state });
     announce(`Automatic update ${RUN_WORDS[state]}.`);
   }
 
@@ -150,14 +150,14 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
 
   function warningText(w, entry) {
     const when = ` The next try is around ${nextTry(entry)}.`;
-    return w.kind === 'maintenance' ? `Kindroid seems to be under maintenance.${when}` : `Kindroid has not answered ${w.failures} times in a row. It may be down.${when}`;
+    return w.kind === ERROR.MAINTENANCE ? `Kindroid seems to be under maintenance.${when}` : `Kindroid has not answered ${w.failures} times in a row. It may be down.${when}`;
   }
 
   /** The last run's problem in plain words (the technical detail in brackets, for anyone who reports it). */
   function problemText(e, kin) {
     if (e.note) return e.note;
-    if (e.errorKind === 'answer') return `${kin.name}'s answer could not be read: ${e.error}`;
-    if (e.errorKind === 'server') return `Kindroid did not answer this time (${e.error}). It tries again around ${nextTry(e)}.`;
+    if (e.errorKind === ERROR.ANSWER) return `${kin.name}'s answer could not be read: ${e.error}`;
+    if (e.errorKind === ERROR.SERVER) return `Kindroid did not answer this time (${e.error}). It tries again around ${nextTry(e)}.`;
     return e.error;
   }
 
@@ -210,7 +210,7 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
     const busy = S.busy[kin.id];
     const dream = e.dream && e.dream.dream && now.getTime() - Date.parse(e.dream.at) < DREAM_TTL_HOURS * 3600e3 ? e.dream : null;
     const others = list.length - 1;
-    const warning = S.settings.autoState === 'running' ? warningOf(e) : null;
+    const warning = S.settings.autoState === AUTO.RUNNING ? warningOf(e) : null;
     const problem = S.error && (S.error.save || S.error.kinId === kin.id) ? S.error.text : e.error ? problemText(e, kin) : null;
 
     return h('section', { class: 'card', 'aria-label': `${kin.name}: current status` },
@@ -250,12 +250,12 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
     const now = clock();
     const night = e.sleep;
     let status;
-    if (run === 'stopped') status = 'Stopped. Press Start to update automatically.';
+    if (run === AUTO.STOPPED) status = 'Stopped. Press Start to update automatically.';
     else if (night) {
       const asleep = new Date(night.until) > now ? `Asleep until ${at(night.wakeAt)}. The dream question comes around ${nextTry(e)}. ` : `Waking up: the dream question comes around ${nextTry(e)}. `;
-      status = run === 'paused' ? `${asleep}Paused: nothing is asked until you press Resume.`
+      status = run === AUTO.PAUSED ? `${asleep}Paused: nothing is asked until you press Resume.`
         : [asleep, busy ? null : h('button', { type: 'button', class: 'link-btn', 'data-key': 'wake-now', onClick: () => update('wake') }, 'Wake now')];
-    } else if (run === 'paused') status = 'Paused: nothing is asked until you press Resume.';
+    } else if (run === AUTO.PAUSED) status = 'Paused: nothing is asked until you press Resume.';
     else status = `Next update around ${nextTry(e)}.`;
     const control = (key, text, iconName, enabled, state, focusAfter) => h('button', {
       type: 'button', class: `btn small${key === 'auto-start' ? ' primary' : ''}`, 'data-key': key, disabled: !enabled,
@@ -264,11 +264,11 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
     return h('div', { class: 'auto', role: 'group', 'aria-labelledby': 'auto-title' },
       h('div', { class: 'auto-head' },
         h('span', { class: 'row-label', id: 'auto-title' }, 'Automatic update'),
-        h('span', { class: `auto-state ${run}`, 'data-testid': 'auto-state' }, { running: 'Running', paused: 'Paused', stopped: 'Stopped' }[run])),
+        h('span', { class: `auto-state ${run}`, 'data-testid': 'auto-state' }, { [AUTO.RUNNING]: 'Running', [AUTO.PAUSED]: 'Paused', [AUTO.STOPPED]: 'Stopped' }[run])),
       h('div', { class: 'auto-controls' },
-        control('auto-start', run === 'paused' ? 'Resume' : 'Start', 'play', run !== 'running', 'running', 'auto-pause'),
-        control('auto-pause', 'Pause', 'pause', run === 'running', 'paused', 'auto-start'),
-        control('auto-stop', 'Stop', 'stop', run !== 'stopped', 'stopped', 'auto-start')),
+        control('auto-start', run === AUTO.PAUSED ? 'Resume' : 'Start', 'play', run !== AUTO.RUNNING, AUTO.RUNNING, 'auto-pause'),
+        control('auto-pause', 'Pause', 'pause', run === AUTO.RUNNING, AUTO.PAUSED, 'auto-start'),
+        control('auto-stop', 'Stop', 'stop', run !== AUTO.STOPPED, AUTO.STOPPED, 'auto-start')),
       h('div', { class: 'auto-head' }, h('label', { class: 'row-label', for: 'auto-ruler' }, 'How often'), out),
       h('input', { type: 'range', id: 'auto-ruler', class: 'ruler', 'data-key': 'auto-ruler', min: 0, max: INTERVAL_STEPS.length - 1, step: 1, value: Math.max(0, INTERVAL_STEPS.indexOf(value)), 'aria-valuetext': label(value),
         onPointerdown: () => { dragging = true; },

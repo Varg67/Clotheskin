@@ -340,6 +340,19 @@ const step = async (name, fn) => {
     await t.ctx.close();
   });
 
+  await step('no makeup: the makeup row is hidden; a lipstick shows it again', async () => {
+    const t = await open({ kins: [{ id: 'kin-isa', name: 'Isa' }] });
+    await t.dev(() => window.dev.answers({ reading: '{"location":"in the bathroom","topwear":["a dress"],"makeup":"no makeup"}' }));
+    await t.key('update').click();
+    await t.until(async () => /bathroom/.test(await t.text('location')), 'read');
+    assert.equal(await t.fr.locator('[data-testid="makeup"]').count(), 0, 'no makeup row');
+    await t.page.clock.fastForward('20:00');
+    await t.dev(() => window.dev.answers({ reading: '{"makeup":"red lipstick"}' }));
+    await t.key('update').click();
+    await t.until(async () => /lipstick/i.test(await t.text('makeup')), 'the row is back');
+    await t.ctx.close();
+  });
+
   await step('no page errors or console errors', async () => { assert.deepEqual(problems, []); });
 
   await browser.close(); server.close();

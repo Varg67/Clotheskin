@@ -11,7 +11,7 @@ __def("src/core/constants.js", function () {
  * The app's version (package.json's, checked by a test). The screen shows it in Settings, and the run writes it to
  * status.json each time it saves, so a screen and a run from different updates are noticed.
  */
-const APP_VERSION = '0.5.0';
+const APP_VERSION = '0.5.1';
 
 // Canonical slot identifiers. Keys are English by design.
 
@@ -33,12 +33,18 @@ const WEAR_SLOTS = [...CLOTHING_SLOTS, ...ACCESSORY_SLOTS, BAG_SLOT];
  * What a reading's sentence says when the Kin's answer said nothing about it. Such a sentence is never carried over
  * from one reading to the next (state.js). Here, not in outfit.js, so the screen does not pull in the answer reader.
  */
+/**
+ * The makeup sentence for a bare face. It is kept in status.json (so an earlier "red lipstick" does not come back as
+ * the last known makeup), but not shown: no makeup is no row (the person's choice, Nov 2026).
+ */
+const BARE_FACE_SENTENCE = 'No makeup.';
+
 const NOT_DESCRIBED = Object.freeze({
   location: 'No location described in the recent chat.',
   doing: 'No pose or action described in the recent chat.',
   outfit: 'No outfit described in the recent chat.',
 });
-return { APP_VERSION, CLOTHING_SLOTS, ACCESSORY_SLOTS, BAG_SLOT, WEAR_SLOTS, NOT_DESCRIBED };
+return { APP_VERSION, CLOTHING_SLOTS, ACCESSORY_SLOTS, BAG_SLOT, WEAR_SLOTS, BARE_FACE_SENTENCE, NOT_DESCRIBED };
 });
 
 __def("src/core/format.js", function () {
@@ -404,7 +410,7 @@ const { snapInterval, DEFAULT_INTERVAL_S, ERRORS_BEFORE_WARNING } = __req("src/c
 const { safeTimeZone } = __req("src/core/time.js");
 const { REMEMBERED, DREAM_TTL_HOURS } = __req("src/core/sleep.js");
 const { oneLine } = __req("src/core/text.js");
-const { NOT_DESCRIBED, APP_VERSION } = __req("src/core/constants.js");
+const { NOT_DESCRIBED, APP_VERSION, BARE_FACE_SENTENCE } = __req("src/core/constants.js");
 
 const SETTINGS_FILE = 'settings.json';
 const STATUS_FILE = 'status.json';
@@ -545,6 +551,9 @@ function plannedAt(entry, settings) {
   return new Date(new Date(entry.lastRunAt).getTime() + settings.intervalS * 1000).toISOString();
 }
 
+/** The makeup sentence to show, or null: none known, or a bare face (kept, not shown). */
+const shownMakeup = (makeup) => (makeup && makeup !== BARE_FACE_SENTENCE ? makeup : null);
+
 /** The run's version when it differs from the screen's (some files were updated and others not), or null. */
 function versionMismatch(status) {
   return status.runVersion && status.runVersion !== APP_VERSION ? status.runVersion : null;
@@ -557,7 +566,7 @@ function warningOf(entry) {
   if (entry.errorKind === 'server' && entry.serverFailures >= ERRORS_BEFORE_WARNING) return { kind: 'server', failures: entry.serverFailures };
   return null;
 }
-return { SETTINGS_FILE, STATUS_FILE, THEMES, ACTION, OPS, DEFAULT_SETTINGS, normalizeSettings, carryOver, normalizeEntry, normalizeStatus, afterStop, forgetOld, plannedAt, versionMismatch, warningOf };
+return { SETTINGS_FILE, STATUS_FILE, THEMES, ACTION, OPS, DEFAULT_SETTINGS, normalizeSettings, carryOver, normalizeEntry, normalizeStatus, afterStop, forgetOld, plannedAt, shownMakeup, versionMismatch, warningOf };
 });
 
 __def("src/core/text.js", function () {
@@ -656,7 +665,7 @@ __def("src/screen/app.js", function () {
 // work, every 15 minutes or when Update status is pressed; the screen never asks the Kin anything itself.
 const { h, keepFocus } = __req("src/screen/dom.js");
 const { icon, spinner, poseIcon, hairIcon } = __req("src/screen/icons.js");
-const { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, warningOf, versionMismatch, SETTINGS_FILE, STATUS_FILE, ACTION, THEMES } = __req("src/core/state.js");
+const { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, warningOf, versionMismatch, shownMakeup, SETTINGS_FILE, STATUS_FILE, ACTION, THEMES } = __req("src/core/state.js");
 const { INTERVAL_STEPS, formatInterval, snapInterval, startDueFor } = __req("src/core/schedule.js");
 const { describeDream, DREAM_TTL_HOURS } = __req("src/core/sleep.js");
 const { deviceTimeZone } = __req("src/core/time.js");
@@ -754,7 +763,7 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
     if (!kin) return;
     const a = afterStop(before.kins[kin.id] || normalizeEntry(), S.settings);
     const b = afterStop(after.kins[kin.id] || normalizeEntry(), S.settings);
-    const text = (r) => (r ? [r.location, r.doing, r.outfit, r.hair, r.makeup].filter(Boolean).join(' ') : '');
+    const text = (r) => (r ? [r.location, r.doing, r.outfit, r.hair, shownMakeup(r.makeup)].filter(Boolean).join(' ') : '');
     const parts = [];
     if (b.reading && (asked ? b.reading.at !== (a.reading && a.reading.at) : text(b.reading) !== text(a.reading))) parts.push(text(b.reading));
     if (b.sleep && (!a.sleep || asked)) parts.push(`${kin.name} is asleep until ${formatWhen(b.sleep.wakeAt, { now: clock() })}.`);
@@ -886,7 +895,7 @@ async function startApp({ root, channel, kins, clock = () => new Date() }) {
           fact(r ? poseIcon(r.doing) : 'person', 'Pose and action', 'doing', r && r.doing, 'No pose or action read yet.', seenAt(r, 'doing', now)),
           fact('hanger', 'Outfit', 'outfit', r && r.outfit, 'No outfit read yet. Press Update status.', seenAt(r, 'outfit', now)),
           r && r.hair ? fact(hairIcon(r.hair), 'Hair', 'hair', r.hair, '', seenAt(r, 'hair', now)) : null,
-          r && r.makeup ? fact('makeup', 'Makeup', 'makeup', r.makeup, '', seenAt(r, 'makeup', now)) : null,
+          r && shownMakeup(r.makeup) ? fact('makeup', 'Makeup', 'makeup', r.makeup, '', seenAt(r, 'makeup', now)) : null,
           dream ? fact('moon', 'Last dream', 'dream', describeDream(dream), '') : null),
         h('button', { type: 'button', class: 'btn primary block', 'data-key': 'update', 'aria-busy': String(Boolean(busy)), onClick: () => update('read') },
           busy ? [spinner(), busy === 'wake' ? 'Asking about the dream…' : 'Reading…'] : [icon('refresh', { size: 18 }), 'Update status']),

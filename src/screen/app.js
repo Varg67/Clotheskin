@@ -2,7 +2,7 @@
 // work, every 15 minutes or when Update status is pressed; the screen never asks the Kin anything itself.
 import { h, keepFocus } from './dom.js';
 import { icon, spinner, poseIcon, hairIcon } from './icons.js';
-import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, warningOf, versionMismatch, SETTINGS_FILE, STATUS_FILE, ACTION, THEMES } from '../core/state.js';
+import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, afterStop, warningOf, versionMismatch, shownMakeup, SETTINGS_FILE, STATUS_FILE, ACTION, THEMES } from '../core/state.js';
 import { INTERVAL_STEPS, formatInterval, snapInterval, startDueFor } from '../core/schedule.js';
 import { describeDream, DREAM_TTL_HOURS } from '../core/sleep.js';
 import { deviceTimeZone } from '../core/time.js';
@@ -100,7 +100,7 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
     if (!kin) return;
     const a = afterStop(before.kins[kin.id] || normalizeEntry(), S.settings);
     const b = afterStop(after.kins[kin.id] || normalizeEntry(), S.settings);
-    const text = (r) => (r ? [r.location, r.doing, r.outfit, r.hair, r.makeup].filter(Boolean).join(' ') : '');
+    const text = (r) => (r ? [r.location, r.doing, r.outfit, r.hair, shownMakeup(r.makeup)].filter(Boolean).join(' ') : '');
     const parts = [];
     if (b.reading && (asked ? b.reading.at !== (a.reading && a.reading.at) : text(b.reading) !== text(a.reading))) parts.push(text(b.reading));
     if (b.sleep && (!a.sleep || asked)) parts.push(`${kin.name} is asleep until ${formatWhen(b.sleep.wakeAt, { now: clock() })}.`);
@@ -232,7 +232,7 @@ export async function startApp({ root, channel, kins, clock = () => new Date() }
           fact(r ? poseIcon(r.doing) : 'person', 'Pose and action', 'doing', r && r.doing, 'No pose or action read yet.', seenAt(r, 'doing', now)),
           fact('hanger', 'Outfit', 'outfit', r && r.outfit, 'No outfit read yet. Press Update status.', seenAt(r, 'outfit', now)),
           r && r.hair ? fact(hairIcon(r.hair), 'Hair', 'hair', r.hair, '', seenAt(r, 'hair', now)) : null,
-          r && r.makeup ? fact('makeup', 'Makeup', 'makeup', r.makeup, '', seenAt(r, 'makeup', now)) : null,
+          r && shownMakeup(r.makeup) ? fact('makeup', 'Makeup', 'makeup', r.makeup, '', seenAt(r, 'makeup', now)) : null,
           dream ? fact('moon', 'Last dream', 'dream', describeDream(dream), '') : null),
         h('button', { type: 'button', class: 'btn primary block', 'data-key': 'update', 'aria-busy': String(Boolean(busy)), onClick: () => update('read') },
           busy ? [spinner(), busy === 'wake' ? 'Asking about the dream…' : 'Reading…'] : [icon('refresh', { size: 18 }), 'Update status']),

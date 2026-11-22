@@ -12,7 +12,7 @@ import { buildOutfitPrompt, buildFollowUpPrompt, buildCorrectionPrompt, SLEEP_PR
 import { parseReading, describeReading } from '../src/core/outfit.js';
 import { looksAsleep, sentenceMark, planSleep, parseSleepAnswer, parseDreamAnswer, describeDream, dreamFact, DREAM_TTL_HOURS } from '../src/core/sleep.js';
 import { retryDelay, errorKind, isDue, TICK_S } from '../src/core/schedule.js';
-import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, forgetOld, carryOver, SETTINGS_FILE, STATUS_FILE, ACTION, OPS } from '../src/core/state.js';
+import { normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, forgetOld, carryOver, shownMakeup, SETTINGS_FILE, STATUS_FILE, ACTION, OPS } from '../src/core/state.js';
 import { NOT_DESCRIBED, APP_VERSION } from '../src/core/constants.js';
 import { describeNow } from '../src/core/time.js';
 import { formatWhen } from '../src/core/format.js';
@@ -126,7 +126,7 @@ async function read(ctx, who, entry) {
   const reading = carryOver(fresh, entry.reading, now);
   e.reading = reading;
   e.serverFailures = 0; // Kindroid answered
-  const line = `${who.name}: ${[reading.location, reading.doing, reading.outfit, reading.hair, reading.makeup].filter(Boolean).join(' ')}`;
+  const line = `${who.name}: ${[reading.location, reading.doing, reading.outfit, reading.hair, shownMakeup(reading.makeup)].filter(Boolean).join(' ')}`;
 
   // Sleep is read from what the Kin said just now, never from a pose kept from an earlier reading. An answer that says
   // nothing about the pose or action is not a sign of being awake: the night, if any, and its mark stay as they are.

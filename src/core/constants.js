@@ -2,7 +2,7 @@
  * The app's version (package.json's, checked by a test). The screen shows it in Settings, and the run writes it to
  * status.json each time it saves, so a screen and a run from different updates are noticed.
  */
-export const APP_VERSION = '0.5.0';
+export const APP_VERSION = '0.5.1';
 
 // Canonical slot identifiers. Keys are English by design.
 
@@ -24,6 +24,12 @@ export const WEAR_SLOTS = [...CLOTHING_SLOTS, ...ACCESSORY_SLOTS, BAG_SLOT];
  * What a reading's sentence says when the Kin's answer said nothing about it. Such a sentence is never carried over
  * from one reading to the next (state.js). Here, not in outfit.js, so the screen does not pull in the answer reader.
  */
+/**
+ * The makeup sentence for a bare face. It is kept in status.json (so an earlier "red lipstick" does not come back as
+ * the last known makeup), but not shown: no makeup is no row (the person's choice, Nov 2026).
+ */
+export const BARE_FACE_SENTENCE = 'No makeup.';
+
 export const NOT_DESCRIBED = Object.freeze({
   location: 'No location described in the recent chat.',
   doing: 'No pose or action described in the recent chat.',

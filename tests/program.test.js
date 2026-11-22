@@ -564,3 +564,23 @@ test('a whole messy roleplay answer, every slip at once, reads as five short sen
   assert.equal(r.message, 'Isa: In the kitchen. Sitting at the table on a stool, talking with Ari. Wearing a purple shirt and purple panties, barefoot. Long dark hair.');
   assert.equal(k.entry().reading.makeup, null, '"not mentioned" is no makeup row');
 });
+
+test('no makeup: the row is hidden, but the bare face is kept, so an earlier lipstick never comes back', async () => {
+  const { BARE_FACE_SENTENCE } = await import('../src/core/constants.js');
+  const { describeReading, parseReading } = await import('../src/core/outfit.js');
+  assert.equal(describeReading(parseReading('{"makeup":"no makeup"}')).makeup, BARE_FACE_SENTENCE, 'the sentence the screen hides');
+  const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1', intervalS: 900 } });
+  k.answers.reading.push(JSON.stringify({ location: 'in the bathroom', makeup: 'red lipstick', topwear: ['a dress'] }));
+  let r = await tick(k);
+  assert.match(r.message, /Red lipstick\.$/);
+  k.advance(20);
+  k.answers.reading.splice(0, Infinity, JSON.stringify({ action: 'washing her face', makeup: 'no makeup' }));
+  r = await tick(k);
+  assert.ok(!/makeup|lipstick/i.test(r.message), r.message);
+  assert.equal(k.entry().reading.makeup, BARE_FACE_SENTENCE, 'kept');
+  k.advance(20);
+  k.answers.reading.splice(0, Infinity, JSON.stringify({ action: 'brushing her teeth' })); // nothing about makeup
+  r = await tick(k);
+  assert.equal(k.entry().reading.makeup, BARE_FACE_SENTENCE, 'still a bare face, not the old lipstick');
+  assert.ok(!/lipstick/i.test(r.message));
+});

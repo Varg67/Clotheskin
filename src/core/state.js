@@ -9,7 +9,7 @@ import { snapInterval, DEFAULT_INTERVAL_S, ERRORS_BEFORE_WARNING } from './sched
 import { safeTimeZone } from './time.js';
 import { REMEMBERED, DREAM_TTL_HOURS } from './sleep.js';
 import { oneLine } from './text.js';
-import { NOT_DESCRIBED, APP_VERSION } from './constants.js';
+import { NOT_DESCRIBED, APP_VERSION, BARE_FACE_SENTENCE } from './constants.js';
 
 export const SETTINGS_FILE = 'settings.json';
 export const STATUS_FILE = 'status.json';
@@ -149,6 +149,9 @@ export function plannedAt(entry, settings) {
   if (!entry.lastRunAt) return null;
   return new Date(new Date(entry.lastRunAt).getTime() + settings.intervalS * 1000).toISOString();
 }
+
+/** The makeup sentence to show, or null: none known, or a bare face (kept, not shown). */
+export const shownMakeup = (makeup) => (makeup && makeup !== BARE_FACE_SENTENCE ? makeup : null);
 
 /** The run's version when it differs from the screen's (some files were updated and others not), or null. */
 export function versionMismatch(status) {

@@ -106,3 +106,16 @@ test('the screen\'s one file has no comment lines, and nothing inside a line of 
   ].join('\n');
   assert.equal(stripCommentLines(code), ["const a = 1; // after code: kept", 'const b = 2;', "const re = /\\*[^*]+\\*/g; const url = 'http://x';", ' const c = 3;'].join('\n'));
 });
+
+test('a screen action waits for a pending preference write and will not use a rejected save', async () => {
+  const p = page();
+  const save = p.channel.write('settings.json', '{"tellLook":false}');
+  const action = p.channel.action('update_status', { kin: 'k1' });
+  await Promise.all([save, action]);
+  assert.deepEqual(p.posted.map(m => m.kin), ['files.write', 'action']);
+
+  const offline = page({ deaf: 100 });
+  const outcomes = await Promise.allSettled([offline.channel.write('settings.json', '{}'), offline.channel.action('update_status', {})]);
+  assert.ok(outcomes.every(r => r.status === 'rejected'));
+  assert.deepEqual(offline.posted.map(m => m.kin), ['files.write']);
+});

@@ -9,6 +9,8 @@
 // the action, so: one read per path at a time (repeats share it), and one action run at a time.
 // Plain classes, no private fields: the screen also runs on older Safari.
 
+import { SETTINGS_FILE } from '../core/state.js';
+
 export class Channel {
   constructor({ post, subscribe, timeouts = {} }) {
     this.post = post;
@@ -97,7 +99,7 @@ export class Channel {
 
   /** Runs the program's action; resolves { ok, summary }. One at a time: a reply names only the action. */
   action(name, input) {
-    const run = this.actions.catch(() => {}).then(() => this.wait(`action:${name}`, { timeout: this.t.action, message: { kin: 'action', name, input } }));
+    const run = this.actions.catch(() => {}).then(() => this.writes[SETTINGS_FILE]).then(() => this.wait(`action:${name}`, { timeout: this.t.action, message: { kin: 'action', name, input } }));
     this.actions = run;
     return run.then((r) => ({ ok: r.ok !== false, summary: typeof r.summary === 'string' ? r.summary : '' }));
   }

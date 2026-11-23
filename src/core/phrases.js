@@ -351,11 +351,15 @@ function lookText(v, kind) {
   return undefined;
 }
 
+// Only makeup properties may become makeup text. A nested summary or dream stays out.
+const MAKEUP_PARTS = new Set('lips eyes face cheeks brows eyebrows eyelashes lashes skin base foundation concealer blush bronzer highlighter powder contour mascara eyeliner eyeshadow lipstick lipgloss gloss liner color colour style finish look makeup'.split(' '));
+
 /** An object or a list of texts as one phrase (hair keeps its words in order). undefined: not texts. */
 function lookFromParts(v, kind) {
   if (isPlainObject(v)) {
-    const words = (kind === 'hair' ? HAIR_ORDER.map((k) => v[k]) : Object.values(v)).filter((x) => typeof x === 'string' && x.trim());
-    if (!words.length) return undefined;
+    const parts = kind === 'hair' ? HAIR_ORDER : Object.keys(v).filter((key) => MAKEUP_PARTS.has(key.toLowerCase()));
+    const words = parts.map((key) => v[key]).filter((x) => typeof x === 'string' && x.trim());
+    if (!words.length) return kind === 'makeup' ? '' : undefined;
     return kind === 'hair' ? words.join(' ') : joinNatural(words);
   }
   if (v.some((x) => typeof x !== 'string')) return undefined;

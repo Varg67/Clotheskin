@@ -9,6 +9,8 @@ A Kindroid app that follows your Kin in the current roleplay. It asks the Kin wh
 
 It can do this by itself every 15 minutes to 4 hours, and it follows the Kin's nights. When the Kin falls asleep it asks when it will wake up and leaves it alone until then. In the morning it asks what it dreamt and how much it still remembers. With your permission, it also tells the Kin its dream, so the Kin can remember it during the day.
 
+The card keeps tracking when sharing is off. Clotheskin checks saved sharing preferences before each memory note and before returning a reading or dream through an action. Current look covers outfit, hair and makeup. Location, pose, activity and night times stay on the card. With both options off, a successful reading returns “Status updated.”
+
 Built from Kindroid's guide for coding tools ("Making things for a Kin with your own coding tool") and from published programs (Dice Roller, Bunny & Fox BBS, Aurora Alert).
 
 ## How it works in Kindroid

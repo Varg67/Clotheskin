@@ -21,6 +21,11 @@ export function oneLine(text, max = 500) {
   return `${dropHalfChar(s.slice(0, max - 1))}…`;
 }
 
+/** A field meant for the Kin is prose. Never pass through a serialized object or array of JSON values. */
+export function isPlainFact(value) {
+  return typeof value === 'string' && !/[{}]|\[\s*["{[]|["]\s*:/.test(value);
+}
+
 /** "in the kitchen" -> "In the kitchen." No period after one already there, or after the "…" of a cut. */
 export function toSentence(s) {
   const str = String(s ?? '');

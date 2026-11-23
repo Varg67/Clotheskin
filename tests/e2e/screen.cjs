@@ -264,7 +264,8 @@ const step = async (name, fn) => {
     await t.key('auto-start').click();
     await t.until(async () => (await t.settings()).autoState === 'running', 'running');
     const r = await t.dev(() => window.dev.tick());
-    assert.match(r.message, /^Isa: In the living room\./, 'the scheduled start reads Isa');
+    assert.equal(r.message, 'Status updated.');
+    assert.equal((await t.status()).kins['kin-isa'].reading.location, 'In the living room.');
     await t.ctx.close();
   });
 

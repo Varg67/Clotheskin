@@ -380,7 +380,11 @@ function parseDreamAnswer(text) {
   return { ok: true, dream: summary, remembered: REMEMBERED.includes(remembered) ? remembered : 'some' };
 }
 
-const dreamFields = (o) => ({ dream: o.dream ?? o.summary ?? '', remembered: String(o.remembered ?? o.remember ?? '').trim().toLowerCase() });
+function dreamFields(o) {
+  const onlyDreamFields = Object.keys(o).every((key) => ['summary', 'remembered', 'remember'].includes(key));
+  const dream = Object.prototype.hasOwnProperty.call(o, 'dream') ? (o.dream ?? '') : (onlyDreamFields ? o.summary ?? '' : '');
+  return { dream, remembered: String(o.remembered ?? o.remember ?? '').trim().toLowerCase() };
+}
 
 function parseAnswerObject(text) {
   const p = parseJsonObject(text);
@@ -408,7 +412,7 @@ __def("src/core/state.js", function () {
 const { snapInterval, retryDelay, errorKind, DEFAULT_INTERVAL_S, ERRORS_BEFORE_WARNING, ERROR, TICK_S } = __req("src/core/schedule.js");
 const { safeTimeZone } = __req("src/core/time.js");
 const { REMEMBERED, DREAM_TTL_HOURS, sentenceMark } = __req("src/core/sleep.js");
-const { oneLine } = __req("src/core/text.js");
+const { oneLine, isPlainFact } = __req("src/core/text.js");
 const { NOT_DESCRIBED, APP_VERSION, BARE_FACE_SENTENCE, WEAR_SLOTS } = __req("src/core/constants.js");
 
 
@@ -561,6 +565,10 @@ const LOOK_TTL_HOURS = 12;
 const LOOK_RETRY_HOURS = 1;
 const LOOK_FIELDS = ['outfit', 'hair', 'makeup'];
 const LOOK_FACT_MAX = 300;
+
+function lookSummary(fresh) {
+  return LOOK_FIELDS.filter((field) => said(field, fresh[field]) && isPlainFact(fresh[field])).map((field) => fresh[field]).join(' ');
+}
 const toldOf = (o) => Object.fromEntries(LOOK_FIELDS.filter((k) => o && o[k] && /^[0-9a-f]{8}$/.test(o[k].mark) && iso(o[k].at))
   .map((k) => [k, { mark: String(o[k].mark), at: String(iso(o[k].at)) }]));
 
@@ -568,7 +576,7 @@ function lookFacts({ fresh, told, now, when }) {
   const out = [];
   for (const field of LOOK_FIELDS) {
     const v = fresh && fresh[field];
-    if (!said(field, v)) continue;
+    if (!said(field, v) || !isPlainFact(v)) continue;
     const mark = sentenceMark(v);
     const last = told && told[field];
     if (last && last.mark === mark && now.getTime() - Date.parse(last.at) < (LOOK_TTL_HOURS - 1) * 3600e3) continue;
@@ -675,7 +683,7 @@ function warningOf(entry) {
   if (entry.errorKind !== ERROR.SERVER || entry.serverFailures < ERRORS_BEFORE_WARNING) return null;
   return { kind: ERROR.SERVER, failures: entry.serverFailures };
 }
-return { SETTINGS_FILE, STATUS_FILE, AUTO, THEMES, ACTION, OPS, DEFAULT_SETTINGS, normalizeSettings, carryOver, normalizeEntry, LOOK_TTL_HOURS, LOOK_RETRY_HOURS, lookFacts, normalizeStatus, afterStop, forgetOld, plannedAt, succeeded, failedEntry, postponedEntry, mergeConcurrent, readingText, shownMakeup, versionMismatch, warningOf };
+return { SETTINGS_FILE, STATUS_FILE, AUTO, THEMES, ACTION, OPS, DEFAULT_SETTINGS, normalizeSettings, carryOver, normalizeEntry, LOOK_TTL_HOURS, LOOK_RETRY_HOURS, lookSummary, lookFacts, normalizeStatus, afterStop, forgetOld, plannedAt, succeeded, failedEntry, postponedEntry, mergeConcurrent, readingText, shownMakeup, versionMismatch, warningOf };
 });
 
 __def("src/core/text.js", function () {
@@ -695,6 +703,10 @@ function oneLine(text, max = 500) {
   const s = String(text ?? '').replace(INVISIBLE, '').replace(/\s+/g, ' ').trim();
   if (s.length <= max) return s;
   return `${dropHalfChar(s.slice(0, max - 1))}…`;
+}
+
+function isPlainFact(value) {
+  return typeof value === 'string' && !/[{}]|\[\s*["{[]|["]\s*:/.test(value);
 }
 
 function toSentence(s) {
@@ -724,7 +736,7 @@ function nothingSaid({ extra = [], notWords = NOT_STATED } = {}) {
 }
 
 const NOT_STATED_OR_UNSURE = [...NOT_STATED, 'sure', 'clear'];
-return { capitalizeFirst, cleanString, oneLine, toSentence, clipWords, trimEndPunctuation, stripWrapping, joinNatural, nothingSaid, NOT_STATED_OR_UNSURE };
+return { capitalizeFirst, cleanString, oneLine, isPlainFact, toSentence, clipWords, trimEndPunctuation, stripWrapping, joinNatural, nothingSaid, NOT_STATED_OR_UNSURE };
 });
 
 __def("src/core/time.js", function () {
@@ -876,6 +888,8 @@ return { startApp };
 });
 
 __def("src/screen/channel.js", function () {
+const { SETTINGS_FILE } = __req("src/core/state.js");
+
 class Channel {
   constructor({ post, subscribe, timeouts = {} }) {
     this.post = post;
@@ -953,7 +967,7 @@ class Channel {
   }
 
   action(name, input) {
-    const run = this.actions.catch(() => {}).then(() => this.wait(`action:${name}`, { timeout: this.t.action, message: { kin: 'action', name, input } }));
+    const run = this.actions.catch(() => {}).then(() => this.writes[SETTINGS_FILE]).then(() => this.wait(`action:${name}`, { timeout: this.t.action, message: { kin: 'action', name, input } }));
     this.actions = run;
     return run.then((r) => ({ ok: r.ok !== false, summary: typeof r.summary === 'string' ? r.summary : '' }));
   }
@@ -1534,7 +1548,7 @@ function renderLook(v) {
   return h('section', { class: 'card dreams', 'aria-labelledby': 'look-title' },
     h('div', { class: 'card-body' },
       h('h2', { class: 'section-title', id: 'look-title' }, 'Current look'),
-      h('p', { class: 'help' }, 'Clotheskin can tell your Kin its outfit, hair and makeup when they change, so it stays consistent in your roleplay. Each note lasts 12 hours. Your Kin is not told anything unless you turn this on.'),
+      h('p', { class: 'help' }, 'Clotheskin can tell your Kin its outfit, hair and makeup when they change, so it stays consistent in your roleplay. Each note lasts 12 hours. Turning this on also includes the reported look in action results. Location, pose and activity stay on your card.'),
       h('label', { class: 'check' }, h('input', { type: 'checkbox', 'data-key': 'tell-look', checked: v.S.settings.tellLook || undefined, onChange: (ev) => v.store.saveSettings({ tellLook: ev.target.checked }) }),
         h('span', {}, 'Tell my Kin its current look')),
       problem ? h('p', { class: 'help', role: 'status', 'data-testid': 'look-problem' }, problem) : null));
@@ -1544,7 +1558,7 @@ function renderDreams(v) {
   return h('section', { class: 'card dreams', 'aria-labelledby': 'dreams-title' },
     h('div', { class: 'card-body' },
       h('h2', { class: 'section-title', id: 'dreams-title' }, 'Dreams'),
-      h('p', { class: 'help' }, 'When your Kin wakes up, Clotheskin asks what it dreamt and shows it here for a day. Your Kin is not told its dream unless you turn this on.'),
+      h('p', { class: 'help' }, 'When your Kin wakes up, Clotheskin asks what it dreamt and shows it here for a day. Turn this on to share the dream in the wake-up result and send a memory note.'),
       dreamOptions(v)));
 }
 return { renderLook, renderDreams };
@@ -1581,7 +1595,7 @@ const { h } = __req("src/screen/dom.js");
 const { THEMES } = __req("src/core/state.js");
 const { APP_VERSION } = __req("src/core/constants.js");
 
-const HOW_IT_WORKS = 'Your Kin looks at its recent chat with you and says where it is, how it is positioned, what it is doing, what it is wearing, and its hair and makeup; Clotheskin shows that as short sentences. When it is asleep, Clotheskin asks when it will wake up, lets it sleep, and asks about its dream in the morning. Kept in the app’s files: the last reading, the night’s times, the last dream, and when your Kin was last told its look (a fingerprint, not the words). The dream is erased after a day, and Stop erases the night, the dream and what was told within 15 minutes. The chat is never kept.';
+const HOW_IT_WORKS = 'Your Kin looks at its recent chat with you and says where it is, how it is positioned, what it is doing, what it is wearing, and its hair and makeup; Clotheskin shows that as short sentences. When it is asleep, Clotheskin asks when it will wake up, lets it sleep, and asks about its dream in the morning. Kept in the app’s files: your settings, the latest reading and outfit by item for each tracked Kin, observation and update times, retry and delivery status, the night’s times, the last dream, and when your Kin was last told its look (a fingerprint, not the words). The dream is erased after a day, and Stop erases the night, the dream and what was told within 15 minutes. The chat is never kept.';
 
 function dreamOptions(v) {
   const settings = v.S.settings;

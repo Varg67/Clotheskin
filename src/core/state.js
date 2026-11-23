@@ -8,7 +8,7 @@
 import { snapInterval, retryDelay, errorKind, DEFAULT_INTERVAL_S, ERRORS_BEFORE_WARNING, ERROR, TICK_S } from './schedule.js';
 import { safeTimeZone } from './time.js';
 import { REMEMBERED, DREAM_TTL_HOURS, sentenceMark } from './sleep.js';
-import { oneLine } from './text.js';
+import { oneLine, isPlainFact } from './text.js';
 import { NOT_DESCRIBED, APP_VERSION, BARE_FACE_SENTENCE, WEAR_SLOTS } from './constants.js';
 /** @import { ErrorKind } from './schedule.js' */
 
@@ -234,6 +234,11 @@ export const LOOK_TTL_HOURS = 12;
 export const LOOK_RETRY_HOURS = 1;
 const LOOK_FIELDS = ['outfit', 'hair', 'makeup'];
 const LOOK_FACT_MAX = 300;
+
+/** Only fields named by the Current look control can appear in an action result. */
+export function lookSummary(fresh) {
+  return LOOK_FIELDS.filter((field) => said(field, fresh[field]) && isPlainFact(fresh[field])).map((field) => fresh[field]).join(' ');
+}
 /** @returns {Object<string, { mark: string, at: string }>} */
 const toldOf = (o) => Object.fromEntries(LOOK_FIELDS.filter((k) => o && o[k] && /^[0-9a-f]{8}$/.test(o[k].mark) && iso(o[k].at))
   .map((k) => [k, { mark: String(o[k].mark), at: String(iso(o[k].at)) }]));
@@ -247,7 +252,7 @@ export function lookFacts({ fresh, told, now, when }) {
   const out = [];
   for (const field of LOOK_FIELDS) {
     const v = fresh && fresh[field];
-    if (!said(field, v)) continue;
+    if (!said(field, v) || !isPlainFact(v)) continue;
     const mark = sentenceMark(v);
     const last = told && told[field];
     if (last && last.mark === mark && now.getTime() - Date.parse(last.at) < (LOOK_TTL_HOURS - 1) * 3600e3) continue;

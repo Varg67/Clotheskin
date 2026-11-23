@@ -35,7 +35,7 @@ test('2. on: the first reading tells outfit, hair and makeup, each under its own
   assert.equal(hair[1], 'Your hair right now (21:40 on Sunday): long dark hair in a ponytail.');
   assert.equal(makeup[1], 'Your makeup right now (21:40 on Sunday): red lipstick.');
   for (const [, , o] of looks(k)) { assert.equal(o.kin, 'k1'); assert.equal(o.ttl, LOOK_TTL_HOURS); assert.ok(!o.reachOut); }
-  assert.match(r.message, /\(Told Isa: outfit, hair, makeup\.\)$/, 'the Workshop log says what was told');
+  assert.equal(r.message, 'Wearing a purple shirt and jeans. Long dark hair in a ponytail. Red lipstick.');
 });
 
 test('3. the same look at the next reading is not told again (kin tell is for rare facts)', async () => {

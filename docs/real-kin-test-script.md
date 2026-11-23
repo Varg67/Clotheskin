@@ -334,7 +334,7 @@ Para a automação, use a régua em **15 min** durante o teste e volte para um i
 - A pose diz que está dormindo (ex.: "Lying in bed, sleeping.").
 - O horário de acordar é o que o Kin disse, no **seu** relógio.
 - **Wake now** troca o botão para "Asking about the dream…" e depois aparece a linha **Last dream**.
-- No chat, o Kin passa a **lembrar do sonho** durante o dia (a menos que você desligue em Settings → Dreams).
+- No chat, o Kin passa a **lembrar do sonho** durante o dia (se você ativar a opção em Dreams).
 
 **Anote:** O que o Kin respondeu, o horário mostrado, o sonho, e se ele comentou o sonho depois no chat.
 

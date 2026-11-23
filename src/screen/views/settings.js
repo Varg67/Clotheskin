@@ -4,7 +4,7 @@ import { h } from '../dom.js';
 import { THEMES } from '../../core/state.js';
 import { APP_VERSION } from '../../core/constants.js';
 
-const HOW_IT_WORKS = 'Your Kin looks at its recent chat with you and says where it is, how it is positioned, what it is doing, what it is wearing, and its hair and makeup; Clotheskin shows that as short sentences. When it is asleep, Clotheskin asks when it will wake up, lets it sleep, and asks about its dream in the morning. Kept in the app’s files: the last reading, the night’s times, the last dream, and when your Kin was last told its look (a fingerprint, not the words). The dream is erased after a day, and Stop erases the night, the dream and what was told within 15 minutes. The chat is never kept.';
+const HOW_IT_WORKS = 'Your Kin looks at its recent chat with you and says where it is, how it is positioned, what it is doing, what it is wearing, and its hair and makeup; Clotheskin shows that as short sentences. When it is asleep, Clotheskin asks when it will wake up, lets it sleep, and asks about its dream in the morning. Kept in the app’s files: your settings, the latest reading and outfit by item for each tracked Kin, observation and update times, retry and delivery status, the night’s times, the last dream, and when your Kin was last told its look (a fingerprint, not the words). The dream is erased after a day, and Stop erases the night, the dream and what was told within 15 minutes. The chat is never kept.';
 
 /** The dream choices (in views/choices.js, on a card of their own). */
 export function dreamOptions(v) {

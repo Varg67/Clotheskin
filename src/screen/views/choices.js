@@ -11,7 +11,7 @@ export function renderLook(v) {
   return h('section', { class: 'card dreams', 'aria-labelledby': 'look-title' },
     h('div', { class: 'card-body' },
       h('h2', { class: 'section-title', id: 'look-title' }, 'Current look'),
-      h('p', { class: 'help' }, 'Clotheskin can tell your Kin its outfit, hair and makeup when they change, so it stays consistent in your roleplay. Each note lasts 12 hours. Your Kin is not told anything unless you turn this on.'),
+      h('p', { class: 'help' }, 'Clotheskin can tell your Kin its outfit, hair and makeup when they change, so it stays consistent in your roleplay. Each note lasts 12 hours. Turning this on also includes the reported look in action results. Location, pose and activity stay on your card.'),
       h('label', { class: 'check' }, h('input', { type: 'checkbox', 'data-key': 'tell-look', checked: v.S.settings.tellLook || undefined, onChange: (ev) => v.store.saveSettings({ tellLook: ev.target.checked }) }),
         h('span', {}, 'Tell my Kin its current look')),
       problem ? h('p', { class: 'help', role: 'status', 'data-testid': 'look-problem' }, problem) : null));
@@ -22,6 +22,6 @@ export function renderDreams(v) {
   return h('section', { class: 'card dreams', 'aria-labelledby': 'dreams-title' },
     h('div', { class: 'card-body' },
       h('h2', { class: 'section-title', id: 'dreams-title' }, 'Dreams'),
-      h('p', { class: 'help' }, 'When your Kin wakes up, Clotheskin asks what it dreamt and shows it here for a day. Your Kin is not told its dream unless you turn this on.'),
+      h('p', { class: 'help' }, 'When your Kin wakes up, Clotheskin asks what it dreamt and shows it here for a day. Turn this on to share the dream in the wake-up result and send a memory note.'),
       dreamOptions(v)));
 }

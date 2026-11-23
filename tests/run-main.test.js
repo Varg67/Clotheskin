@@ -11,9 +11,10 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const fakeKin = fileURLToPath(new URL('./support/fake-kin-cli.mjs', import.meta.url));
 
-function run(event, { options = {}, settings = { autoState: 'running', kinId: 'k1', tz: 'America/Sao_Paulo' }, bin = fakeKin, stdin, env = {} } = {}) {
+function run(event, { options = {}, settings = { autoState: 'running', kinId: 'k1', tz: 'America/Sao_Paulo' }, bin = fakeKin, stdin, env = {}, initialStatus } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'clotheskin-run-'));
   mkdirSync(join(dir, 'files'));
+  if (initialStatus) writeFileSync(join(dir, 'files', 'status.json'), JSON.stringify(initialStatus));
   if (settings) writeFileSync(join(dir, 'files', 'settings.json'), JSON.stringify(settings));
   writeFileSync(join(dir, 'options.json'), JSON.stringify(options));
   const r = spawnSync(process.execPath, ['main.js'], { cwd: root, input: stdin ?? JSON.stringify(event), encoding: 'utf8', env: { ...process.env, KIN_BIN: bin, FAKE_DIR: dir, ...env }, timeout: 20000 });
@@ -30,7 +31,7 @@ test('a scheduled run reads the Kin and saves the reading; the answer, split ins
   assert.deepEqual(r.status.kins.k1.reading.location, 'In the café.');
   assert.equal(r.status.kins.k1.reading.doing, 'Sitting at a table, sipping a latte.');
   assert.equal(r.ends.length, 1, 'kin end exactly once');
-  assert.deepEqual(r.ends[0], ['end', 'Isa: In the café. Sitting at a table, sipping a latte. Wearing a white shirt.']);
+  assert.deepEqual(r.ends[0], ['end', 'Status updated.']);
   const ask = r.calls.find((c) => c[0] === 'ask');
   assert.deepEqual(ask.slice(0, 3), ['ask', '--kin', 'k1']);
   assert.match(r.stderr, /\[clotheskin\] kin ask: \d+ characters in \d+ ms/, 'diagnostics on stderr');
@@ -41,7 +42,7 @@ test('the action from the screen reads the Kin it names', () => {
   const r = run({ trigger: 'action', action: 'update_status', input: { kin: 'k2', op: 'read' } }, { options: { answer: ANSWER }, settings: { autoState: 'stopped' } });
   assert.equal(r.code, 0, r.stderr);
   assert.equal(r.status.kins.k2.name, 'Bea Maria', 'the name comes from kin kins, not from the input');
-  assert.match(r.ends[0][1], /^Bea Maria: In the café\./);
+  assert.deepEqual(r.ends, [['end', 'Status updated.']]);
 });
 
 test('Kindroid down: the run fails cleanly with kin end --failed, and the slowing down is saved', () => {
@@ -99,3 +100,55 @@ test('a "not found" that is not kin\'s 404 is a failure: status.json is never wr
   assert.match(r.ends[0][2], /Could not read the app's files/);
   assert.equal(r.calls.filter((c) => c[0] === 'files' && c[1] === 'put').length, 0);
 });
+
+const privateLook = {
+  location: 'in the amber observatory', pose: 'sitting on a copper stool', action: 'polishing an astrolabe',
+  topwear: ['a saffron vest'], hair: 'a lilac braid',
+  makeup: { lips: 'coral lipstick', dream: 'forbidden comet', summary: 'private summary' },
+};
+const night = { wakeAt: '2099-01-01T08:00:00Z', until: '2099-01-01T07:50:00Z' };
+const oldCard = { location: 'Cached location.', outfit: 'Cached outfit.', doing: 'Cached activity.' };
+
+function originEvent(origin, op) {
+  const input = { op, kin: 'k1' };
+  if (origin === 'screen') return { trigger: 'action', action: 'update_status', input };
+  return { trigger: 'action', action: 'update_status', kin: 'k1', input: { op, kin: 'k2' } };
+}
+
+for (const origin of ['screen', 'Kin']) {
+  for (const tellLook of [false, true]) for (const tellDream of [false, true]) {
+    test(`real entry with simulated ${origin} action: look=${tellLook}, dream=${tellDream}`, () => {
+      const settings = { tellLook, tellDream };
+      for (const op of ['read', 'wake']) {
+        const event = originEvent(origin, op);
+        const initialStatus = { diagnosticsVersion: 1, kins: { k1: {
+          reading: oldCard, sleep: night, dream: { dream: 'Cached dream', remembered: 'all', at: new Date().toISOString() },
+          note: 'private cached note', summary: { secret: 'private metadata' },
+        } } };
+        const answer = op === 'read' ? privateLook : { dream: 'A clockwork whale', remembered: 'most', summary: 'private summary', outfit: 'Cached outfit.' };
+        const r = run(event, { initialStatus, settings, options: { answer: JSON.stringify(answer) } });
+        assert.equal(r.code, 0, r.stderr);
+        const look = op === 'read' && tellLook;
+        const dream = op === 'wake' && tellDream;
+        const expected = look ? 'Wearing a saffron vest. A lilac braid. Coral lipstick.'
+          : dream ? 'A clockwork whale. Remembers most of it.' : 'Status updated.';
+        assert.deepEqual(r.ends, [['end', expected]]);
+        const deliveries = r.calls.filter(([verb]) => verb === 'tell');
+        assert.equal(deliveries.length, look ? 3 : dream ? 1 : 0);
+        for (const delivery of deliveries) assert.deepEqual(delivery.slice(1, 3), ['--kin', 'k1']);
+        assert.doesNotMatch(JSON.stringify([r.ends, deliveries, r.stderr]), /observatory|stool|astrolabe|cached|forbidden comet|private summary|private metadata/i);
+        assert.equal(r.status.kins.k2, undefined);
+        if (op === 'read') {
+          assert.match(r.status.kins.k1.reading.doing, /stool.*astrolabe/);
+          assert.match(r.status.kins.k1.reading.location, /observatory/);
+          assert.match(r.status.kins.k1.reading.hair, /lilac braid/);
+          assert.equal(r.status.kins.k1.dream.dream, 'Cached dream');
+        } else {
+          assert.equal(r.status.kins.k1.dream.dream, answer.dream);
+          assert.equal(r.status.kins.k1.reading.outfit, 'Cached outfit.');
+          assert.equal(r.status.kins.k1.sleep, null);
+        }
+      }
+    });
+  }
+}

@@ -13,14 +13,14 @@ import { parseReading, describeReading, updateWardrobe } from '../src/core/outfi
 import { looksAsleep, sleepCompatiblePosture, confirmedAwake, sentenceMark, planSleep, parseSleepAnswer, parseDreamAnswer, describeDream, dreamFact, DREAM_TTL_HOURS } from '../src/core/sleep.js';
 import { errorKind, serviceProblem, isDue, ERROR } from '../src/core/schedule.js';
 import {
-  normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, readingText, forgetOld, carryOver, lookFacts,
+  normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, forgetOld, carryOver, lookFacts, lookSummary,
   succeeded, failedEntry, postponedEntry, mergeConcurrent, LOOK_TTL_HOURS, LOOK_RETRY_HOURS,
   SETTINGS_FILE, STATUS_FILE, ACTION, OPS, AUTO,
 } from '../src/core/state.js';
 import { NOT_DESCRIBED, APP_VERSION } from '../src/core/constants.js';
 import { formatWhen } from '../src/core/format.js';
 import { describeNow } from '../src/core/time.js';
-import { oneLine } from '../src/core/text.js';
+import { oneLine, isPlainFact } from '../src/core/text.js';
 
 const RETRY_AFTER_MS = 3000; // a fast Kindroid failure (a 502, a dropped connection) is tried once more
 const ASK_TIMEOUT_MS = 90000; // one question to the Kin never waits longer than this
@@ -45,6 +45,8 @@ const TELL_TIMEOUT_MS = 15000; // telling the Kin its look waits no longer than 
  * @typedef {{ ok: true, text: string } | { ok: false, kind: ErrorKind, error: string }} AskResult
  * @typedef {{ kind?: ErrorKind, error: string, length?: number }} Outcome  what went wrong in a step
  * @typedef {{ ok: boolean, message: string }} Result  what the run ends with (kin end [--failed] message)
+ * @typedef {{ kind: 'look', fresh: Sentences } | { kind: 'dream', dream: import('../src/core/sleep.js').Dream }} SharedDetail
+ * @typedef {{ ok: boolean, notice: keyof typeof NOTICES, nextAt?: string|null, detail?: SharedDetail }} Step
  * @typedef {{ location: string, doing: string, outfit: string, hair: string|null, makeup: string|null,
  *   endedAction?: string, excludedLocation?: string }} Sentences  of one answer
  * @typedef {{ clock?: () => Date, log?: (line: string) => void, retryAfterMs?: number, budgetMs?: number }} Options
@@ -58,6 +60,21 @@ const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
 const ok = (message) => ({ ok: true, message: oneLine(message) });
 /** @returns {Result} */
 const failed = (message) => ({ ok: false, message: oneLine(message) });
+
+// Handlers can select a public notice, but cannot supply its text. Private details travel separately.
+const NOTICES = Object.freeze({
+  updated: 'Status updated.',
+  deferred: 'Update deferred until the next start.',
+  notDue: 'No update is due yet.',
+  missingKin: 'No Kin was given.',
+  detached: 'The selected Kin is not attached to Clotheskin any more.',
+  listFailed: 'Could not list the Kins.',
+  badAnswer: 'Clotheskin could not read the answer.',
+  maintenance: 'Kindroid is under maintenance.',
+  failed: 'Clotheskin could not complete the update.',
+});
+/** @param {keyof typeof NOTICES} notice @returns {Step} */
+const stepNotice = (notice, success = true) => ({ ok: success, notice });
 
 /**
  * One run. `event` is the JSON Kindroid sends on stdin: {"trigger":"schedule"} or
@@ -82,9 +99,38 @@ export async function runProgram({ event, kin, ...options }) {
   const ctx = context(kin, settings.value, options);
   const status = await eraseOld(ctx, statusFile.value);
   if (!status.ok) return failed(`Could not erase an old dream from the app's files: ${status.error}`);
-  if (trigger === 'action') return onAction(ctx, status.value, event);
-  const idle = idleReason(settings.value);
-  return idle ? ok(idle) : scheduled(ctx, status.value);
+  const idle = trigger === 'schedule' && idleReason(settings.value);
+  if (idle) return ok(idle);
+  const step = trigger === 'action' ? await onAction(ctx, status.value, event) : await scheduled(ctx, status.value);
+  return outgoingResult(ctx, step);
+}
+
+/** A settings read failure at a disclosure boundary grants no permission. */
+async function currentSharing(kin) {
+  const settings = await readFile(kin, SETTINGS_FILE, normalizeSettings);
+  return settings.ok ? settings.value : null;
+}
+
+/** Build the public contract after the last save, using only details from this operation.
+ * @param {Ctx} ctx
+ * @param {Step} step
+ * @returns {Promise<Result>}
+ */
+async function outgoingResult(ctx, { ok: success, notice, detail, nextAt }) {
+  if (notice === 'notDue' && nextAt) return ok(`Nothing to do yet: next update around ${formatWhen(nextAt, { timeZone: ctx.settings.tz, now: ctx.clock() })}.`);
+  const message = NOTICES[notice] || NOTICES.failed;
+  if (!success) return failed(message);
+  if (!detail) return ok(message);
+  const text = await authorizedDetail(ctx.kin, detail);
+  return ok(text || message);
+}
+
+/** @param {KinApi} kin @param {SharedDetail} detail */
+async function authorizedDetail(kin, detail) {
+  const settings = await currentSharing(kin);
+  if (detail.kind === 'look' && settings?.tellLook) return lookSummary(detail.fresh);
+  if (detail.kind === 'dream' && settings?.tellDream && safeDream(detail.dream)) return describeDream(detail.dream);
+  return '';
 }
 
 /**
@@ -155,15 +201,14 @@ async function readFile(kin, path, normalize) {
  * The 15-minute start, while the automatic update runs for a Kin: does what is due (a reading, or the dream question).
  * @param {Ctx} ctx
  * @param {Status} status
- * @returns {Promise<Result>}
+ * @returns {Promise<Step>}
  */
 async function scheduled(ctx, status) {
   const { settings, clock } = ctx;
-  if (!settings.kinId) return ok('No Kin is selected.'); // idleReason said so already; this tells the types
+  if (!settings.kinId) return stepNotice('missingKin', false); // idleReason said so already; this tells the types
   const entry = status.kins[settings.kinId] || normalizeEntry();
   const at = plannedAt(entry, settings);
-  // Most starts end here, without asking anything. The line shows in Kindroid's log, so it is on the person's clock.
-  if (!isDue(at, clock())) return ok(`Nothing to do yet: next update around ${formatWhen(at, { timeZone: settings.tz, now: clock() })}.`);
+  if (!isDue(at, clock())) return { ...stepNotice('notDue'), nextAt: entry.sleep ? null : at };
 
   const who = await attachedKin(ctx, settings.kinId, entry);
   if (!who.ok) return who.result;
@@ -173,7 +218,7 @@ async function scheduled(ctx, status) {
 async function onAction(ctx, status, event) {
   const input = event.input && typeof event.input === 'object' ? event.input : {};
   const id = typeof event.kin === 'string' && event.kin ? event.kin : (typeof input.kin === 'string' ? input.kin : '');
-  if (!id) return failed('No Kin was given.');
+  if (!id) return stepNotice('missingKin', false);
   const op = OPS.includes(input.op) ? input.op : 'read';
   const entry = status.kins[id] || normalizeEntry();
   const who = await attachedKin(ctx, id, entry);
@@ -188,7 +233,7 @@ async function onAction(ctx, status, event) {
  * @param {Ctx} ctx
  * @param {string} id
  * @param {Entry} entry
- * @returns {Promise<{ ok: true, kin: Who } | { ok: false, result: Result }>}
+ * @returns {Promise<{ ok: true, kin: Who } | { ok: false, result: Step }>}
  */
 async function attachedKin(ctx, id, entry) {
   let kins;
@@ -196,16 +241,17 @@ async function attachedKin(ctx, id, entry) {
     const who = { id, name: entry.name || id };
     const now = ctx.clock();
     const outcome = { kind: ERROR.SERVER, error: `Could not list the Kins: ${serviceProblem(e)}` };
-    return { ok: false, result: await fail(ctx, { who, entry: { ...entry, lastRunAt: now.toISOString() }, outcome, now, base: entry }) };
+    await fail(ctx, { who, entry: { ...entry, lastRunAt: now.toISOString() }, outcome, now, base: entry });
+    return { ok: false, result: stepNotice('listFailed', false) };
   }
   const kin = kins.find((k) => k.id === id);
-  if (!kin) return { ok: false, result: failed('The selected Kin is not attached to Clotheskin any more.') };
+  if (!kin) return { ok: false, result: stepNotice('detached', false) };
   return { ok: true, kin };
 }
 
 // ---------------------------------------------------------------- steps
 
-/** Reads where the Kin is, its pose and action and its outfit; then, if it is asleep, asks until when. */
+/** Reads the card and checks the night. @returns {Promise<Step>} */
 async function read(ctx, who, entry) {
   const now = ctx.clock();
   const updated = { ...entry, name: who.name, lastRunAt: now.toISOString() };
@@ -214,17 +260,16 @@ async function read(ctx, who, entry) {
   const { fresh } = answer;
   // What the answer said nothing about keeps the last known sentence (real test: "No outfit described" lost it).
   const withReading = { ...updated, reading: carryOver(fresh, entry.reading, now), serverFailures: 0 }; // Kindroid answered
-  const look = ctx.settings.tellLook ? await tellLook(ctx, { who, entry: withReading, fresh, now }) : { said: [] };
-  const told = look.said.length ? ` (Told ${who.name}: ${look.said.join(', ')}.)` : '';
-  const line = `${who.name}: ${readingText(withReading.reading)}${told}`;
-  return afterReading(ctx, { who, entry: { ...withReading, ...look.entry }, base: entry, now, line,
+  const look = await tellLook(ctx, { who, entry: withReading, fresh, now });
+  const result = await afterReading(ctx, { who, entry: { ...withReading, ...look }, base: entry, now,
     doing: fresh.doing, endedAction: fresh.endedAction });
+  return { ...result, detail: { kind: 'look', fresh } };
 }
 
 /**
  * Asks the reading question and reads the answer: { ok: true, fresh } (the card's sentences of this answer alone; hair
  * and makeup only when the Kin described them), or { ok: false, result } once the failure or the wait is saved.
- * @returns {Promise<{ ok: true, fresh: Sentences } | { ok: false, result: Result }>}
+ * @returns {Promise<{ ok: true, fresh: Sentences } | { ok: false, result: Step }>}
  */
 async function readAnswer(ctx, { who, entry, base, now }) {
   const { reply, parsed } = await askAndParse(ctx, who, buildOutfitPrompt({ name: who.name }), (text) => parseReading(text, who.name));
@@ -246,46 +291,45 @@ async function readAnswer(ctx, { who, entry, base, now }) {
  * the Kin said just now (`doing`), never from a pose kept from an earlier reading; an answer that says nothing about
  * the pose or action is not a sign of being awake: the night, if any, and its mark stay as they are.
  */
-async function afterReading(ctx, { who, entry, base, now, line, doing, endedAction }) {
+async function afterReading(ctx, { who, entry, base, now, doing, endedAction }) {
   if (looksAsleep(endedAction) && !looksAsleep(doing)) {
     await save(ctx, who.id, succeeded({ ...entry, sleep: null, sleptOn: null }), base);
-    return ok(line);
+    return stepNotice('updated');
   }
-  if (doing === NOT_DESCRIBED.doing) { await save(ctx, who.id, succeeded(entry), base); return ok(line); }
+  if (doing === NOT_DESCRIBED.doing) { await save(ctx, who.id, succeeded(entry), base); return stepNotice('updated'); }
   if (entry.sleep && sleepCompatiblePosture(doing)) {
     await save(ctx, who.id, succeeded(entry), base);
-    return ok(line);
+    return stepNotice('updated');
   }
   if (!looksAsleep(doing)) {
     await save(ctx, who.id, succeeded({ ...entry, sleep: null, sleptOn: null }), base); // awake: any night is over
-    return ok(line);
+    return stepNotice('updated');
   }
-  if (entry.sleep) { await save(ctx, who.id, succeeded(entry), base); return ok(`${line} Still asleep.`); } // read by hand during the night
+  if (entry.sleep) { await save(ctx, who.id, succeeded(entry), base); return stepNotice('updated'); } // read by hand during the night
   const mark = sentenceMark(doing); // a fingerprint, never the sentence: nothing about the scene in the night's data
   if (entry.sleptOn === mark) {
     // A repeated claim cannot undo a newer explicit denial. A previously confirmed night keeps its own mark.
-    if (base.reading?.doing === confirmedAwake(doing)) ({ entry, line } = retractSleep(entry, line));
+    if (base.reading?.doing === confirmedAwake(doing)) entry = retractSleep(entry);
     await save(ctx, who.id, succeeded(entry), base);
-    return ok(line);
+    return stepNotice('updated');
   }
   // The reading is kept before the sleep question: if the run is cut short, it is not lost.
   await save(ctx, who.id, entry, base);
-  return askSleep(ctx, { who, entry, now, mark, line });
+  return askSleep(ctx, { who, entry, now, mark });
 }
 
-/** Rebuild the card and log from the confirmed reading, keeping any independently described posture. */
-function retractSleep(entry, line) {
-  const reading = { ...entry.reading, doing: confirmedAwake(entry.reading.doing) };
-  return { entry: { ...entry, reading }, line: line.replace(readingText(entry.reading), () => readingText(reading)) };
+/** Keep any independently described posture when the Kin denies sleeping. */
+function retractSleep(entry) {
+  return { ...entry, reading: { ...entry.reading, doing: confirmedAwake(entry.reading.doing) } };
 }
 
 /** Asks whether the Kin is asleep and until when; a believable wake-up time starts the night. */
-async function askSleep(ctx, { who, entry, now, mark, line }) {
+async function askSleep(ctx, { who, entry, now, mark }) {
   const prompt = buildFollowUpPrompt(SLEEP_PROMPT, { name: who.name, now: describeNow(now, ctx.settings.tz) });
   const { reply, parsed: answer } = await askAndParse(ctx, who, prompt, parseSleepAnswer);
   if (!reply.ok && reply.kind === ERROR.TIME) {
     const note = 'The sleep question waits for the next start of the app.';
-    return postpone(ctx, { who, entry: succeeded(entry), now, base: entry, note, message: `${line} The sleep question waits for the next start.` });
+    return postpone(ctx, { who, entry: succeeded(entry), now, base: entry, note });
   }
   if (!reply.ok) {
     const note = `The sleep question could not be asked (${reply.error}). It is asked again at the next update.`;
@@ -299,13 +343,12 @@ async function askSleep(ctx, { who, entry, now, mark, line }) {
   const plan = answer.sleeping ? planSleep(answer.wakeAt, now, ctx.settings.tz) : null;
   const sleep = plan ? { wakeAt: plan.wakeAt.toISOString(), until: plan.until.toISOString() } : null;
   const beforeConfirmation = entry;
-  if (!answer.sleeping) ({ entry, line } = retractSleep(entry, line));
+  if (!answer.sleeping) entry = retractSleep(entry);
   await save(ctx, who.id, succeeded({ ...entry, sleptOn: mark, sleep }), beforeConfirmation);
-  if (plan) return ok(`${line} Asleep until ${answer.wakeAt}.`);
-  return ok(answer.sleeping ? `${line} Asleep, but the wake-up time ${answer.wakeAt} is too soon or too far away to wait for; readings go on.` : `${line} Not asleep after all.`);
+  return stepNotice('updated');
 }
 
-/** The night is over: asks what the Kin dreamt, and (if the person wants) tells the Kin so it remembers it. */
+/** The night is over: asks what the Kin dreamt and optionally shares it. @returns {Promise<Step>} */
 async function wake(ctx, who, entry) {
   const now = ctx.clock();
   const updated = { ...entry, name: who.name, lastRunAt: now.toISOString() };
@@ -320,24 +363,28 @@ async function wake(ctx, who, entry) {
   if (!dream || !dream.ok) {
     ctx.log('the dream answer was not usable'); // a Kin that cannot answer is let go: awake, without a dream
     await save(ctx, who.id, succeeded({ ...updated, sleep: null }), entry);
-    return ok(`${who.name} woke up (no usable dream answer).`);
+    return stepNotice('updated');
   }
   updated.dream = { dream: dream.dream, remembered: dream.remembered, at: now.toISOString() };
-  const told = await tellDream(ctx, who, dream);
+  await tellDream(ctx, who, dream);
   await save(ctx, who.id, succeeded({ ...updated, sleep: null }), entry); // sleptOn stays: the still chat does not start a new night
-  return ok(`${who.name} woke up. ${describeDream(dream)}${told}`);
+  return { ...stepNotice('updated'), detail: { kind: 'dream', dream } };
 }
 
-/** Tells the Kin its dream, if the person turned that on: ' Isa was told, to remember it today.' or ''. */
+// A null dream is a valid answer. Structured data inside a dream string stays on the card.
+const safeDream = (dream) => dream.dream === null || isPlainFact(dream.dream);
+
+/** Check both dream permissions immediately before the memory note. */
 async function tellDream(ctx, who, dream) {
-  const fact = ctx.settings.tellDream ? dreamFact(dream) : null;
-  if (!fact) return '';
+  if (!safeDream(dream)) return;
+  const fact = dreamFact(dream);
+  if (!fact) return;
+  const settings = await currentSharing(ctx.kin);
+  if (!settings?.tellDream) return;
   try {
-    await ctx.kin.tell(fact, { kin: who.id, key: 'dream', ttl: DREAM_TTL_HOURS, reachOut: ctx.settings.reachOut });
-    return ` ${who.name} was told, to remember it today.`;
+    await ctx.kin.tell(fact, { kin: who.id, key: 'dream', ttl: DREAM_TTL_HOURS, reachOut: settings.reachOut });
   } catch (err) {
     ctx.log(`kin tell (dream) failed: ${serviceProblem(err)}`);
-    return '';
   }
 }
 
@@ -345,25 +392,24 @@ async function tellDream(ctx, who, dream) {
  * Tells the Kin what it is wearing now (settings.tellLook), so it stays consistent in the roleplay: one fact per field
  * (look-outfit, look-hair, look-makeup), each replacing the last and lasting LOOK_TTL_HOURS. Only what changed, only
  * from what the Kin said just now (lookFacts). A failure or a lack of time is not an error: the reading is kept, and
- * what was not told is told at the next reading. Returns { entry (told, lookFailedAt, lookError), said }.
+ * what was not told is told at the next reading. Returns the changes to the local delivery record.
  */
 async function tellLook(ctx, { who, entry, fresh, now }) {
   // A failure waits an hour: a Kindroid that refuses the note is not asked three times every 15 minutes.
-  if (entry.lookFailedAt && now.getTime() - Date.parse(entry.lookFailedAt) < LOOK_RETRY_HOURS * 3600e3) return { entry: {}, said: [] };
+  if (entry.lookFailedAt && now.getTime() - Date.parse(entry.lookFailedAt) < LOOK_RETRY_HOURS * 3600e3) return {};
   const told = { ...(entry.told || {}) };
-  const said = [];
   for (const f of lookFacts({ fresh, told: entry.told, now, when: describeNow(now, ctx.settings.tz) })) {
     if (ctx.deadline - Date.now() < RESERVE_MS + TELL_TIMEOUT_MS) { ctx.log('not enough time left to tell the look: at the next reading'); break; }
+    if (!(await currentSharing(ctx.kin))?.tellLook) return { told };
     try {
       await ctx.kin.tell(f.fact, { kin: who.id, key: f.key, ttl: LOOK_TTL_HOURS, timeoutMs: TELL_TIMEOUT_MS });
       told[f.field] = { mark: f.mark, at: now.toISOString() };
-      said.push(f.field);
     } catch (err) {
       ctx.log(`kin tell (${f.key}) failed: ${serviceProblem(err)}`);
-      return { entry: { told, lookFailedAt: now.toISOString(), lookError: serviceProblem(err) }, said }; // the rest waits too
+      return { told, lookFailedAt: now.toISOString(), lookError: serviceProblem(err) }; // the rest waits too
     }
   }
-  return { entry: { told, lookFailedAt: null, lookError: null }, said };
+  return { told, lookFailedAt: null, lookError: null };
 }
 
 // ---------------------------------------------------------------- helpers
@@ -434,13 +480,14 @@ function canRetry(ctx, attempt, kind) {
 /**
  * @param {Ctx} ctx
  * @param {{ who: Who, entry: Entry, outcome: Outcome, now: Date, note?: string|null, base?: Entry|null }} failure
- * @returns {Promise<Result>}
+ * @returns {Promise<Step>}
  */
 async function fail(ctx, { who, entry, outcome, now, note = null, base }) {
   if (outcome.kind === ERROR.ANSWER && outcome.length !== undefined) ctx.log(`answer not usable (${outcome.length} characters)`);
   const next = failedEntry(entry, { kind: outcome.kind, error: outcome.error, note, now, intervalS: ctx.settings.intervalS });
   await save(ctx, who.id, next, base);
-  return failed(note || next.error);
+  if (next.errorKind === ERROR.ANSWER) return stepNotice('badAnswer', false);
+  return stepNotice(next.errorKind === ERROR.MAINTENANCE ? 'maintenance' : 'failed', false);
 }
 
 /**
@@ -449,12 +496,12 @@ async function fail(ctx, { who, entry, outcome, now, note = null, base }) {
  */
 /**
  * @param {Ctx} ctx
- * @param {{ who: Who, entry: Entry, now: Date, note: string, base?: Entry|null, message?: string }} later
- * @returns {Promise<Result>}
+ * @param {{ who: Who, entry: Entry, now: Date, note: string, base?: Entry|null }} later
+ * @returns {Promise<Step>}
  */
-async function postpone(ctx, { who, entry, now, note, base, message = note }) {
+async function postpone(ctx, { who, entry, now, note, base }) {
   await save(ctx, who.id, postponedEntry(entry, { now, note }), base);
-  return ok(message);
+  return stepNotice('deferred');
 }
 
 /**

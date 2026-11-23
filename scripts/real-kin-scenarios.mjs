@@ -152,7 +152,7 @@ export const STEPS = [
     id: 'N1', title: 'A noite: dormir, acordar, sonho',
     provoke: 'No chat, leve o Kin a ir dormir e combine o despertador ("Boa noite, acorda às 7h30?"). Aperte **Update status**.',
     expectText: 'Depois da leitura, o app pergunta sozinho quando o Kin acorda. Em **Automatic update** aparece "Asleep until 7:30 AM tomorrow. The dream question comes around …" e o link **Wake now**.',
-    checks: ['A pose diz que está dormindo (ex.: "Lying in bed, sleeping.").', 'O horário de acordar é o que o Kin disse, no **seu** relógio.', '**Wake now** troca o botão para "Asking about the dream…" e depois aparece a linha **Last dream**.', 'No chat, o Kin passa a **lembrar do sonho** durante o dia (a menos que você desligue em Settings → Dreams).'],
+    checks: ['A pose diz que está dormindo (ex.: "Lying in bed, sleeping.").', 'O horário de acordar é o que o Kin disse, no **seu** relógio.', '**Wake now** troca o botão para "Asking about the dream…" e depois aparece a linha **Last dream**.', 'No chat, o Kin passa a **lembrar do sonho** durante o dia (se você ativar a opção em Dreams).'],
     record: 'O que o Kin respondeu, o horário mostrado, o sonho, e se ele comentou o sonho depois no chat.',
   },
   {

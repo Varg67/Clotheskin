@@ -125,7 +125,12 @@ export function parseDreamAnswer(text) {
 }
 
 /** The dream and how much of it is remembered, under the keys a Kin uses for them. */
-const dreamFields = (o) => ({ dream: o.dream ?? o.summary ?? '', remembered: String(o.remembered ?? o.remember ?? '').trim().toLowerCase() });
+function dreamFields(o) {
+  // A generic summary beside other scene fields could describe the whole card.
+  const onlyDreamFields = Object.keys(o).every((key) => ['summary', 'remembered', 'remember'].includes(key));
+  const dream = Object.prototype.hasOwnProperty.call(o, 'dream') ? (o.dream ?? '') : (onlyDreamFields ? o.summary ?? '' : '');
+  return { dream, remembered: String(o.remembered ?? o.remember ?? '').trim().toLowerCase() };
+}
 
 /**
  * A follow-up answer (sleep or dream) as a JSON object.

@@ -27,7 +27,7 @@ test('running: reads at once, then only when the interval has passed; moving the
   const first = await tick(k);
   assert.match(first.message, /^Isa: In the bedroom\. Sitting on the bed, reading a book\. Wearing pyjamas\.$/);
   const t0 = k.clock().toISOString();
-  assert.deepEqual(k.entry().reading, { location: 'In the bedroom.', doing: 'Sitting on the bed, reading a book.', outfit: 'Wearing pyjamas.', hair: null, makeup: null, at: t0, seen: { location: t0, doing: t0, outfit: t0 } });
+  assert.deepEqual(k.entry().reading, { location: 'In the bedroom.', doing: 'Sitting on the bed, reading a book.', outfit: 'Wearing pyjamas.', wardrobe: { topwear: ['pyjamas'] }, hair: null, makeup: null, at: t0, seen: { location: t0, doing: t0, outfit: t0 } });
   assert.equal(k.entry().name, 'Isa');
   for (const m of [15, 15, 15]) { k.advance(m); await tick(k); }
   assert.deepEqual(k.asks(), ['reading'], '45 minutes with a 1-hour interval: nothing more');
@@ -489,7 +489,7 @@ test('a pose kept from an earlier reading never starts a night: sleep is read fr
   k.answers.reading.splice(0, Infinity, JSON.stringify({ topwear: ['a hoodie'] })); // nothing about the pose
   await tick(k);
   assert.deepEqual(k.asks(), ['reading', 'sleep', 'reading'], 'no sleep question from the kept pose');
-  assert.equal(k.entry().reading.doing, 'Lying in bed, sleeping.', 'still shown, as last seen');
+  assert.equal(k.entry().reading.doing, 'Lying in bed, awake.', 'the independently described pose and newer confirmation are kept');
   assert.equal(k.entry().sleep, null);
 });
 
@@ -552,10 +552,10 @@ test('a Kin that undresses: "Not wearing anything" replaces the last known cloth
 test('a whole messy roleplay answer, every slip at once, reads as five short sentences about the Kin only', async () => {
   const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1' } });
   k.answers.reading.push('*smiles softly* Sure! ```json\n' + JSON.stringify({
-    location: 'Bia is in the kitchen with Ari and Marina',
-    pose: 'Bia is sitting at the table (on a stool)',
+    location: 'Isa is in the kitchen with Ari and Marina',
+    pose: 'Isa is sitting at the table (on a stool)',
     action: 'asking Ari to check whether Marina is home',
-    hair: 'Bia has long dark hair, which she keeps tucking behind her ear',
+    hair: 'Isa has long dark hair, which she keeps tucking behind her ear',
     makeup: 'not mentioned in the chat',
     topwear: ['wearing a purple shirt', 'a cardigan (taken off)'],
     bottomunderwear: ['purple panties'],

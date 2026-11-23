@@ -11,7 +11,7 @@ O endereço aponta para um **commit**, não para um branch: assim o agente pega 
 - **Mensagens prontas, com o commit preenchido:** depois do push, rode `npm run install-prompt` (ou peça ao Claude para rodar). Ele imprime as mensagens abaixo com o commit, as respostas esperadas e o tamanho e o SHA-256 de cada arquivo.
 - **À mão:** troque `<commit>` pelo hash completo do commit em cada mensagem.
 
-## Os 24 arquivos que o Kindroid usa
+## Os 25 arquivos que o Kindroid usa
 
 ```
 kin.json
@@ -25,6 +25,7 @@ src/core/json.js
 src/core/outfit.js
 src/core/phrases.js
 src/core/prompt.js
+src/core/scene.js
 src/core/schedule.js
 src/core/sleep.js
 src/core/state.js
@@ -40,7 +41,7 @@ sample/settings.json
 sample/status.json
 ```
 
-O resto do repositório (`tests/`, `dev/`, `scripts/`, `docs/`, `tools/`, `prints/`) é só para desenvolver e testar: o Kindroid não precisa. **Para atualizar, mande sempre os 24 juntos**: eles dependem uns dos outros, e uma mistura de arquivos novos e velhos pode quebrar o app.
+O resto do repositório (`tests/`, `dev/`, `scripts/`, `docs/`, `tools/`, `prints/`) é só para desenvolver e testar: o Kindroid não precisa. **Para atualizar, mande sempre os 25 juntos**: eles dependem uns dos outros, e uma mistura de arquivos novos e velhos pode quebrar o app.
 
 ## As mensagens para o agente, em ordem
 
@@ -58,7 +59,7 @@ Open this raw GitHub file: https://raw.githubusercontent.com/Varg67/Clotheskin/<
 Starting from the same raw GitHub revision, open main.js and follow its local imports. Which file and function handle a manual status update? List the files you successfully opened.
 ```
 
-**Resposta certa:** a função `onAction` em `run/program.js`, e os 15 arquivos: `main.js`, `run/kin.js`, `run/program.js`, `src/core/constants.js`, `src/core/format.js`, `src/core/json.js`, `src/core/outfit.js`, `src/core/phrases.js`, `src/core/prompt.js`, `src/core/schedule.js`, `src/core/sleep.js`, `src/core/state.js`, `src/core/text.js`, `src/core/time.js`, `src/core/vocabulary.js`.
+**Resposta certa:** a função `onAction` em `run/program.js`, e os 16 arquivos: `main.js`, `run/kin.js`, `run/program.js`, `src/core/constants.js`, `src/core/format.js`, `src/core/json.js`, `src/core/outfit.js`, `src/core/phrases.js`, `src/core/prompt.js`, `src/core/scene.js`, `src/core/schedule.js`, `src/core/sleep.js`, `src/core/state.js`, `src/core/text.js`, `src/core/time.js`, `src/core/vocabulary.js`.
 
 ### 3. Seguir a tela
 
@@ -71,7 +72,7 @@ Open screen/index.html from the same revision and follow its local scripts, styl
 ### 4. Copiar para o projeto do Workshop
 
 ```
-Copy the existing Clotheskin app from the verified raw GitHub revision into the current Workshop project. Copy exactly these 24 files, each from https://raw.githubusercontent.com/Varg67/Clotheskin/<commit>/<path>, saved at the same path, exactly as downloaded: do not rewrite, shorten or "improve" anything. Keep kin.json at the project root.
+Copy the existing Clotheskin app from the verified raw GitHub revision into the current Workshop project. Copy exactly these 25 files, each from https://raw.githubusercontent.com/Varg67/Clotheskin/<commit>/<path>, saved at the same path, exactly as downloaded: do not rewrite, shorten or "improve" anything. Keep kin.json at the project root.
 
 kin.json
 package.json
@@ -84,6 +85,7 @@ src/core/json.js
 src/core/outfit.js
 src/core/phrases.js
 src/core/prompt.js
+src/core/scene.js
 src/core/schedule.js
 src/core/sleep.js
 src/core/state.js

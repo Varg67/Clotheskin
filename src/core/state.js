@@ -9,7 +9,7 @@ import { snapInterval, retryDelay, errorKind, DEFAULT_INTERVAL_S, ERRORS_BEFORE_
 import { safeTimeZone } from './time.js';
 import { REMEMBERED, DREAM_TTL_HOURS, sentenceMark } from './sleep.js';
 import { oneLine } from './text.js';
-import { NOT_DESCRIBED, APP_VERSION, BARE_FACE_SENTENCE } from './constants.js';
+import { NOT_DESCRIBED, APP_VERSION, BARE_FACE_SENTENCE, WEAR_SLOTS } from './constants.js';
 /** @import { ErrorKind } from './schedule.js' */
 
 /**
@@ -29,7 +29,7 @@ import { NOT_DESCRIBED, APP_VERSION, BARE_FACE_SENTENCE } from './constants.js';
  * The card's sentences of the last reading. Hair and makeup only when the Kin described them. A sentence the last
  * answer said nothing about is the last known one, and `seen` says when it was last said (see carryOver).
  * @typedef {{ location: string, doing: string, outfit: string, hair: string|null, makeup: string|null, at: string|null,
- *   seen: Object<string, string> }} StoredReading
+ *   seen: Object<string, string>, wardrobe?: Object<string, any> }} StoredReading
  * @typedef {{ wakeAt: string, until: string }} Night  when the Kin wakes up, and from when the dream question is due
  * @typedef {{ dream: string|null, remembered: string, at: string }} StoredDream
  *
@@ -114,6 +114,23 @@ const seenOf = (o) => Object.fromEntries(READING_FIELDS.filter((k) => o && iso(o
 /** Whether a sentence says something (not empty, not the "nothing described" sentence). */
 const said = (k, v) => typeof v === 'string' && v.trim() !== '' && v !== NOT_DESCRIBED[k];
 
+function sameLocation(place, excluded) {
+  return typeof place === 'string' && typeof excluded === 'string' && place.toLowerCase() === excluded.toLowerCase();
+}
+
+function retireActivity(r, endedAction, hasFreshDoing) {
+  if (!endedAction || hasFreshDoing || !said('doing', r.doing)) return;
+  // A stop names its activity. Keep the preceding pose and its original observation time.
+  const parts = r.doing.replace(/[.!?]$/, '').split(', ');
+  const last = parts[parts.length - 1].toLowerCase();
+  const ended = endedAction.toLowerCase();
+  if (last === ended || last.startsWith(ended + ' ') || ended.startsWith(last + ' ')) {
+    parts.pop();
+    r.doing = parts.length ? parts.join(', ') + '.' : NOT_DESCRIBED.doing;
+    if (!parts.length) delete r.seen.doing;
+  }
+}
+
 /**
  * The new reading on top of the last one: what the Kin's answer said nothing about (no outfit in the recent chat,
  * say) keeps the last known sentence, with the time it was last seen (`seen`), instead of an empty card. Only the
@@ -121,15 +138,37 @@ const said = (k, v) => typeof v === 'string' && v.trim() !== '' && v !== NOT_DES
  */
 export function carryOver(fresh, prev, now) {
   const at = now.toISOString();
-  const r = { ...fresh, at, seen: {} };
+  const { endedAction, excludedLocation, ...fields } = fresh;
+  const r = { ...fields, at, seen: {} };
+  if (prev?.wardrobe && !fresh.wardrobe) r.wardrobe = prev.wardrobe;
   for (const k of READING_FIELDS) {
     if (said(k, fresh[k])) r.seen[k] = at;
     else if (prev && said(k, prev[k])) { r[k] = prev[k]; r.seen[k] = (prev.seen && prev.seen[k]) || prev.at || at; }
   }
+  if (sameLocation(r.location, excludedLocation)) {
+    r.location = NOT_DESCRIBED.location;
+    delete r.seen.location;
+  }
+  retireActivity(r, endedAction, said('doing', fresh.doing));
   return r;
 }
 
 const objectOr = (v) => (v && typeof v === 'object' ? v : null);
+
+// Read only canonical slots from disk. A missing snapshot identifies a legacy, sentence-only reading.
+function storedWardrobe(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const wardrobe = {};
+  for (const slot of [...WEAR_SLOTS, 'clothing', 'accessories']) {
+    if (!Array.isArray(raw[slot])) continue;
+    const pieces = raw[slot].slice(0, 8).map((v) => sentence(v, 600)).filter(Boolean);
+    if (pieces.length) wardrobe[slot] = pieces;
+  }
+  if (raw._naked === true) wardrobe._naked = true;
+  const states = ['barefoot', 'topless', 'shirtless'].filter((v) => Array.isArray(raw._states) && raw._states.includes(v));
+  if (states.length) wardrobe._states = states;
+  return { wardrobe };
+}
 
 /** The last reading (the card's sentences): kept only with an outfit sentence. */
 /** @returns {StoredReading|null} */
@@ -138,6 +177,7 @@ function normalizeReading(given) {
   const outfit = r && sentence(r.outfit, 600);
   if (!r || !outfit) return null;
   return {
+    ...storedWardrobe(r.wardrobe),
     location: sentence(r.location, 300) || '', doing: sentence(r.doing, 300) || '', outfit,
     hair: sentence(r.hair, 200), makeup: sentence(r.makeup, 200), at: iso(r.at), seen: seenOf(r.seen),
   };

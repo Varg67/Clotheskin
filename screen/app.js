@@ -281,7 +281,7 @@ const MIN_SLEEP_S = 15 * 60; // waking up sooner than this: no hibernation, the 
 const MAX_SLEEP_S = 14 * 3600; // a wake-up time further away than this is not believed (an old chat, a typo)
 const DREAM_TTL_HOURS = 24; // the Kin is told its dream for a day (kin tell --ttl), and the screen shows it as long
 
-const ASLEEP = /\b(sleeping|asleep|napping|dozing|slumbering|snoozing)\b(?!\s+(bag|pill|pills|mask|pad|pod|car|quarters|area|beauty)\b)/i;
+const ASLEEP = /^(?:(?:fast|sound|soundly|deeply|peacefully|still|already)\s+)*(?:sleeping|asleep|napping|dozing|slumbering|snoozing)\b(?!\s+(bag|pill|pills|mask|pad|pod|car|quarters|area|beauty)\b)/i;
 const NOT_ASLEEP = /\b(not|never|no longer|unable to|can['’]?t|cannot|trying to|about to|going to|half)\s+(quite\s+|yet\s+|really\s+)?(be\s+|fall\s+|get\s+)?(sleeping|asleep|napping|dozing)\b|\bawake\b/i;
 function sentenceMark(text) {
   let h = 0x811c9dc5;
@@ -291,7 +291,24 @@ function sentenceMark(text) {
 
 function looksAsleep(doing) {
   const s = String(doing ?? '');
-  return ASLEEP.test(s) && !NOT_ASLEEP.test(s);
+  return !NOT_ASLEEP.test(s) && sleepClauses(s).some((part) => ASLEEP.test(part));
+}
+
+function sleepClauses(s) {
+  const clauses = s.replace(/[.!?]+$/, '').split(/\s*[,;]\s*/);
+  return clauses.flatMap((part) => {
+    const pair = part.match(/^(.+?)\s+(?:and\s+)?((?:(?:sound|fast)\s+)?(?:asleep|sleeping|napping|dozing)\b.*)$/i);
+    return pair && sleepCompatiblePosture(pair[1]) ? [pair[1], pair[2]] : [part.trim()];
+  });
+}
+
+function confirmedAwake(doing) {
+  const parts = sleepClauses(doing).filter((part) => !ASLEEP.test(part));
+  return toSentence([...parts, 'awake'].join(', '));
+}
+
+function sleepCompatiblePosture(doing) {
+  return /^(?:lying|laying|curled up|reclining|resting|stretched out)(?: down)?(?: (?:in|on|under|beneath|against) (?:[\p{L}’'-]+ ){0,4}(?:bed|sofa|couch|mattress|pillow|bedroll|floor|ground|chair|armchair|blankets?|covers|side|back|stomach))?[.!]?$/iu.test(doing);
 }
 
 function parseClockTime(v) {
@@ -374,7 +391,7 @@ function dreamFact({ dream, remembered } = {}) {
   const text = cleanString(dream, 240).replace(/["“”]/g, "'");
   return `While you slept, you dreamt: "${text}". Now that you are awake you remember ${amount} of it.`;
 }
-return { WAKE_LEAD_S, DREAM_TTL_HOURS, sentenceMark, looksAsleep, parseClockTime, planSleep, parseSleepAnswer, REMEMBERED, parseDreamAnswer, describeDream, dreamFact };
+return { WAKE_LEAD_S, DREAM_TTL_HOURS, sentenceMark, looksAsleep, confirmedAwake, sleepCompatiblePosture, parseClockTime, planSleep, parseSleepAnswer, REMEMBERED, parseDreamAnswer, describeDream, dreamFact };
 });
 
 __def("src/core/state.js", function () {
@@ -382,7 +399,7 @@ const { snapInterval, retryDelay, errorKind, DEFAULT_INTERVAL_S, ERRORS_BEFORE_W
 const { safeTimeZone } = __req("src/core/time.js");
 const { REMEMBERED, DREAM_TTL_HOURS, sentenceMark } = __req("src/core/sleep.js");
 const { oneLine } = __req("src/core/text.js");
-const { NOT_DESCRIBED, APP_VERSION, BARE_FACE_SENTENCE } = __req("src/core/constants.js");
+const { NOT_DESCRIBED, APP_VERSION, BARE_FACE_SENTENCE, WEAR_SLOTS } = __req("src/core/constants.js");
 
 
 const SETTINGS_FILE = 'settings.json';
@@ -436,23 +453,61 @@ const READING_FIELDS = ['location', 'doing', 'outfit', 'hair', 'makeup'];
 const seenOf = (o) => Object.fromEntries(READING_FIELDS.filter((k) => o && iso(o[k])).map((k) => [k, String(iso(o[k]))]));
 const said = (k, v) => typeof v === 'string' && v.trim() !== '' && v !== NOT_DESCRIBED[k];
 
+function sameLocation(place, excluded) {
+  return typeof place === 'string' && typeof excluded === 'string' && place.toLowerCase() === excluded.toLowerCase();
+}
+
+function retireActivity(r, endedAction, hasFreshDoing) {
+  if (!endedAction || hasFreshDoing || !said('doing', r.doing)) return;
+  const parts = r.doing.replace(/[.!?]$/, '').split(', ');
+  const last = parts[parts.length - 1].toLowerCase();
+  const ended = endedAction.toLowerCase();
+  if (last === ended || last.startsWith(ended + ' ') || ended.startsWith(last + ' ')) {
+    parts.pop();
+    r.doing = parts.length ? parts.join(', ') + '.' : NOT_DESCRIBED.doing;
+    if (!parts.length) delete r.seen.doing;
+  }
+}
+
 function carryOver(fresh, prev, now) {
   const at = now.toISOString();
-  const r = { ...fresh, at, seen: {} };
+  const { endedAction, excludedLocation, ...fields } = fresh;
+  const r = { ...fields, at, seen: {} };
+  if (prev?.wardrobe && !fresh.wardrobe) r.wardrobe = prev.wardrobe;
   for (const k of READING_FIELDS) {
     if (said(k, fresh[k])) r.seen[k] = at;
     else if (prev && said(k, prev[k])) { r[k] = prev[k]; r.seen[k] = (prev.seen && prev.seen[k]) || prev.at || at; }
   }
+  if (sameLocation(r.location, excludedLocation)) {
+    r.location = NOT_DESCRIBED.location;
+    delete r.seen.location;
+  }
+  retireActivity(r, endedAction, said('doing', fresh.doing));
   return r;
 }
 
 const objectOr = (v) => (v && typeof v === 'object' ? v : null);
+
+function storedWardrobe(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const wardrobe = {};
+  for (const slot of [...WEAR_SLOTS, 'clothing', 'accessories']) {
+    if (!Array.isArray(raw[slot])) continue;
+    const pieces = raw[slot].slice(0, 8).map((v) => sentence(v, 600)).filter(Boolean);
+    if (pieces.length) wardrobe[slot] = pieces;
+  }
+  if (raw._naked === true) wardrobe._naked = true;
+  const states = ['barefoot', 'topless', 'shirtless'].filter((v) => Array.isArray(raw._states) && raw._states.includes(v));
+  if (states.length) wardrobe._states = states;
+  return { wardrobe };
+}
 
 function normalizeReading(given) {
   const r = objectOr(given);
   const outfit = r && sentence(r.outfit, 600);
   if (!r || !outfit) return null;
   return {
+    ...storedWardrobe(r.wardrobe),
     location: sentence(r.location, 300) || '', doing: sentence(r.doing, 300) || '', outfit,
     hair: sentence(r.hair, 200), makeup: sentence(r.makeup, 200), at: iso(r.at), seen: seenOf(r.seen),
   };

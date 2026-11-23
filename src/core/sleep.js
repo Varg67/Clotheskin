@@ -10,7 +10,7 @@ const MIN_SLEEP_S = 15 * 60; // waking up sooner than this: no hibernation, the 
 const MAX_SLEEP_S = 14 * 3600; // a wake-up time further away than this is not believed (an old chat, a typo)
 export const DREAM_TTL_HOURS = 24; // the Kin is told its dream for a day (kin tell --ttl), and the screen shows it as long
 
-const ASLEEP = /\b(sleeping|asleep|napping|dozing|slumbering|snoozing)\b(?!\s+(bag|pill|pills|mask|pad|pod|car|quarters|area|beauty)\b)/i;
+const ASLEEP = /^(?:(?:fast|sound|soundly|deeply|peacefully|still|already)\s+)*(?:sleeping|asleep|napping|dozing|slumbering|snoozing)\b(?!\s+(bag|pill|pills|mask|pad|pod|car|quarters|area|beauty)\b)/i;
 const NOT_ASLEEP = /\b(not|never|no longer|unable to|can['’]?t|cannot|trying to|about to|going to|half)\s+(quite\s+|yet\s+|really\s+)?(be\s+|fall\s+|get\s+)?(sleeping|asleep|napping|dozing)\b|\bawake\b/i;
 /**
  * A short fingerprint of a sentence (FNV-1a, hex). The sleep cycle remembers which "asleep" sentence it already asked
@@ -25,7 +25,27 @@ export function sentenceMark(text) {
 /** Whether the pose and action sentence says the Kin is asleep ("Lying in bed, sleeping."). */
 export function looksAsleep(doing) {
   const s = String(doing ?? '');
-  return ASLEEP.test(s) && !NOT_ASLEEP.test(s);
+  return !NOT_ASLEEP.test(s) && sleepClauses(s).some((part) => ASLEEP.test(part));
+}
+
+// A sleep word inside the object ("watching a sleeping baby") describes someone or something else.
+function sleepClauses(s) {
+  const clauses = s.replace(/[.!?]+$/, '').split(/\s*[,;]\s*/);
+  return clauses.flatMap((part) => {
+    const pair = part.match(/^(.+?)\s+(?:and\s+)?((?:(?:sound|fast)\s+)?(?:asleep|sleeping|napping|dozing)\b.*)$/i);
+    return pair && sleepCompatiblePosture(pair[1]) ? [pair[1], pair[2]] : [part.trim()];
+  });
+}
+
+/** A later answer denying sleep can still confirm a posture, e.g. lying in bed. */
+export function confirmedAwake(doing) {
+  const parts = sleepClauses(doing).filter((part) => !ASLEEP.test(part));
+  return toSentence([...parts, 'awake'].join(', '));
+}
+
+/** An isolated resting posture gives no evidence that a confirmed sleeper woke up. */
+export function sleepCompatiblePosture(doing) {
+  return /^(?:lying|laying|curled up|reclining|resting|stretched out)(?: down)?(?: (?:in|on|under|beneath|against) (?:[\p{L}’'-]+ ){0,4}(?:bed|sofa|couch|mattress|pillow|bedroll|floor|ground|chair|armchair|blankets?|covers|side|back|stomach))?[.!]?$/iu.test(doing);
 }
 
 /** "07:30", "07:30:00", "0730", "7:30", "7.30", "7h30", "7 am", "7:30 PM", "19:00" -> { h, m }; anything else -> null. */

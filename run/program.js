@@ -9,8 +9,8 @@
 // Files (src/core/state.js): settings.json is the screen's, status.json is the run's. The run reads both, changes
 // only its Kin's entry, re-reads status.json just before writing, and never writes over a file it could not read.
 import { buildOutfitPrompt, buildFollowUpPrompt, buildCorrectionPrompt, SLEEP_PROMPT, DREAM_PROMPT, KIN_ASK_LIMIT } from '../src/core/prompt.js';
-import { parseReading, describeReading } from '../src/core/outfit.js';
-import { looksAsleep, sentenceMark, planSleep, parseSleepAnswer, parseDreamAnswer, describeDream, dreamFact, DREAM_TTL_HOURS } from '../src/core/sleep.js';
+import { parseReading, describeReading, updateWardrobe } from '../src/core/outfit.js';
+import { looksAsleep, sleepCompatiblePosture, confirmedAwake, sentenceMark, planSleep, parseSleepAnswer, parseDreamAnswer, describeDream, dreamFact, DREAM_TTL_HOURS } from '../src/core/sleep.js';
 import { errorKind, isDue, ERROR } from '../src/core/schedule.js';
 import {
   normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, readingText, forgetOld, carryOver, lookFacts,
@@ -45,7 +45,8 @@ const TELL_TIMEOUT_MS = 15000; // telling the Kin its look waits no longer than 
  * @typedef {{ ok: true, text: string } | { ok: false, kind: ErrorKind, error: string }} AskResult
  * @typedef {{ kind?: ErrorKind, error: string, length?: number }} Outcome  what went wrong in a step
  * @typedef {{ ok: boolean, message: string }} Result  what the run ends with (kin end [--failed] message)
- * @typedef {{ location: string, doing: string, outfit: string, hair: string|null, makeup: string|null }} Sentences  of one answer
+ * @typedef {{ location: string, doing: string, outfit: string, hair: string|null, makeup: string|null,
+ *   endedAction?: string, excludedLocation?: string }} Sentences  of one answer
  * @typedef {{ clock?: () => Date, log?: (line: string) => void, retryAfterMs?: number, budgetMs?: number }} Options
  */
 /** @import { Settings, Status, Entry } from '../src/core/state.js' */
@@ -216,7 +217,8 @@ async function read(ctx, who, entry) {
   const look = ctx.settings.tellLook ? await tellLook(ctx, { who, entry: withReading, fresh, now }) : { said: [] };
   const told = look.said.length ? ` (Told ${who.name}: ${look.said.join(', ')}.)` : '';
   const line = `${who.name}: ${readingText(withReading.reading)}${told}`;
-  return afterReading(ctx, { who, entry: { ...withReading, ...look.entry }, base: entry, now, line, doing: fresh.doing });
+  return afterReading(ctx, { who, entry: { ...withReading, ...look.entry }, base: entry, now, line,
+    doing: fresh.doing, endedAction: fresh.endedAction });
 }
 
 /**
@@ -225,7 +227,7 @@ async function read(ctx, who, entry) {
  * @returns {Promise<{ ok: true, fresh: Sentences } | { ok: false, result: Result }>}
  */
 async function readAnswer(ctx, { who, entry, base, now }) {
-  const { reply, parsed } = await askAndParse(ctx, who, buildOutfitPrompt({ name: who.name }), parseReading);
+  const { reply, parsed } = await askAndParse(ctx, who, buildOutfitPrompt({ name: who.name }), (text) => parseReading(text, who.name));
   if (!reply.ok && reply.kind === ERROR.TIME) {
     return { ok: false, result: await postpone(ctx, { who, entry, now, base, note: 'The reading waits for the next start of the app.' }) };
   }
@@ -234,8 +236,9 @@ async function readAnswer(ctx, { who, entry, base, now }) {
     const outcome = { kind: ERROR.ANSWER, error: `${parsed ? parsed.error : ''} Nothing was changed.`, length: reply.text.length };
     return { ok: false, result: await fail(ctx, { who, entry, outcome, now, base }) };
   }
-  const fresh = describeReading(parsed);
-  return { ok: true, fresh: { ...fresh, hair: parsed.hair ? fresh.hair : null, makeup: parsed.makeup ? fresh.makeup : null } };
+  const fresh = { ...describeReading(parsed), ...updateWardrobe(parsed.outfit, entry.reading) };
+  return { ok: true, fresh: { ...fresh, endedAction: parsed.endedAction, excludedLocation: parsed.excludedLocation,
+    hair: parsed.hair ? fresh.hair : null, makeup: parsed.makeup ? fresh.makeup : null } };
 }
 
 /**
@@ -243,18 +246,37 @@ async function readAnswer(ctx, { who, entry, base, now }) {
  * the Kin said just now (`doing`), never from a pose kept from an earlier reading; an answer that says nothing about
  * the pose or action is not a sign of being awake: the night, if any, and its mark stay as they are.
  */
-async function afterReading(ctx, { who, entry, base, now, line, doing }) {
+async function afterReading(ctx, { who, entry, base, now, line, doing, endedAction }) {
+  if (looksAsleep(endedAction) && !looksAsleep(doing)) {
+    await save(ctx, who.id, succeeded({ ...entry, sleep: null, sleptOn: null }), base);
+    return ok(line);
+  }
   if (doing === NOT_DESCRIBED.doing) { await save(ctx, who.id, succeeded(entry), base); return ok(line); }
+  if (entry.sleep && sleepCompatiblePosture(doing)) {
+    await save(ctx, who.id, succeeded(entry), base);
+    return ok(line);
+  }
   if (!looksAsleep(doing)) {
     await save(ctx, who.id, succeeded({ ...entry, sleep: null, sleptOn: null }), base); // awake: any night is over
     return ok(line);
   }
   if (entry.sleep) { await save(ctx, who.id, succeeded(entry), base); return ok(`${line} Still asleep.`); } // read by hand during the night
   const mark = sentenceMark(doing); // a fingerprint, never the sentence: nothing about the scene in the night's data
-  if (entry.sleptOn === mark) { await save(ctx, who.id, succeeded(entry), base); return ok(line); } // the chat has not moved since
+  if (entry.sleptOn === mark) {
+    // A repeated claim cannot undo a newer explicit denial. A previously confirmed night keeps its own mark.
+    if (base.reading?.doing === confirmedAwake(doing)) ({ entry, line } = retractSleep(entry, line));
+    await save(ctx, who.id, succeeded(entry), base);
+    return ok(line);
+  }
   // The reading is kept before the sleep question: if the run is cut short, it is not lost.
   await save(ctx, who.id, entry, base);
   return askSleep(ctx, { who, entry, now, mark, line });
+}
+
+/** Rebuild the card and log from the confirmed reading, keeping any independently described posture. */
+function retractSleep(entry, line) {
+  const reading = { ...entry.reading, doing: confirmedAwake(entry.reading.doing) };
+  return { entry: { ...entry, reading }, line: line.replace(readingText(entry.reading), () => readingText(reading)) };
 }
 
 /** Asks whether the Kin is asleep and until when; a believable wake-up time starts the night. */
@@ -276,7 +298,9 @@ async function askSleep(ctx, { who, entry, now, mark, line }) {
   }
   const plan = answer.sleeping ? planSleep(answer.wakeAt, now, ctx.settings.tz) : null;
   const sleep = plan ? { wakeAt: plan.wakeAt.toISOString(), until: plan.until.toISOString() } : null;
-  await save(ctx, who.id, succeeded({ ...entry, sleptOn: mark, sleep }), entry);
+  const beforeConfirmation = entry;
+  if (!answer.sleeping) ({ entry, line } = retractSleep(entry, line));
+  await save(ctx, who.id, succeeded({ ...entry, sleptOn: mark, sleep }), beforeConfirmation);
   if (plan) return ok(`${line} Asleep until ${answer.wakeAt}.`);
   return ok(answer.sleeping ? `${line} Asleep, but the wake-up time ${answer.wakeAt} is too soon or too far away to wait for; readings go on.` : `${line} Not asleep after all.`);
 }

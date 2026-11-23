@@ -45,8 +45,25 @@ const PLACE_COMPOUND = /^(room|rooms|area|hall|lot|garage|pool|mall|centre|cente
 const LABEL = /^(current\s+)?(location|place|where)\s*[:\-–—]\s*/i;
 // "Bia is in the kitchen": a roleplay answer in the third person, with the Kin's own name.
 const NAMED_PLACE_SUBJECT = new RegExp(`^(?:[A-Z][\\w'’-]*\\s+){1,2}(?:is|was)\\s+(?=(${EN_PREP}|${MOTION}|on the way)\\b)`, 'i');
-// Who is there is not the place: "in the kitchen with Ari and Marina" -> "in the kitchen" ("a room with a view" stays).
-const COMPANY = /\s+(together\s+)?with\s+(you|me|him|her|them|us|[A-Z][\w'’-]*|(my|his|her|their|our|your)\s+\w+|the person|friends|family)\b.*$/;
+// In a travel phrase, company may appear before the route ("walking with Isa to work").
+const COMPANY_PERSON = "(?:you|me|him|her|them|us|\\p{Lu}[\\p{L}'’-]*(?:\\s+\\p{Lu}[\\p{L}'’-]*)*|(?:my|his|her|their|our|your)\\s+\\w+|the person|friends|family)";
+const COMPANY = new RegExp(`\\s+(?:together\\s+)?with\\s+${COMPANY_PERSON}(?:(?:,\\s*|\\s+and\\s+)${COMPANY_PERSON})*(?=\\s|[,.;!?]|$)`, 'u');
+const TRAVEL_ROUTE = /^\s+(?:to|towards?|from|via|through|along|into|onto)\s+/i;
+const STARTS_TRAVEL = new RegExp(`^(?:${MOTION}|on the way)\\b`, 'i');
+// A caller's location can follow a phone conversation without identifying the Kin's location.
+const PHONE_CALL = /(?:^|\s+)(?:on the phone|on a (?:video |voice )?call)\s+with\b.*$/i;
+const DEPARTED = /^(?:I\s+)?(?:have\s+)?(?:just\s+)?left\s+(?!(?:wing|bank|field|side)\b)/i;
+const ARRIVAL_AFTER_DEPARTURE = /\band\s+(?:now\s+)?(?:I(?:['’]m| am)|am)\s+(?:now\s+)?(.+)$/i;
+const NONCURRENT_PLACE = /^(?:maybe|perhaps|possibly|not|no longer|if|I\s+(?:will|would|might|may|was|were)|(?:will|would|might|may)\s+(?:be|go|head)|was|were|(?:I['’]m\s+)?(?:planning|hoping) to)\b/i;
+
+function withoutCompany(s) {
+  const company = COMPANY.exec(s);
+  if (!company) return s;
+  const before = s.slice(0, company.index);
+  if (!STARTS_TRAVEL.test(before)) return before;
+  const after = s.slice(company.index + company[0].length);
+  return TRAVEL_ROUTE.test(after) ? before + after : before;
+}
 
 /** The place alone: no label, brackets, subject, time words, clothes, activity or company around it. */
 function placeOnly(text) {
@@ -57,23 +74,25 @@ function placeOnly(text) {
   s = s.replace(/^((currently|right now|still|now)\s+)?((i|she|he|they|we)\s+(am|is|are|['’]?m)|i['’]m|she['’]s|he['’]s|they['’]re|we['’]re)\s+((currently|still|now|just)\s+)?/i, '')
     .replace(/^(currently|right now|still|now)\s+(?=(in|at|on|inside|outside|near)\b)/i, '')
     .replace(/[\s,]+(right now|at the moment|currently|now|still)$/i, '');
-  return s.replace(CLOTHES_CLAUSE, '')                                       // clothes do not belong here
+  return withoutCompany(s.replace(PHONE_CALL, '')).replace(CLOTHES_CLAUSE, '') // clothes do not belong here
     .replace(/\s*[,;]\s*[a-z]+ing\b.*$/, '')                               // ", cooking dinner" (not ", Spring Street")
     .replace(/\s+(while|as|and)\s+[a-z]+ing\b.*$/i, '')                    // "while reading"
-    .replace(COMPANY, '')                                                     // "with Ari and Marina"
     .replace(/[.;,!?\s]+$/, '');                                             // the clauses above may leave a comma behind
 }
 
 /**
- * A lowercase posture or activity first ("sitting on the sofa", "cooking in the kitchen") is dropped when a place
+ * A posture or activity first ("sitting on the sofa", "cooking in the kitchen") is dropped when a place
  * follows; with no place after it, there is no place (null). "living room", "waiting room", "parking lot" and "a
  * building" are places, not a posture with a place after it.
  */
 function withoutLeadingPosture(s) {
-  const lead = s.match(/^([a-z]+ing|seated|perched|sat|stood|lay)(?:\s+(.*))?$/);
-  if (!lead || ING_PLACE.has(lead[1]) || PLACE_COMPOUND.test(lead[2] || '') || IS_MOTION.test(lead[1])) return s;
+  const lead = s.match(/^([a-z]+ing|seated|perched|sat|stood|lay)(?:\s+(.*))?$/i);
+  if (!lead || ING_PLACE.has(lead[1].toLowerCase()) || PLACE_COMPOUND.test(lead[2] || '') || IS_MOTION.test(lead[1])) return s;
   const rest = (lead[2] || '').trim();
-  return STARTS_PLACE.test(rest) || STARTS_PORTUGUESE.test(rest) ? rest : null;
+  if (STARTS_PLACE.test(rest) || STARTS_PORTUGUESE.test(rest)) return rest;
+  // A capitalized proper name such as "Reading" or "Spring Hill" can also end in -ing.
+  if (/^[A-Z]/.test(s) && !POSTURE_WORD.test(lead[1])) return s;
+  return null;
 }
 
 /**
@@ -85,7 +104,18 @@ function withoutLeadingPosture(s) {
 export function cleanLocation(v) {
   const raw = rawText(v, 400);
   if (raw === null || raw === undefined) return raw;
-  const s = withoutLeadingPosture(placeOnly(raw));
+  let place = placeOnly(raw);
+  if (DEPARTED.test(place)) {
+    const arrival = ARRIVAL_AFTER_DEPARTURE.exec(place);
+    if (!arrival) {
+      const from = place.replace(DEPARTED, '').trim();
+      return clipWords('left ' + from, MAX_LOCATION);
+    }
+    if (!STARTS_PLACE.test(arrival[1])) return null;
+    place = arrival[1];
+  }
+  if (NONCURRENT_PLACE.test(place) || (STARTS_TRAVEL.test(place) && scheduledAction(place))) return null;
+  const s = withoutLeadingPosture(place);
   if (!s || NO_PLACE.test(s) || NO_PLACE_START.test(s)) return null;
   return clipWords(s, MAX_LOCATION);
 }
@@ -137,7 +167,6 @@ const PLANNED_VERBS = [
   'go', 'do', 'see', 'meet', 'visit', 'clean', 'wash', 'work', 'start', 'check', 'lie', 'sit', 'relax', 'rest', 'shower', 'bathe',
   'leave', 'head', 'text', 'ask', 'tell', 'order',
 ];
-const GOING_TO_VERB = new RegExp(`^going to (${PLANNED_VERBS.join('|')})\\b`, 'i');
 const FUTURE_WORD = /\b(later|tomorrow|soon|tonight|afterwards|next (week|time)|in a (bit|moment|while)|in \d+ (minutes?|hours?))\b/i;
 const FEELING = /^(feeling|being|seeming)\b/i; // a state of mind is not an action
 // A feeling is not an action: "happy", "a bit tired".
@@ -174,6 +203,14 @@ const VERBS = new Set([
   'relax', 'scroll', 'browse', 'shop', 'pick', 'carry', 'fix', 'adjust', 'check', 'open', 'close', 'think', 'wave', 'nod', 'sigh',
   'pace', 'tie', 'stroke', 'pet', 'feed',
 ]);
+const GOING_TO_VERB = new RegExp(`^going to (?:${[...new Set([...PLANNED_VERBS, ...VERBS])].join('|')})\\b`, 'i');
+
+// In "packing for tomorrow's trip", the time describes the trip. In "packing tomorrow" it dates the action.
+function scheduledAction(s) {
+  const actionTime = s.replace(/\b(?:for|about|until|before)\s+(?:tomorrow|tonight|later|next (?:week|time))\b|\b(?:tomorrow|tonight)['’]s\b/gi, '');
+  return FUTURE_WORD.test(actionTime);
+}
+
 // Past forms only for postures ("sat on the sofa" is how many people say "sitting"); a past action may be over.
 const PAST_POSTURE = { sat: 'sit', stood: 'stand', lay: 'lie', knelt: 'kneel', crouched: 'crouch', leaned: 'lean', leant: 'lean' };
 
@@ -205,8 +242,15 @@ function toIng(s, { posture = false } = {}) {
 /** "*smiles* cooking" -> "cooking": a *roleplay* aside goes, before anything trims the stars at the edges. */
 function withoutAsides(v) {
   if (typeof v !== 'string') return v;
-  const unstarred = v.replace(/\*[^*]+\*/g, ' ').trim();
-  return unstarred || v;
+  const marked = [];
+  const outside = v.replace(/(\*{1,2})([^*]+?)\1/g, (_, stars, words) => {
+    marked.push(words.trim());
+    return ' ';
+  }).trim();
+  if (!marked.length) return v;
+  // A quoted reply is dialogue. Keep the narrated action beside it, but ignore a short aside before plain narration.
+  const narration = outside.replace(/"[^"]*"|“[^”]*”|‘[^’]*’/g, '').trim();
+  return /[\p{L}\p{N}]/u.test(narration) ? narration : marked.join(', ');
 }
 
 /** No label, brackets, subject ("I am", "Bia is"), clothes, or clause about someone else ("who is watching TV"). */
@@ -260,14 +304,14 @@ function withoutSpeech(s) {
 }
 
 // Placeholders, idleness, plans, things already done and feelings: none of these is what the Kin is doing now.
-const NOT_AN_ACTION = [NO_VALUE, NO_ACTION, PLAN_OR_PAST, GOING_TO_VERB, FUTURE_WORD, FEELING, FEELING_WORD];
+const NOT_AN_ACTION = [NO_VALUE, NO_ACTION, PLAN_OR_PAST, GOING_TO_VERB, FEELING, FEELING_WORD];
 
 /** What the Kin is doing now ("drinking coffee"). Plans, speech, feelings and things already finished are not an action. */
 export function cleanAction(v) {
   const doing = cleanDoing(v, { posture: false });
   if (doing === null || doing === undefined) return doing;
   const s = trimEndPunctuation(withoutSpeech(doing).replace(/\s+(while|as)\s+[a-z]+ing\b.*$/i, '')); // "… while humming a song"
-  if (!s || NOT_AN_ACTION.some((re) => re.test(s))) return null;
+  if (!s || scheduledAction(s) || NOT_AN_ACTION.some((re) => re.test(s))) return null;
   return clipWords(s, MAX_DOING);
 }
 
@@ -302,7 +346,8 @@ const NAME_HAS = /^(?:[A-Z][\w'’-]*\s+){1,2}(?:has|has got|is wearing|wears|is
 /** A text, a list of texts or an object as one text ("*runs fingers through her hair* long" -> "long"). */
 function lookText(v, kind) {
   if (isPlainObject(v) || Array.isArray(v)) return lookFromParts(v, kind);
-  if (typeof v === 'string') return v.replace(/\*[^*]+\*/g, ' ').trim() || v;
+  if (typeof v === 'string') return v.replace(/\*([^*]+)\*/g, (_, content) =>
+    /^(?:(?:I|she|he|they)\s+)?(?:runs?|running|brush(?:es|ing)?|touch(?:es|ing)?|adjust(?:s|ing)?|smil(?:es|ing)|laugh(?:s|ing)?|wink(?:s|ing)?|sigh(?:s|ing)?)\b/i.test(content.trim()) ? ' ' : content).trim();
   return undefined;
 }
 
@@ -324,6 +369,7 @@ function lookFromParts(v, kind) {
 function lookOnly(text) {
   return trimEndPunctuation(stripWrapping(cleanString(text, 400)).replace(/\*/g, ''))
     .replace(LOOK_LABEL, '')
+    .replace(/^(?:hair|make-?up) (?:is|are)\s+/i, '')
     .replace(/\s*\(([^()]*)\)?/g, (m, inner) => (inner.trim() ? ` ${inner.trim()}` : ''))   // "(tied back)"
     .replace(NAME_HAS, '')
     .replace(/^(my|her|his|their) (hair|make-?up) (is|are)\s+/i, '')
@@ -354,7 +400,16 @@ export const cleanHair = (v) => lookPhrase(v, 'hair');
 export function cleanMakeup(v) {
   if (typeof v === 'string' && BARE_FACE.test(cleanString(v, 200).replace(/[.!\s]+$/, ''))) return 'no makeup';
   const s = lookPhrase(v, 'makeup');
-  return typeof s === 'string' && BARE_FACE.test(s) ? 'no makeup' : s;
+  if (typeof s !== 'string') return s;
+  // A completed removal describes the current result only when all makeup is gone or the remainder is explicit.
+  const removal = /^(?:(?:I|she|he|they)\s+)?(?:just\s+)?(?:washed off|wiped off|removed|took off)\s+/i;
+  if (removal.test(s)) {
+    const rest = s.replace(removal, '');
+    const remaining = rest.match(/[.;,]\s*(?:only\s+)?([^.;,]+?)\s+(?:remains?|is left)$/i);
+    if (remaining) return remaining[1];
+    if (/^(?:all (?:of )?)?(?:(?:my|her|his|their|the) )?make-?up$/i.test(rest)) return 'no makeup';
+  }
+  return BARE_FACE.test(s) ? 'no makeup' : s;
 }
 
 /** "Long black hair in a ponytail." */

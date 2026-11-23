@@ -7,7 +7,7 @@ function __def(p, f) { __defs[p] = f; }
 function __req(p) { if (!(p in __mods)) { if (!__defs[p]) throw new Error('missing module ' + p); __mods[p] = null; __mods[p] = __defs[p](); } return __mods[p]; }
 
 __def("src/core/constants.js", function () {
-const APP_VERSION = '0.6.0';
+const APP_VERSION = '0.6.1';
 
 
 const CLOTHING_SLOTS = [
@@ -255,6 +255,16 @@ function errorKind(message, kind = ERROR.SERVER) {
   return MAINTENANCE.test(String(message ?? '')) ? ERROR.MAINTENANCE : kind;
 }
 
+function serviceProblem(error) {
+  const text = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  if (MAINTENANCE.test(text)) return 'Kindroid is under maintenance';
+  if (/\b(?:timed? ?out|timeout|ETIMEDOUT)\b/i.test(text)) return 'request timed out';
+  if (/\b(?:unauthorized|forbidden|access denied|401|403)\b/i.test(text)) return 'access denied';
+  if (/\b(?:429|rate limit(?:ed)?|busy)\b/i.test(text)) return 'service busy';
+  if (text === 'the kin command was not found') return text;
+  return 'service request failed';
+}
+
 const plannedMs = (at) => { const t = at ? Date.parse(at) : NaN; return Number.isFinite(t) ? t : null; };
 
 function isDue(at, now) {
@@ -268,7 +278,7 @@ function startDueFor(at, now) {
   const q = TICK_S * 1000;
   return new Date(Math.ceil(from / q) * q);
 }
-return { TICK_S, INTERVAL_STEPS, DEFAULT_INTERVAL_S, MAX_RETRY_S, ERRORS_BEFORE_WARNING, MAINTENANCE_RETRY_S, formatInterval, snapInterval, retryDelay, ERROR, errorKind, isDue, startDueFor };
+return { TICK_S, INTERVAL_STEPS, DEFAULT_INTERVAL_S, MAX_RETRY_S, ERRORS_BEFORE_WARNING, MAINTENANCE_RETRY_S, formatInterval, snapInterval, retryDelay, ERROR, errorKind, serviceProblem, isDue, startDueFor };
 });
 
 __def("src/core/sleep.js", function () {
@@ -570,10 +580,21 @@ function lookFacts({ fresh, told, now, when }) {
 function normalizeStatus(raw) {
   const o = parse(raw);
   const kins = {};
+  let diagnosticsVersion = 1;
   if (o.kins && typeof o.kins === 'object') {
-    for (const [id, e] of Object.entries(o.kins)) if (str(id, 120)) kins[id] = normalizeEntry(e && typeof e === 'object' ? e : {});
+    for (const [id, rawEntry] of Object.entries(o.kins)) {
+      if (!str(id, 120)) continue;
+      const e = normalizeEntry(objectOr(rawEntry) || {});
+      if (o.diagnosticsVersion !== 1 && (e.error || e.note || e.lookError)) {
+        e.error = e.error ? 'A previous update failed.' : null;
+        e.note = null;
+        e.lookError = e.lookError ? 'A previous look update failed.' : null;
+        diagnosticsVersion = 0;
+      }
+      kins[id] = e;
+    }
   }
-  return { v: 1, runVersion: str(o.runVersion, 20), kins };
+  return { v: 1, diagnosticsVersion, runVersion: str(o.runVersion, 20), kins };
 }
 
 function afterStop(entry, settings) {
@@ -583,14 +604,14 @@ function afterStop(entry, settings) {
 
 function forgetOld(status, settings, now) {
   const kins = {};
-  let changed = false;
+  let changed = status.diagnosticsVersion === 0;
   for (const [id, entry] of Object.entries(status.kins)) {
     let e = afterStop(entry, settings);
     if (e.dream && (!e.dream.at || now.getTime() - Date.parse(e.dream.at) >= DREAM_TTL_HOURS * 3600e3)) e = { ...e, dream: null };
     if (JSON.stringify(e) !== JSON.stringify(entry)) changed = true;
     kins[id] = e;
   }
-  return { status: { ...status, kins }, changed };
+  return { status: { ...status, diagnosticsVersion: 1, kins }, changed };
 }
 
 function plannedAt(entry, settings) {
@@ -694,7 +715,6 @@ function joinNatural(list) {
   return `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
 }
 
-const errorMessage = (e) => (e instanceof Error ? e.message : String(e));
 
 const NOTHING = ['unknown', 'unspecified', 'undefined', 'null', 'none', 'nothing', 'n\\/?a', '-+', '\\?+'];
 const NOT_STATED = ['mentioned', 'specified', 'stated', 'known', 'visible', 'described'];
@@ -704,7 +724,7 @@ function nothingSaid({ extra = [], notWords = NOT_STATED } = {}) {
 }
 
 const NOT_STATED_OR_UNSURE = [...NOT_STATED, 'sure', 'clear'];
-return { capitalizeFirst, cleanString, oneLine, toSentence, clipWords, trimEndPunctuation, stripWrapping, joinNatural, errorMessage, nothingSaid, NOT_STATED_OR_UNSURE };
+return { capitalizeFirst, cleanString, oneLine, toSentence, clipWords, trimEndPunctuation, stripWrapping, joinNatural, nothingSaid, NOT_STATED_OR_UNSURE };
 });
 
 __def("src/core/time.js", function () {
@@ -1232,7 +1252,7 @@ function createStore(deps) {
     onChange();
     try {
       const reply = await channel.action(ACTION, { kin: kin.id, op });
-      if (!reply.ok && reply.summary) S.error = { kinId: kin.id, text: reply.summary };
+      if (!reply.ok) S.error = { kinId: kin.id, text: 'The update failed. Try again in a moment.' };
     } catch {
       S.error = { kinId: kin.id, text: 'Kindroid did not answer. Try again in a moment.' };
     }
@@ -1599,4 +1619,4 @@ return { dreamOptions, renderSettings };
 
 __req("src/screen/main.js").boot();
 })();
-// end of Clotheskin screen 0.6.0
+// end of Clotheskin screen 0.6.1

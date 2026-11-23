@@ -243,8 +243,8 @@ test('another run writing meanwhile: only this Kin\'s entry changes', async () =
 
 test('unknown triggers and actions end clearly, without asking', async () => {
   const k = fakeKindroid({ settings: { autoState: 'running', kinId: 'k1' } });
-  assert.match((await runProgram({ event: { trigger: 'inbound' }, kin: k.kin })).message, /Nothing to do for the trigger "inbound"/);
-  assert.match((await runProgram({ event: { trigger: 'action', action: 'toString' }, kin: k.kin })).message, /Nothing to do for the action "toString"/);
+  assert.match((await runProgram({ event: { trigger: 'inbound' }, kin: k.kin })).message, /Unsupported Clotheskin trigger/);
+  assert.match((await runProgram({ event: { trigger: 'action', action: 'toString' }, kin: k.kin })).message, /Unsupported Clotheskin action/);
   assert.match((await runProgram({ event: { trigger: 'action', action: ACTION, input: {} }, kin: k.kin })).message, /No Kin was given/);
   assert.deepEqual(k.asks(), []);
 });

@@ -3,7 +3,7 @@
 // with `kin end "..."` or `kin end --failed "..."`. So every path below, crashes included, reaches kin end once.
 import { createKin } from './run/kin.js';
 import { runProgram } from './run/program.js';
-import { errorMessage } from './src/core/text.js';
+import { serviceProblem } from './src/core/schedule.js';
 
 const log = (m) => console.error(`[clotheskin] ${m}`); // stderr: diagnostics only, never the scene
 
@@ -42,8 +42,7 @@ async function end(result) {
   try {
     await kin.end(result.message, { failed: !result.ok });
   } catch (e) {
-    log(`kin end failed: ${errorMessage(e)}`);
-    log(`the run meant to say: ${result.message}`);
+    log(`kin end failed: ${serviceProblem(e)}`);
     process.exitCode = 1;
   }
 }
@@ -58,6 +57,6 @@ try {
   const { event, problem } = parseEvent(await readStdin());
   result = problem ? { ok: false, message: problem } : await runProgram({ event, kin, log });
 } catch (e) {
-  result = { ok: false, message: `Clotheskin could not finish: ${errorMessage(e)}` };
+  result = { ok: false, message: `Clotheskin could not finish: ${serviceProblem(e)}.` };
 }
 await end(result);

@@ -141,7 +141,7 @@ export function createStore(deps) {
     onChange();
     try {
       const reply = await channel.action(ACTION, { kin: kin.id, op });
-      if (!reply.ok && reply.summary) S.error = { kinId: kin.id, text: reply.summary };
+      if (!reply.ok) S.error = { kinId: kin.id, text: 'The update failed. Try again in a moment.' };
     } catch {
       S.error = { kinId: kin.id, text: 'Kindroid did not answer. Try again in a moment.' };
     }

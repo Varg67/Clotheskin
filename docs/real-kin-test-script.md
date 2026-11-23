@@ -13,7 +13,7 @@ Este arquivo é gerado por `node scripts/build-test-script.mjs`. As frases "O ca
 ## Três coisas que valem para todos os passos
 
 - **O Kin vê o chat dos últimos 2 dias** (`chat:read:2`). O cartão descreve o estado *no fim do chat recente*, então **não zera** entre um passo e outro: cada passo parte do que os anteriores deixaram. Só um chat novo começa em branco (passo S13).
-- **Erro em vermelho** no cartão: aperte **Try again** uma vez e anote o texto. Se houver algo entre parênteses, é o texto do próprio Kindroid: **copie exatamente**.
+- **Erro em vermelho** no cartão: aperte **Try again** uma vez e anote o texto. Anote a categoria exibida pelo Clotheskin.
 - **A automação roda na nuvem do Kindroid**, não no seu PC: o Kindroid inicia o app a cada 15 minutos. Fechar o painel ou desligar o PC não para as leituras; só impede você de vê-las até reabrir.
 
 ## Passos de leitura
@@ -320,7 +320,7 @@ Este arquivo é gerado por `node scripts/build-test-script.mjs`. As frases "O ca
 
 ## A noite, a automação e as falhas
 
-Estes passos verificam o que roda sozinho e o que acontece **quando algo dá errado**. Também servem para **coletar o texto real dos erros** do `kin`: o app só reconhece "arquivo ainda não existe" por um "404" e "manutenção" pelas palavras maintenance/downtime/outage, e esses textos foram supostos. Vale em todas as falhas: **as últimas frases boas continuam no cartão** e nenhum botão fica travado.
+Estes passos verificam o que roda sozinho e o que acontece **quando algo dá errado**. Vale em todas as falhas: **as últimas frases boas continuam no cartão** e nenhum botão fica travado.
 
 Para a automação, use a régua em **15 min** durante o teste e volte para um intervalo maior depois: cada leitura é uma pergunta ao Kin.
 
@@ -366,13 +366,13 @@ Para a automação, use a régua em **15 min** durante o teste e volte para um i
 
 **Como provocar:** Envie o app e **não** clique em **Allow** em Apps → Waiting for you. Abra o app e aperte **Update status**.
 
-**O que esperar:** Não se sabe se o Kindroid chega a executar um app sem o Allow. Se executar, o cartão mostra um erro com o texto do Kindroid entre parênteses.
+**O que esperar:** Não se sabe se o Kindroid chega a executar um app sem o Allow. Se executar, o cartão mostra um erro com uma categoria de diagnóstico.
 
 **Confira:**
 - Não fica em "Reading…" para sempre (no máximo uns 2,5 minutos).
 - Depois do **Allow**, funciona sem reenviar.
 
-**Anote:** O texto exato entre parênteses, ou o aviso que o Kindroid mostrar.
+**Anote:** A categoria exibida no cartão.
 
 ### F2. Fechar o painel no meio de uma leitura
 
@@ -426,13 +426,13 @@ Para a automação, use a régua em **15 min** durante o teste e volte para um i
 
 **Como provocar:** Nada a provocar: observe durante o teste.
 
-**O que esperar:** Um erro passageiro aparece como "Kindroid did not answer this time (texto do Kindroid). It tries again around …". Depois de 3 seguidos, um aviso: "Kindroid has not answered 3 times in a row. It may be down."; com "maintenance", "Kindroid seems to be under maintenance." e espera de 30 minutos.
+**O que esperar:** Um erro passageiro aparece como "Kindroid did not answer this time (categoria do erro). It tries again around …". Depois de 3 seguidos, um aviso: "Kindroid has not answered 3 times in a row. It may be down."; com "maintenance", "Kindroid seems to be under maintenance." e espera de 30 minutos.
 
 **Confira:**
 - O app espera mais entre as tentativas quando o erro se repete.
 - **Try now** tenta na hora.
 
-**Anote:** **O texto exato entre parênteses.** É o que mostra como o kin real descreve os erros.
+**Anote:** A categoria exibida e o horário da próxima tentativa.
 
 ### F7. Duas janelas apertando ao mesmo tempo
 
@@ -464,7 +464,7 @@ Para a automação, use a régua em **15 min** durante o teste e volte para um i
 
 ## Tabela de resultados
 
-| Passo | Resultado (OK / parcial / falhou) | Tipo | Resposta do Kin ou **texto real do erro** (cole) | Cartão (cole as frases ou o aviso) |
+| Passo | Resultado (OK / parcial / falhou) | Tipo | Resposta de teste ou categoria do erro | Cartão (cole as frases ou o aviso) |
 |---|---|---|---|---|
 | S1 |  |  |  |  |
 | S2 |  |  |  |  |

@@ -52,7 +52,8 @@ import { NOT_DESCRIBED, APP_VERSION, BARE_FACE_SENTENCE, WEAR_SLOTS } from './co
  * @property {string|null} lookFailedAt telling the look failed: not tried again for LOOK_RETRY_HOURS
  * @property {string|null} lookError why, shown on the Current look card
  *
- * @typedef {{ v: 1, runVersion: string|null, kins: Object<string, Entry> }} Status  runVersion: the version of the run
+ * @typedef {{ v: 1, diagnosticsVersion: number, runVersion: string|null, kins: Object<string, Entry> }} Status
+ *   runVersion: the version of the run
  *   that last saved the file (APP_VERSION), or null before 0.4.0
  */
 
@@ -263,11 +264,23 @@ export function normalizeStatus(raw) {
   const o = parse(raw);
   /** @type {Object<string, Entry>} */
   const kins = {};
+  let diagnosticsVersion = 1;
   if (o.kins && typeof o.kins === 'object') {
-    for (const [id, e] of Object.entries(o.kins)) if (str(id, 120)) kins[id] = normalizeEntry(e && typeof e === 'object' ? e : {});
+    for (const [id, rawEntry] of Object.entries(o.kins)) {
+      if (!str(id, 120)) continue;
+      const e = normalizeEntry(objectOr(rawEntry) || {});
+      if (o.diagnosticsVersion !== 1 && (e.error || e.note || e.lookError)) {
+        // Legacy files can contain raw service errors. Version 0 requests a cleanup write on the next start.
+        e.error = e.error ? 'A previous update failed.' : null;
+        e.note = null;
+        e.lookError = e.lookError ? 'A previous look update failed.' : null;
+        diagnosticsVersion = 0;
+      }
+      kins[id] = e;
+    }
   }
   // runVersion: the version of the run that last saved the file (APP_VERSION), or null before 0.4.0.
-  return { v: 1, runVersion: str(o.runVersion, 20), kins };
+  return { v: 1, diagnosticsVersion, runVersion: str(o.runVersion, 20), kins };
 }
 
 /**
@@ -292,14 +305,14 @@ export function afterStop(entry, settings) {
 export function forgetOld(status, settings, now) {
   /** @type {Object<string, Entry>} */
   const kins = {};
-  let changed = false;
+  let changed = status.diagnosticsVersion === 0;
   for (const [id, entry] of Object.entries(status.kins)) {
     let e = afterStop(entry, settings);
     if (e.dream && (!e.dream.at || now.getTime() - Date.parse(e.dream.at) >= DREAM_TTL_HOURS * 3600e3)) e = { ...e, dream: null };
     if (JSON.stringify(e) !== JSON.stringify(entry)) changed = true;
     kins[id] = e;
   }
-  return { status: { ...status, kins }, changed };
+  return { status: { ...status, diagnosticsVersion: 1, kins }, changed };
 }
 
 /**

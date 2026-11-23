@@ -6,10 +6,11 @@
 //  - output is read as UTF-8 text in one piece (execFile with encoding), so a character is never split between chunks;
 //  - stdin is closed at once, so a subcommand never waits for input; `files put` gets the body there (Kin Bank, Planner);
 //  - a missing file is "kin: 404 ..." on stderr (Kin Bank and Planner check /^kin: 404\b/);
-//  - a failure says which subcommand failed and the last line kin printed, not the whole command line;
+//  - failures expose a fixed category only; stderr and command arguments can contain private data;
 //  - `kin files get` of a missing file is "not found" (null), any other failure is an error: the caller must then
 //    not write over the file it could not read.
 import { execFile } from 'node:child_process';
+import { serviceProblem } from '../src/core/schedule.js';
 import { oneLine } from '../src/core/text.js';
 
 // kin end takes up to 4,000 characters, shown in the chat and given back to the Kin when an action started the run.
@@ -17,22 +18,15 @@ import { oneLine } from '../src/core/text.js';
 const END_LIMIT = 500;
 
 class KinError extends Error {
-  /**
-   * @param {string} message
-   * @param {{ code?: string|number|null, stderr?: string, timedOut?: boolean }} [details] code: kin's exit code (a number:
-   *   it ran) or Node's error code ('ENOENT': it did not)
-   */
-  constructor(message, { code = null, stderr = '', timedOut = false } = {}) {
+  constructor(message, missingFile) {
     super(message);
-    this.code = code;
-    this.stderr = stderr;
-    this.timedOut = timedOut;
+    this.missingFile = missingFile;
   }
 }
 
 // Only kin's own "404" means "no such file" (as Bunny & Fox BBS checks): "storage node not found" is a failure,
 // and reading it as "empty" would write over the real file.
-const NOT_FOUND = /\b404\b/;
+const NOT_FOUND = /^kin:\s*404\b/im;
 
 /**
  * The kin command as functions. `bin` is `kin` inside a run; KIN_BIN=/path/kin.mjs runs the downloadable kin.mjs
@@ -52,10 +46,9 @@ export function createKin({ bin = process.env.KIN_BIN || 'kin', defaultTimeoutMs
     return new Promise((resolve, reject) => {
       const child = execFile(cmd, argv, { encoding: 'utf8', timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
         if (!err) { resolve(stdout); return; }
-        const last = String(stderr || '').trim().split('\n').pop() || (err.code === 'ENOENT' ? `the kin command was not found (${bin})` : `exit ${err.code ?? err.signal}`);
-        const what = args[0] === 'files' ? `files ${args[1]} ${args[2] ?? ''}`.trim() : args[0];
-        const timedOut = Boolean(err.killed && err.signal);
-        reject(new KinError(timedOut ? `kin ${what} timed out after ${Math.round(timeoutMs / 1000)} s` : `kin ${what} failed: ${last}`, { code: err.code, stderr: String(stderr || ''), timedOut }));
+        const missingFile = typeof err.code === 'number' && args[0] === 'files' && args[1] === 'get' && NOT_FOUND.test(stderr);
+        const reason = err.code === 'ENOENT' ? 'the kin command was not found' : serviceProblem(err.killed ? 'timeout' : stderr);
+        reject(new KinError(reason, missingFile));
       });
       child.stdin?.on('error', () => {}); // kin may exit before reading stdin
       child.stdin?.end(input == null ? undefined : input); // `kin files put <path>` reads the body here
@@ -86,7 +79,7 @@ export function createKin({ bin = process.env.KIN_BIN || 'kin', defaultTimeoutMs
         const body = await call(['files', 'get', path]);
         return body === '' ? null : body;
       } catch (e) {
-        if (e instanceof KinError && typeof e.code === 'number' && NOT_FOUND.test(e.stderr)) return null; // kin ran and said 404
+        if (e instanceof KinError && e.missingFile) return null; // kin ran and said 404
         throw e;
       }
     },

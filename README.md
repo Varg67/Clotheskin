@@ -31,6 +31,7 @@ Built from Kindroid's guide for coding tools ("Making things for a Kin with your
   - **The next morning.** The chat usually stays still overnight, so the same "asleep" sentence does not start a new night. A wake-up time less than 15 minutes or more than 14 hours away is not believed, and the readings go on.
   - **Waking up early.** Reading the Kin by hand during its night and finding it awake ends the night.
 - **Errors.**
+  - Service failures show a fixed diagnostic category. If the final status cannot be delivered, the log records only the failure category. Version 0.6.1 clears legacy diagnostic text on the next run that can save the app’s state.
   - **Retries:** a fast Kindroid failure (a 502, a 503, a dropped connection) is tried once more within the run. Errors in a row slow the next try down: 2× from the second, up to 1 hour.
   - **Server warning:** three Kindroid errors in a row show a warning with the time of the next try. A failure that says "maintenance", "scheduled downtime" or "outage" shows a maintenance warning and waits at least 30 minutes. A failing `kin kins` counts like any Kindroid error.
   - **Kin answers:** a wrong answer from the Kin (in character, not JSON) is the Kin's error, not Kindroid's: it slows the readings down without the server warning. The error never quotes the answer.

@@ -45,11 +45,12 @@ test('the action from the screen reads the Kin it names', () => {
 });
 
 test('Kindroid down: the run fails cleanly with kin end --failed, and the slowing down is saved', () => {
-  const r = run({ trigger: 'schedule' }, { options: { askFails: 'Kindroid is under scheduled maintenance' } });
+  const r = run({ trigger: 'schedule' }, { options: { askFails: 'Kindroid is under scheduled maintenance Authorization: Bearer CANARY_TEST_ONLY' } });
   assert.equal(r.code, 0, r.stderr);
   assert.equal(r.ends.length, 1);
   assert.equal(r.ends[0][1], '--failed');
-  assert.match(r.ends[0][2], /kin ask failed: kin: Kindroid is under scheduled maintenance/);
+  assert.match(r.ends[0][2], /Kindroid is under maintenance/);
+  assert.doesNotMatch(JSON.stringify([r.status, r.ends, r.stderr]), /CANARY_TEST_ONLY/);
   assert.equal(r.status.kins.k1.errorKind, 'maintenance');
   assert.equal(r.calls.filter((c) => c[0] === 'ask').length, 1, 'maintenance is not tried again at once');
 });
@@ -70,11 +71,11 @@ test('stdin that is JSON but not an object, or far too large, still ends with ki
   }
 });
 
-test('kin end itself failing: exit code 1 and the message on stderr, no crash', () => {
-  const r = run({ trigger: 'schedule' }, { options: { answer: ANSWER, endFails: true } });
+test('kin end failing: only a safe diagnostic reaches stderr', () => {
+  const r = run({ trigger: 'schedule' }, { options: { answer: ANSWER, endFails: 'Authorization: Bearer CANARY_TEST_ONLY' } });
   assert.equal(r.code, 1);
-  assert.match(r.stderr, /kin end failed: kin end failed: kin end: rejected/);
-  assert.match(r.stderr, /the run meant to say: Isa: In the café/);
+  assert.match(r.stderr, /kin end failed: service request failed/);
+  assert.doesNotMatch(r.stderr, /the run meant to say|Isa|café|CANARY_TEST_ONLY|Authorization/i);
   assert.ok(!/node:internal|at .*\.js:\d+/.test(r.stderr), 'no stack trace');
 });
 

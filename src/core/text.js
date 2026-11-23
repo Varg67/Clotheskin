@@ -44,8 +44,6 @@ export function joinNatural(list) {
   return `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
 }
 
-/** What went wrong, as text, whatever was thrown (an Error, a string, anything): never "undefined". */
-export const errorMessage = (e) => (e instanceof Error ? e.message : String(e));
 
 // What a model writes when it has nothing to say: "unknown", "none", "n/a", "---", "???", "not mentioned".
 const NOTHING = ['unknown', 'unspecified', 'undefined', 'null', 'none', 'nothing', 'n\\/?a', '-+', '\\?+'];

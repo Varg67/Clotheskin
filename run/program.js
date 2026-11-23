@@ -11,7 +11,7 @@
 import { buildOutfitPrompt, buildFollowUpPrompt, buildCorrectionPrompt, SLEEP_PROMPT, DREAM_PROMPT, KIN_ASK_LIMIT } from '../src/core/prompt.js';
 import { parseReading, describeReading, updateWardrobe } from '../src/core/outfit.js';
 import { looksAsleep, sleepCompatiblePosture, confirmedAwake, sentenceMark, planSleep, parseSleepAnswer, parseDreamAnswer, describeDream, dreamFact, DREAM_TTL_HOURS } from '../src/core/sleep.js';
-import { errorKind, isDue, ERROR } from '../src/core/schedule.js';
+import { errorKind, serviceProblem, isDue, ERROR } from '../src/core/schedule.js';
 import {
   normalizeSettings, normalizeStatus, normalizeEntry, plannedAt, readingText, forgetOld, carryOver, lookFacts,
   succeeded, failedEntry, postponedEntry, mergeConcurrent, LOOK_TTL_HOURS, LOOK_RETRY_HOURS,
@@ -20,7 +20,7 @@ import {
 import { NOT_DESCRIBED, APP_VERSION } from '../src/core/constants.js';
 import { formatWhen } from '../src/core/format.js';
 import { describeNow } from '../src/core/time.js';
-import { oneLine, errorMessage } from '../src/core/text.js';
+import { oneLine } from '../src/core/text.js';
 
 const RETRY_AFTER_MS = 3000; // a fast Kindroid failure (a 502, a dropped connection) is tried once more
 const ASK_TIMEOUT_MS = 90000; // one question to the Kin never waits longer than this
@@ -72,7 +72,7 @@ const failed = (message) => ({ ok: false, message: oneLine(message) });
 export async function runProgram({ event, kin, ...options }) {
   const trigger = event && event.trigger;
   const known = trigger === 'schedule' || (trigger === 'action' && event.action === ACTION);
-  if (!known) return failed(`Nothing to do for ${trigger === 'action' ? `the action "${event.action}"` : `the trigger "${trigger}"`}.`);
+  if (!known) return failed(trigger === 'action' ? 'Unsupported Clotheskin action.' : 'Unsupported Clotheskin trigger.');
   const [settings, statusFile] = await Promise.all([
     readFile(kin, SETTINGS_FILE, normalizeSettings),
     readFile(kin, STATUS_FILE, normalizeStatus),
@@ -106,7 +106,7 @@ async function eraseOld(ctx, status) {
     }
     return { ok: true, value: fresh.status };
   } catch (e) {
-    return { ok: false, error: errorMessage(e) };
+    return { ok: false, error: serviceProblem(e) };
   }
 }
 
@@ -145,7 +145,7 @@ async function readFile(kin, path, normalize) {
   try {
     return { ok: true, value: normalize(await kin.get(path)) };
   } catch (e) {
-    return { ok: false, error: errorMessage(e) };
+    return { ok: false, error: serviceProblem(e) };
   }
 }
 
@@ -195,7 +195,7 @@ async function attachedKin(ctx, id, entry) {
   try { kins = await ctx.kin.kins(); } catch (e) {
     const who = { id, name: entry.name || id };
     const now = ctx.clock();
-    const outcome = { kind: ERROR.SERVER, error: `Could not list the Kins: ${errorMessage(e)}` };
+    const outcome = { kind: ERROR.SERVER, error: `Could not list the Kins: ${serviceProblem(e)}` };
     return { ok: false, result: await fail(ctx, { who, entry: { ...entry, lastRunAt: now.toISOString() }, outcome, now, base: entry }) };
   }
   const kin = kins.find((k) => k.id === id);
@@ -336,7 +336,7 @@ async function tellDream(ctx, who, dream) {
     await ctx.kin.tell(fact, { kin: who.id, key: 'dream', ttl: DREAM_TTL_HOURS, reachOut: ctx.settings.reachOut });
     return ` ${who.name} was told, to remember it today.`;
   } catch (err) {
-    ctx.log(`kin tell (dream) failed: ${errorMessage(err)}`);
+    ctx.log(`kin tell (dream) failed: ${serviceProblem(err)}`);
     return '';
   }
 }
@@ -359,8 +359,8 @@ async function tellLook(ctx, { who, entry, fresh, now }) {
       told[f.field] = { mark: f.mark, at: now.toISOString() };
       said.push(f.field);
     } catch (err) {
-      ctx.log(`kin tell (${f.key}) failed: ${errorMessage(err)}`);
-      return { entry: { told, lookFailedAt: now.toISOString(), lookError: oneLine(errorMessage(err), 300) }, said }; // the rest waits too
+      ctx.log(`kin tell (${f.key}) failed: ${serviceProblem(err)}`);
+      return { entry: { told, lookFailedAt: now.toISOString(), lookError: serviceProblem(err) }, said }; // the rest waits too
     }
   }
   return { entry: { told, lookFailedAt: null, lookError: null }, said };
@@ -389,9 +389,10 @@ async function ask(ctx, who, prompt) {
       ctx.log(`kin ask: ${text.length} characters in ${Date.now() - started} ms`);
       return { ok: true, text };
     } catch (e) {
-      const kind = errorKind(errorMessage(e), ERROR.SERVER);
+      const error = serviceProblem(e);
+      const kind = errorKind(error, ERROR.SERVER);
       ctx.log(`kin ask failed (${kind}, try ${attempt}, ${Date.now() - started} ms)`);
-      if (!canRetry(ctx, attempt, kind)) return { ok: false, kind, error: errorMessage(e) };
+      if (!canRetry(ctx, attempt, kind)) return { ok: false, kind, error };
       await sleepMs(ctx.retryAfterMs);
     }
   }
@@ -469,11 +470,12 @@ async function postpone(ctx, { who, entry, now, note, base, message = note }) {
  */
 async function save(ctx, id, entry, base) {
   let fresh;
-  try { fresh = normalizeStatus(await ctx.kin.get(STATUS_FILE)); } catch (e) { throw new Error(`status.json could not be read before saving, so nothing was saved: ${errorMessage(e)}`); }
+  try { fresh = normalizeStatus(await ctx.kin.get(STATUS_FILE)); } catch (e) { throw new Error(`status.json could not be read before saving, so nothing was saved: ${serviceProblem(e)}`); }
   const current = fresh.kins[id];
   const merged = mergeConcurrent({ current, start: base && normalizeEntry(base), next: normalizeEntry(entry) });
   if (merged.concurrent) ctx.log(`another run saved this Kin meanwhile: ${merged.theirs ? 'its' : 'this'} night is kept`);
   fresh.kins[id] = merged.entry;
+  fresh.diagnosticsVersion = 1;
   fresh.runVersion = APP_VERSION; // the screen notices a run from another update
-  try { await ctx.kin.put(STATUS_FILE, JSON.stringify(fresh)); } catch (e) { throw new Error(`status.json could not be saved: ${errorMessage(e)}`); }
+  try { await ctx.kin.put(STATUS_FILE, JSON.stringify(fresh)); } catch (e) { throw new Error(`status.json could not be saved: ${serviceProblem(e)}`); }
 }

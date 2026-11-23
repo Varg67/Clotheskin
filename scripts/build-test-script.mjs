@@ -19,7 +19,7 @@ Este arquivo é gerado por \`node scripts/build-test-script.mjs\`. As frases "O 
 ## Três coisas que valem para todos os passos
 
 - **O Kin vê o chat dos últimos ${CHAT_DAYS} dias** (\`chat:read:${CHAT_DAYS}\`). O cartão descreve o estado *no fim do chat recente*, então **não zera** entre um passo e outro: cada passo parte do que os anteriores deixaram. Só um chat novo começa em branco (passo S13).
-- **Erro em vermelho** no cartão: aperte **Try again** uma vez e anote o texto. Se houver algo entre parênteses, é o texto do próprio Kindroid: **copie exatamente**.
+- **Erro em vermelho** no cartão: aperte **Try again** uma vez e anote o texto. Anote a categoria exibida pelo Clotheskin.
 - **A automação roda na nuvem do Kindroid**, não no seu PC: o Kindroid inicia o app a cada 15 minutos. Fechar o painel ou desligar o PC não para as leituras; só impede você de vê-las até reabrir.
 
 ## Passos de leitura`;
@@ -50,7 +50,7 @@ ${s.checks.map((c) => `- ${c}`).join('\n')}
 const stepsIntro = () => `
 ## A noite, a automação e as falhas
 
-Estes passos verificam o que roda sozinho e o que acontece **quando algo dá errado**. Também servem para **coletar o texto real dos erros** do \`kin\`: o app só reconhece "arquivo ainda não existe" por um "404" e "manutenção" pelas palavras maintenance/downtime/outage, e esses textos foram supostos. Vale em todas as falhas: **as últimas frases boas continuam no cartão** e nenhum botão fica travado.
+Estes passos verificam o que roda sozinho e o que acontece **quando algo dá errado**. Vale em todas as falhas: **as últimas frases boas continuam no cartão** e nenhum botão fica travado.
 
 Para a automação, use a régua em **${SHORTEST_INTERVAL}** durante o teste e volte para um intervalo maior depois: cada leitura é uma pergunta ao Kin.`;
 
@@ -87,7 +87,7 @@ const closing = () => `
 
 ## Tabela de resultados
 
-| Passo | Resultado (OK / parcial / falhou) | Tipo | Resposta do Kin ou **texto real do erro** (cole) | Cartão (cole as frases ou o aviso) |
+| Passo | Resultado (OK / parcial / falhou) | Tipo | Resposta de teste ou categoria do erro | Cartão (cole as frases ou o aviso) |
 |---|---|---|---|---|
 ${[...SCENARIOS, ...STEPS].map((s) => `| ${s.id} |  |  |  |  |`).join('\n')}
 `;

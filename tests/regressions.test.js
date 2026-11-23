@@ -78,7 +78,7 @@ test('a failure that is not an Error (a string, null) is still told in words, ne
     const r = await tick(k);
     assert.equal(r.ok, false);
     assert.doesNotMatch(r.message, /undefined/);
-    assert.match(k.entry().error, new RegExp(`Could not list the Kins: ${String(thrown)}`));
+    assert.equal(k.entry().error, 'Could not list the Kins: service request failed');
   }
 });
 

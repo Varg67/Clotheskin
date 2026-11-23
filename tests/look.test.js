@@ -91,7 +91,7 @@ test('7. kin tell fails (Kindroid down, or the note refused): the reading is kep
   assert.equal(k.entry().error, null, 'not a reading error');
   assert.equal(looks(k).length, 1, 'after the first failure, hair and makeup are not tried in this run');
   assert.deepEqual(k.entry().told, {}, 'nothing marked as told');
-  assert.equal(k.entry().lookError, 'kin tell failed: busy');
+  assert.equal(k.entry().lookError, 'service busy');
   k.tellFails = false;
   k.advance(20);
   await tick(k);

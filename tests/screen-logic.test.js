@@ -119,3 +119,12 @@ test('store actions: Update status runs the action and tells the new reading; St
   assert.deepEqual([saved.kinId, saved.autoState, saved.stoppedAt], ['k1', 'stopped', NOW.toISOString()]);
   assert.equal(ACTION, 'update_status');
 });
+
+test('a failed action summary from the host is never displayed or announced', async () => {
+  const page = fakePage({actionReply:{ok:false,summary:'Authorization: Bearer CANARY_TEST_ONLY_PRIVATE'}});
+  const store = createStore({channel:page.channel,kins:[{id:'k1',name:'Isa'}],clock:()=>NOW,onChange:()=>{},announcer:page.announcer});
+  await store.loadSettings();
+  await store.update('read');
+  assert.equal(store.S.error.text, 'The update failed. Try again in a moment.');
+  assert.doesNotMatch(JSON.stringify([store.S.error,page.said]), /Authorization|CANARY_TEST_ONLY_PRIVATE/);
+});

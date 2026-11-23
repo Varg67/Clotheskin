@@ -123,7 +123,7 @@ function readSlot(found, key, value, { nested, name }) {
   // {"outfit":{"topwear":[…],"bottomwear":[…]}}: a Kin that groups the slots under one key is understood.
   if (LOOSE_SLOTS.has(slot) && isPlainObject(value) && !nested) { mergeFound(found, outfitFromObject(value, name, true)); return; }
   const got = cleanPieces(value, name);
-  if (got === null) found.errors.push(`"${key}" must be a text or a list of texts.`);
+  if (got === null) found.errors.push(`"${slot}" must be a text or a list of texts.`);
   else addSlot(found, slot, got);
 }
 

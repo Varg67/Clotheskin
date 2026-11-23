@@ -65,6 +65,17 @@ export function errorKind(message, kind = ERROR.SERVER) {
   return MAINTENANCE.test(String(message ?? '')) ? ERROR.MAINTENANCE : kind;
 }
 
+/** Only these fixed diagnostics may cross the service boundary. Error text can contain request headers or scene data. */
+export function serviceProblem(error) {
+  const text = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  if (MAINTENANCE.test(text)) return 'Kindroid is under maintenance';
+  if (/\b(?:timed? ?out|timeout|ETIMEDOUT)\b/i.test(text)) return 'request timed out';
+  if (/\b(?:unauthorized|forbidden|access denied|401|403)\b/i.test(text)) return 'access denied';
+  if (/\b(?:429|rate limit(?:ed)?|busy)\b/i.test(text)) return 'service busy';
+  if (text === 'the kin command was not found') return text;
+  return 'service request failed';
+}
+
 /** Milliseconds of an ISO time, or null for nothing or a time that cannot be read (both mean "at once"). */
 const plannedMs = (at) => { const t = at ? Date.parse(at) : NaN; return Number.isFinite(t) ? t : null; };
 

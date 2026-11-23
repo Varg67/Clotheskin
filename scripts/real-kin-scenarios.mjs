@@ -145,9 +145,7 @@ export const IN_CHARACTER_ERROR = `${!inCharacter.ok ? inCharacter.error : ''} N
 export const SHORTEST_INTERVAL = formatInterval(INTERVAL_STEPS[0]);
 
 // ---------------------------------------------------------------------------------------------------------------
-// Steps that check the night, the automation and the failures. In each failure the card shows Kindroid's own error
-// text in brackets: COPY IT EXACTLY. run/kin.js recognises "not found" only by a "404" and maintenance only by the
-// words maintenance/downtime/outage; the real texts will confirm or correct that.
+// Steps that check the night, automation and the app's fixed diagnostic categories.
 // ---------------------------------------------------------------------------------------------------------------
 export const STEPS = [
   {
@@ -174,9 +172,9 @@ export const STEPS = [
   {
     id: 'F1', title: 'App enviado, mas ainda sem o Allow',
     provoke: 'Envie o app e **não** clique em **Allow** em Apps → Waiting for you. Abra o app e aperte **Update status**.',
-    expectText: 'Não se sabe se o Kindroid chega a executar um app sem o Allow. Se executar, o cartão mostra um erro com o texto do Kindroid entre parênteses.',
+    expectText: 'Não se sabe se o Kindroid chega a executar um app sem o Allow. Se executar, o cartão mostra um erro com uma categoria de diagnóstico.',
     checks: ['Não fica em "Reading…" para sempre (no máximo uns 2,5 minutos).', 'Depois do **Allow**, funciona sem reenviar.'],
-    record: 'O texto exato entre parênteses, ou o aviso que o Kindroid mostrar.',
+    record: 'A categoria exibida no cartão.',
   },
   {
     id: 'F2', title: 'Fechar o painel no meio de uma leitura',
@@ -209,9 +207,9 @@ export const STEPS = [
   {
     id: 'F6', title: 'Kindroid com problema (só se acontecer)',
     provoke: 'Nada a provocar: observe durante o teste.',
-    expectText: 'Um erro passageiro aparece como "Kindroid did not answer this time (texto do Kindroid). It tries again around …". Depois de 3 seguidos, um aviso: "Kindroid has not answered 3 times in a row. It may be down."; com "maintenance", "Kindroid seems to be under maintenance." e espera de 30 minutos.',
+    expectText: 'Um erro passageiro aparece como "Kindroid did not answer this time (categoria do erro). It tries again around …". Depois de 3 seguidos, um aviso: "Kindroid has not answered 3 times in a row. It may be down."; com "maintenance", "Kindroid seems to be under maintenance." e espera de 30 minutos.',
     checks: ['O app espera mais entre as tentativas quando o erro se repete.', '**Try now** tenta na hora.'],
-    record: '**O texto exato entre parênteses.** É o que mostra como o kin real descreve os erros.',
+    record: 'A categoria exibida e o horário da próxima tentativa.',
   },
   {
     id: 'F7', title: 'Duas janelas apertando ao mesmo tempo',

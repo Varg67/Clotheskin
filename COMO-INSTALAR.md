@@ -1,6 +1,6 @@
 # Clotheskin: como instalar e atualizar no Kindroid
 
-Este arquivo é gerado por `npm run build` (`scripts/build-install.mjs`): não edite à mão. Versão do app: **0.6.0**.
+Este arquivo é gerado por `npm run build` (`scripts/build-install.mjs`): não edite à mão. Versão do app: **0.6.1**.
 
 ## O jeito que funciona
 
@@ -111,13 +111,13 @@ Apply the files now. If a file fails to copy, report its path and the exact erro
 Now reopen these files from the Workshop project, not from GitHub, and report: the run entry, screen entry and schedule in kin.json; the value of APP_VERSION in src/core/constants.js; and the exact last line of screen/app.js. Then open the screen in Workshop preview.
 ```
 
-**Resposta certa:** `node main.js`, `screen/index.html`, `*/15 * * * *`; `APP_VERSION` = `0.6.0`; última linha `// end of Clotheskin screen 0.6.0`. Outra última linha: o `screen/app.js` foi cortado na cópia (repita o passo 4 só com ele).
+**Resposta certa:** `node main.js`, `screen/index.html`, `*/15 * * * *`; `APP_VERSION` = `0.6.1`; última linha `// end of Clotheskin screen 0.6.1`. Outra última linha: o `screen/app.js` foi cortado na cópia (repita o passo 4 só com ele).
 
 ### 6. Testar dentro do Kindroid
 
 1. Apps → **Waiting for you** → **Allow** (o app lê o chat, por isso espera a sua permissão).
 2. Configurações do app → **Kins** → marque os Kins.
-3. Abra a tela, escolha o Kin do roleplay e aperte **Update status**. Em **Settings**, no fim, aparece "Clotheskin 0.6.0". Se só uma parte foi atualizada, a tela mostra um aviso amarelo no topo: *"Some of Clotheskin's files are from another update… Update all the files together."*
+3. Abra a tela, escolha o Kin do roleplay e aperte **Update status**. Em **Settings**, no fim, aparece "Clotheskin 0.6.1". Se só uma parte foi atualizada, a tela mostra um aviso amarelo no topo: *"Some of Clotheskin's files are from another update… Update all the files together."*
 4. A automação merece um teste próprio: aperte **Start** e deixe chegar uma leitura programada, sem apertar o botão.
 
 ## O log do Workshop

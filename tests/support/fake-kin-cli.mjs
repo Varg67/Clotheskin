@@ -33,7 +33,7 @@ if (cmd === 'files' && args[0] === 'get') {
   }
 } else if (cmd === 'end') {
   if (opt.endHangs) setTimeout(() => {}, 60000);
-  if (opt.endFails) { process.stderr.write('kin end: rejected\n'); process.exit(2); }
+  if (opt.endFails) { process.stderr.write(`kin end: ${opt.endFails}\n`); process.exit(2); }
 } else if (cmd === 'tell') {
   // accepted
 } else {
